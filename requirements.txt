@@ -1,0 +1,12 @@
+python-telegram-bot>=22.8
+yfinance>=1.8.0
+pandas>=2.2.0
+numpy>=2.0.0
+google-genai>=2.34.0
+supabase>=2.34.0
+feedparser>=6.0.14
+APScheduler>=3.11.3
+python-dotenv>=1.2.0
+pillow>=11.0.0
+requests>=2.31.0
+aiohttp>=3.9.0
