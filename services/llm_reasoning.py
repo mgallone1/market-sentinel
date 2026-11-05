@@ -1,0 +1,337 @@
+"""
+LLM Reasoning & Vision Service con Google Gemini AI Studio.
+Modello: gemini-3.5-flash-lite
+Combina i dati quantitativi in tempo reale con capacità di ragionamento umano,
+analisi macro e visione artificiale per screenshot di Trade Republic.
+"""
+
+import os
+import json
+from pathlib import Path
+from typing import Dict, Any, Optional
+from dotenv import load_dotenv
+
+ENV_PATH = Path(__file__).parent.parent / ".env"
+load_dotenv(dotenv_path=ENV_PATH)
+
+try:
+    from google import genai
+    from google.genai import types
+    HAS_GENAI = True
+except ImportError:
+    HAS_GENAI = False
+
+class LLMReasoningService:
+    def __init__(self):
+        self.api_key = os.getenv("GEMINI_API_KEY", "").strip()
+        self.client = None
+        self.models_to_try = ["gemini-3.1-flash-lite", "gemini-3.5-flash", "gemini-3.5-flash-lite"]
+        if HAS_GENAI and self.api_key:
+            try:
+                self.client = genai.Client(api_key=self.api_key)
+            except Exception as e:
+                print(f"[LLMReasoningService] Errore init client Gemini: {e}")
+
+    def _call_gemini(self, contents) -> str:
+        if not self.client:
+            return ""
+        for model in self.models_to_try:
+            try:
+                res = self.client.models.generate_content(model=model, contents=contents)
+                if res and res.text:
+                    return res.text.strip()
+            except Exception as e:
+                print(f"[LLMReasoningService] Modello {model} non disponibile: {e}")
+        return ""
+
+    def classify_intent(self, text: str, recent_history_summary: str = "") -> Dict[str, Any]:
+        """
+        Classifica l'intenzione dell'utente (analisi ticker, verifica portafoglio/numeri, panoramica mercato, o chat libera)
+        tenendo conto del contesto e degli ultimi scambi della conversazione.
+        """
+        context_block = f"CONTESTO DELLA CHAT RECENTE:\n{recent_history_summary}\n" if recent_history_summary else ""
+        prompt = f"""
+Sei un classificatore di intenti finanziari avanzato. Analizza attentamente il messaggio dell'utente considerando il contesto recente.
+
+{context_block}MESSAGGIO UTENTE:
+"{text}"
+
+DISTINZIONE CRITICA DEGLI INTENTI:
+1. "update_portfolio_ticker":
+   - Se l'utente chiede di correggere, cambiare, modificare o sostituire uno o più ticker nel portafoglio (es. "hai sbagliato i ticket dei due etf sono XDWD e XDEM", "aggiorna il portafoglio con i ticker giusti", "cambia il ticker di BYD in BY6.F", "sostituisci URTH con XDWD").
+2. "portfolio":
+   - Se l'utente chiede di vedere il portafoglio o chiarimenti sui calcoli/numeri/controvalore mostrati senza specificare cambi di ticker (es. "mostra portafoglio", "ricontrolla i calcoli", "non si trovano i numeri").
+3. "ticker_analysis":
+   - Solo ed esclusivamente quando l'utente chiede una NUOVA analisi tecnica/fondamentale/ciclica di un'azione o crypto (es. "cosa ne pensi di Apple", "analizza Nvidia", "Marvell", "dimmi di Bitcoin").
+4. "market_overview":
+   - Se chiede cosa è successo sul mercato, news generali o il briefing (es. "cosa succede oggi in borsa", "briefing").
+5. "general_chat":
+   - Domande generiche, concettuali o saluti.
+
+Restituisci ESCLUSIVAMENTE un JSON valido:
+{{
+  "intent": "update_portfolio_ticker" | "portfolio" | "ticker_analysis" | "market_overview" | "general_chat",
+  "ticker": "SIMBOLO_TICKER" o null,
+  "replacements": [
+     {{"old_ticker_or_name": "...", "new_ticker": "..."}}
+  ]
+}}
+"""
+        res = self._call_gemini(prompt)
+        if res:
+            try:
+                clean_json = res.replace("```json", "").replace("```", "").strip()
+                return json.loads(clean_json)
+            except Exception as e:
+                print(f"[LLMReasoningService] Errore parse JSON intent: {e}")
+        return {"intent": "general_chat", "ticker": None}
+
+    def generate_executive_market_brief(
+        self,
+        ticker: str,
+        pred_data: Dict[str, Any],
+        fund_data: Dict[str, Any],
+        news_list: list,
+        cycle_data: Optional[Dict[str, Any]] = None,
+        memory_context: str = ""
+    ) -> str:
+        """
+        Genera la sintesi esecutiva Focalizzata sul Momento Attuale:
+        Spiega COSA sta succedendo (catalyst, correlazione Wall Street/crypto, news),
+        DOVE siamo nel ciclo e COSA fare oggi, senza affogare l'utente nei tecnicismi.
+        """
+        if not self.client:
+            return ""
+
+        cycle_data = cycle_data or {}
+        news_details = []
+        for n in news_list[:5]:
+            t_str = n.get("title", "")
+            s_str = n.get("summary", "")
+            if t_str:
+                news_details.append(f"• Titolo: {t_str}\n  Dettaglio: {s_str}")
+        news_block_text = "\n".join(news_details) if news_details else "Nessuna notizia recente rilevante."
+
+        mem_block = f"\nContesto e decisioni precedenti dell'utente negli ultimi 7-30 giorni:\n{memory_context}\n" if memory_context else ""
+
+        prompt = f"""
+Sei un Senior Investment Strategist e Portfolio Manager.
+Il tuo obiettivo è spiegare in modo chiaro, fluido e colloquiale MA professionale cosa sta succedendo ORA allo strumento {fund_data.get('short_name', ticker)} ({ticker}).
+{mem_block}
+DATI FONDAMENTALI & PREZZO:
+- Prezzo Attuale in Euro: {pred_data.get('current_price_eur')} €
+- Variazione/Trend: {pred_data.get('trend_macro', 'N/D')} (Probabilità rimbalzo statistico: {pred_data.get('mean_reversion_probability')})
+- Notizie & Catalyst recenti:
+{news_block_text}
+- Fase Ciclica di Migliorino: {cycle_data.get('tempo_battleplan', 'N/D')} ({cycle_data.get('descrizione_battleplan', '')})
+- Consiglio del ciclo: {cycle_data.get('consiglio_pratico', '')}
+- Mancano circa ~{cycle_data.get('candele_al_minimo', 'N/D')} sedute al minimo ciclico
+
+LINEE GUIDA DI RISPOSTA:
+1. Spiega con parole semplici la CAUSA REALE del movimento odierno (cosa sta succedendo a Wall Street, perché gli investitori vendono o comprano, news aziendali o correlazioni macro). Se è una crypto (es. Bitcoin), spiega la correlazione con la fuga dal rischio su Wall Street e il deleveraging.
+2. Spiega in un breve paragrafo dove ci troviamo nel ciclo attuale e se ha senso aspettare o prepararsi all'acquisto.
+3. Mantieni un tono rassicurante, posato, lucido ed elegante. Niente tecnicismi astrusi come 'matrice browniana', 'Itô' o '2-sigma' (quelli andranno nel deep dive tecnico).
+4. Tutte le cifre RIGOROSAMENTE in Euro (€).
+"""
+        return self._call_gemini(prompt)
+
+    def generate_financial_commentary(
+        self,
+        ticker: str,
+        pred_data: Dict[str, Any],
+        fund_data: Dict[str, Any],
+        news_list: list,
+        cycle_data: Optional[Dict[str, Any]] = None,
+        advanced_data: Optional[Dict[str, Any]] = None,
+        memory_context: str = ""
+    ) -> str:
+        """
+        Genera un'analisi predittiva e strategica di massimo livello integrando:
+        Monte Carlo (10.000 iterazioni), VIX & Tassi Treasury 10Y, Onde di Elliott, Cicli Hurst & Migliorino.
+        """
+        if not self.client:
+            return ""
+
+        cycle_data = cycle_data or {}
+        advanced_data = advanced_data or {}
+        mc = advanced_data.get("monte_carlo", {})
+        macro = advanced_data.get("macro", {})
+        elliott = advanced_data.get("elliott", {})
+
+        news_details = []
+        for n in news_list[:5]:
+            t_str = n.get("title", "")
+            s_str = n.get("summary", "")
+            if t_str:
+                news_details.append(f"• Titolo: {t_str}\n  Dettaglio: {s_str}")
+        news_block_text = "\n".join(news_details) if news_details else "Nessuna notizia recente rilevante."
+
+        mem_block = f"\nContesto e decisioni precedenti dell'utente negli ultimi 7-30 giorni:\n{memory_context}\n" if memory_context else ""
+
+        prompt = f"""
+Sei un Senior Quantitative Strategist e Portfolio Manager di livello hedge fund globale.
+Il tuo interlocutore è un investitore intelligente ma non un addetto ai lavori finanziari: per questo, la tua dote più grande è spiegare in modo chiaro, logico, trasparente e collegato TUTTI i pezzi del puzzle, senza dare nulla per scontato e senza tecnicismi fini a se stessi.
+{mem_block}
+QUADRO QUANTITATIVO COMPLETO SUL TITOLO (tutto espresso in Euro €):
+- Strumento: {fund_data.get('short_name', ticker)} ({ticker})
+- Prezzo Attuale in Euro: {pred_data.get('current_price_eur')} € (Prezzo nativo: ${pred_data.get('raw_price')})
+- Volatilità Giornaliera (ATR): {pred_data.get('daily_atr_eur')} € ({pred_data.get('volatility_daily_pct')}%) | Storica Annualizzata: {mc.get('annualized_vol_pct', 'N/D')}%
+- Cono Previsionale a 5 sedute: {pred_data.get('forecast_cone_5d_eur')}
+- Z-Score statistico (distanza da SMA20): {pred_data.get('z_score')}
+- Probabilità Statistica di Rimbalzo: {pred_data.get('mean_reversion_probability')}
+
+1. SIMULAZIONE STOCASTICA MONTE CARLO (10.000 scenari a 20 sedute):
+- Valore Mediano Atteso (50° percentile): {mc.get('median_price_eur', 'N/D')} €
+- Intervallo di Confidenza al 68% (1 Sigma): {mc.get('ci_68_range_eur', 'N/D')}
+- Intervallo di Confidenza al 95% (2 Sigma): {mc.get('ci_95_range_eur', 'N/D')}
+- Value at Risk (VaR 95% massimo rischio atteso): {mc.get('var_95_eur', 'N/D')} €
+- Probabilità di Rendimento Positivo a 20 sedute: {mc.get('probability_positive_trend', 'N/D')}
+
+2. REGIME MACROECONOMICO & VOLATILITÀ:
+- Indice VIX: {macro.get('vix_value', 'N/D')} ({macro.get('vix_regime', 'N/D')})
+- Rendimento Treasury USA a 10 Anni (^TNX): {macro.get('tnx_10y_yield', 'N/D')}% (impatto sui multipli P/E)
+- Tasso EUR/USD: {macro.get('eur_usd_rate', 'N/D')}
+
+3. MODELLO FRATTALE ONDE DI ELLIOTT:
+- Fase Identificata: {elliott.get('wave_label', 'N/D')}
+- Diagnosi Strutturale: {elliott.get('analysis', '')}
+
+4. ANALISI CICLICA (HURST & MIGLIORINO):
+- Battleplan Migliorino (Ciclo Mensile T+2): {cycle_data.get('tempo_battleplan', 'N/D')} ({cycle_data.get('descrizione_battleplan', '')})
+- Conteggio Barre dal Minimo: {cycle_data.get('bars_since_mensile_min', 'N/D')} barre su mensile; {cycle_data.get('bars_since_intermedio_min', 'N/D')} su intermedio T+3
+- Vincolo Ciclico di Migliorino: {cycle_data.get('vincolo_migliorino', 'N/D')}
+- FLD di Hurst (Future Line of Demarcation): {cycle_data.get('hurst_fld_value', 'N/D')} € ({cycle_data.get('hurst_fld_signal', '')})
+- Divergenza RSI: {cycle_data.get('divergence', 'N/D')} ({cycle_data.get('div_details', '')})
+- Livello Aureo Fibonacci (0.618 Golden Pocket): {cycle_data.get('fib_618_eur', 'N/D')} €
+- Take Profit 1 a mercato: {pred_data.get('take_profit_1_eur')} € | Stop Loss: {pred_data.get('stop_loss_eur')} €
+
+5. CATALYST, NEWS AZIENDALI & M&A FONDAMENTALI:
+{news_block_text}
+
+LINEE GUIDA DI COMPOSIZIONE (OBBLIGATORIE):
+- NON limitarti a snocciolare formule tecniche: spiega chiaramente la CAUSA FONDAMENTALE, MACROECONOMICA e AZIENDALE del movimento.
+- Per le CRIPTOVALUTE (Bitcoin, Ethereum, Solana, etc.), DEVI SEMPRE spiegare il legame diretto con Wall Street e il quadro macro: la correlazione con il sell-off delle Big Tech / Nasdaq, il rialzo dei rendimenti obbligazionari (^TNX) che drena liquidità dagli asset rischiosi, il picco di volatilità (VIX) che costringe gli hedge fund al deleveraging forzato (chiusura posizioni a leva su crypto), e l'impatto sui flussi degli ETF Spot (es. deflussi da IBIT/FBTC).
+- Per le AZIONI spiega le cause specifiche (es. M&A, diluizioni azionarie, trimestrali, tassi e colli di bottiglia energetici dei Data Center AI).
+- Spiega in parole semplici cosa significano insieme i numeri: ad esempio come la discesa fondamentale si incastra con l'Onda correttiva di Elliott e il minimo del ciclo di Hurst/Migliorino.
+- Spiega PERCHÉ è fondamentale impostare un ORDINE LIMITE scontato (es. sui supporti statistici dell'intervallo 1-Sigma di Monte Carlo) invece di comprare a mercato: mostra come l'ordine limite abbatte il rischio e fa schizzare il rapporto Rischio/Rendimento (Risk/Reward) a livelli vantaggiosi (es. da 1:0.8 a mercato a oltre 1:2.5 o 1:3 con limite).
+- Tono: Istituzionale, didattico, posato, lucido, autorevole ma accessibile e privo di melodrammi.
+- Tutte le cifre RIGOROSAMENTE in Euro (€).
+"""
+        return self._call_gemini(prompt)
+
+    def answer_general_query(self, query: str, memory_context: str = "") -> str:
+        """
+        Risponde a domande finanziarie, macroeconomiche o teoriche con registro sobrio e istituzionale.
+        """
+        mem_block = f"\nMemoria storica e conversazioni precedenti con l'utente (ultimi 7-30 giorni):\n{memory_context}\n" if memory_context else ""
+        prompt = f"""
+Sei un Senior Investment Strategist di una primaria casa di gestione istituzionale. Padroneggi i mercati globali, l'asset allocation e l'Analisi Ciclica (Hurst & Migliorino).
+{mem_block}
+L'utente ti pone questa domanda:
+"{query}"
+
+LINEE GUIDA DI STILE:
+- Rispondi in italiano con un registro posato, sobrio, equilibrato, rigoroso e chiaro (registro da Private Banking / Research Desk).
+- Evita toni enfatici, allarmistici, teatrali o paternalistici.
+- Fornisci un'analisi lucida basata sui dati oggettivi, sui fondamentali e sulla corretta gestione del rischio.
+- Valori monetari espressi sempre in Euro (€).
+"""
+        return self._call_gemini(prompt)
+
+    def analyze_screenshot(self, image_bytes: bytes, mime_type: str = "image/png") -> Dict[str, Any]:
+        """
+        Analizza con visione artificiale uno screenshot inviato dall'utente su Telegram.
+        Estrae posizioni di Trade Republic o interpreta grafici e notizie.
+        """
+        if not self.client:
+            return {"type": "unknown", "text": "Modulo AI non attivo"}
+
+        prompt = """
+Sei un esperto di analisi visiva di schermate finanziarie (in particolare broker come Trade Republic, Degiro, TradingView).
+Analizza questa immagine inviata dall'utente:
+
+1. Se è una schermata di POSIZIONE di Trade Republic:
+   Estrai i dati in formato JSON valido:
+   ```json
+   {
+      "is_position": true,
+      "asset_name": "Nome strumento es. MSCI World Momentum",
+      "ticker_candidate": "Ticker o sigla presunta es. IWMO.L o URTH",
+      "shares": 32.2419,
+      "average_buy_price": 81.50,
+      "total_value": 2393.64,
+      "currency": "EUR"
+   }
+   ```
+
+2. Se è un GRAFICO o una NOTIZIA:
+   Fornisci un'analisi visiva e una sintesi esecutiva chiara di cosa mostra l'immagine in lingua italiana.
+"""
+        part = types.Part.from_bytes(data=image_bytes, mime_type=mime_type)
+        text_resp = self._call_gemini([part, prompt])
+        if not text_resp:
+            return {"type": "error", "text": "Impossibile analizzare l'immagine in questo momento."}
+
+        pos_data = None
+        if "```json" in text_resp:
+            try:
+                json_str = text_resp.split("```json")[1].split("```")[0].strip()
+                pos_data = json.loads(json_str)
+            except Exception:
+                pass
+
+        return {
+            "type": "position" if (pos_data and pos_data.get("is_position")) else "visual_analysis",
+            "position_data": pos_data,
+            "text": text_resp
+        }
+
+    def generate_macro_market_briefing(self, indices_data: list, news_list: list) -> str:
+        """
+        Genera un briefing macro completo, posato e analitico sui mercati globali,
+        spiegando i fatti politici (elezioni, midterms), la crisi data center,
+        l'impatto sui semiconduttori e le considerazioni di portafoglio.
+        """
+        if not self.client:
+            return ""
+
+        indices_str = "\n".join([f"- {item['label']}: {item['price_eur']} € ({item['change']:+.2f}%)" for item in indices_data])
+        news_str = "\n".join([f"• {n.get('title', '')}" for n in news_list[:12]])
+
+        prompt = f"""
+Sei un Senior Investment Strategist e Direttore di Ricerca di una primaria istituzione finanziaria.
+Redigi una nota informativa chiara, analitica, rigorosa e posata sulla sessione di mercato corrente per un investitore informato.
+
+Dati di Mercato Live di oggi (in Euro €):
+{indices_str}
+
+Notizie, Catalyst e Rassegna Stampa Internazionale:
+{news_str}
+
+LINEE GUIDA DI STILE (TASSATIVE):
+- Tono sobrio, posato, analitico, rigoroso ed equilibrato (registro da Research Note istituzionale / Memorandum di Mercato).
+- VIETATO qualsiasi tono teatrale, enfatico, allarmistico o paternalistico (vietato scrivere 'sediti e respira', 'se ti trema la mano', 'sangue nelle strade' o espressioni melodrammatiche da film).
+- Struttura l'analisi con lucidità professionale:
+  1. I Catalyst macroeconomici e politici (consultazioni/elezioni, orientamento normativo e fiscale).
+  2. I vincoli infrastrutturali ed energetici legati all'Intelligenza Artificiale (analisi di Goldman Sachs sul 45% dei progetti di data center a rischio ritardo o blocco permessi).
+  3. L'impatto sul comparto dei semiconduttori (revisione del Capex e del ritorno sul capitale investito - ROI).
+  4. Le dinamiche dei flussi istituzionali (deleveraging e riduzione della leva finanziaria).
+  5. Considerazioni di portafoglio e gestione operativa per Trade Republic (disciplina sui livelli tecnici, ordini limite anziché market order, prospettiva temporale).
+- Tutte le cifre monetarie rigorosamente in Euro (€).
+"""
+        return self._call_gemini(prompt)
+
+    def answer_general_query(self, query: str, memory_context: str = "") -> str:
+        """
+        Risponde a domande finanziarie, macroeconomiche o teoriche (inclusa analisi ciclica Hurst & Migliorino).
+        """
+        mem_block = f"\nMemoria storica e conversazioni precedenti con l'utente (ultimi 7-30 giorni):\n{memory_context}\n" if memory_context else ""
+        prompt = f"""
+Sei un Senior Financial Advisor, Portfolio Manager e Maestro dell'Analisi Ciclica. Padroneggi alla perfezione sia l'Analisi Ciclica di J.M. Hurst (Harmonicity, Synchronicity, Proportionality, Summation, FLD) sia l'Analisi Ciclica e il Battleplan di Giuseppe Migliorino (cicli T-1, T, T+1, T+2 Mensile, T+3 Intermedio, la sequenza dei 4 tempi e la teoria dei Vincoli Ciclici).
+{mem_block}
+L'utente ti fa questa domanda in chat su Telegram:
+"{query}"
+
+Rispondi in italiano chiaro, autorevole, brillante e approfondito. Se la domanda riguarda i cicli, Hurst o Migliorino, spiega la logica teorica e applicativa con rigore (come si contano le barre, come funziona il Battleplan, cosa comporta un vincolo ribassista). Esprimi eventuali valori monetari sempre in Euro (€).
+"""
+        return self._call_gemini(prompt)
