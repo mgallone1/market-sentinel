@@ -137,10 +137,11 @@ DATI FONDAMENTALI & PREZZO:
 
 LINEE GUIDA RIGOROSE DI RISPOSTA:
 1. DIVIETO ASSOLUTO DI APERTURE COLLOQUIALI, PATERNALISTICHE O AFFETTATE: NON usare MAI formule come 'Caro amico', 'Mettiamoci comodi', 'Mio caro', 'Entriamo nel vivo/merito'. Inizia DIRETTAMENTE con l'analisi dei fatti e dei dati.
-2. Spiega con chiarezza e rigore analitico la CAUSA REALE del movimento odierno (dinamiche di Wall Street, macro, trimestrali, correlazioni). Se è una crypto (es. Bitcoin), spiega la correlazione con la liquidità istituzionale, il VIX e i tassi USA.
-3. Spiega in un breve paragrafo dove ci troviamo nel ciclo attuale e se ha senso attendere o impostare un ordine limite.
-4. Tono sobrio, istituzionale, posato, privo di enfasi teatrale o formule paternalistiche.
-5. Tutte le cifre RIGOROSAMENTE in Euro (€).
+2. ANCORAGGIO TEMPORALE ASSOLUTO (DIVIETO DI ANACRONISMI): Siamo a {now_str}. È tassativamente vietato citare anni passati (come 2025 o 2024, es. DeepSeek 2025 o vecchi accordi) per giustificare i movimenti di oggi. Concentrati unicamente sulle dinamiche e notizie odierne delle ultime ore.
+3. Spiega con chiarezza e rigore analitico la CAUSA REALE del movimento odierno (dinamiche di Wall Street, macro, trimestrali, correlazioni). Se è una crypto (es. Bitcoin), spiega la correlazione con la liquidità istituzionale, il VIX e i tassi USA.
+4. Spiega in un breve paragrafo dove ci troviamo nel ciclo attuale e se ha senso attendere o impostare un ordine limite.
+5. Tono sobrio, istituzionale, posato, privo di enfasi teatrale o formule paternalistiche.
+6. Tutte le cifre RIGOROSAMENTE in Euro (€).
 """
         return self._call_gemini(prompt)
 
@@ -314,17 +315,21 @@ NOTIZIE, BREAKING NEWS & RASSEGNA STAMPA INTERNAZIONALE IN TEMPO REALE (Bloomber
 {news_str}
 
 LINEE GUIDA RIGOROSE DI REDAZIONE E ANCORAGGIO TEMPORALE:
-1. ANCORAGGIO TEMPORALE ASSOLUTO (ANTI-ALLUCINAZIONE):
+1. ANCORAGGIO TEMPORALE ASSOLUTO (ANTI-ALLUCINAZIONE & ZERO ANACRONISMI):
    - Oggi è {now_str}. Fai riferimento ESCLUSIVAMENTE a questa data e ai dati e alle breaking news fornite sopra.
-   - DIVIETO CATEGORICO di citare eventi storici passati (come il rilascio di DeepSeek di gennaio 2025 o vecchi sell-off passati) come se fossero notizie o driver di oggi.
+   - DIVIETO ASSOLUTO E CATEGORICO di citare date passate o anni precedenti (come '2025', '2024', 'ottobre 2025', 'gennaio 2025') o trattati passati. Questa regola è inflessibile: l'utente non deve MAI leggere riferimenti ad anni passati che creano l'illusione di notizie vecchie.
+   - Concentrati unicamente sull'impatto odierno ({now_str}) e sui fatti delle ultime ore.
    - Se una notizia o spiegazione non è documentata nelle news o nei dati forniti sopra, NON INVENTARE catalizzatori passati. Riporta solo i fatti confermati o la pura dinamica tecnica e ciclica dei prezzi.
-2. CONCISO MA COMPLETO: Niente giri di parole, niente melodramma, niente padding. Struttura il briefing in 3 o 4 punti chiave rapidi ma densi di contenuto informativo:
+2. DIVIETO ASSOLUTO DI FORMULE COLLOQUIALI O PATERNALISTICHE:
+   - VIETATO iniziare con 'Caro amico', 'Mettiamoci comodi', 'Mio caro', 'Entriamo nel merito/vivo', 'Buongiorno caro'.
+   - Inizia SUBITO e DIRETTAMENTE con il punto 1 e l'analisi dei catalyst.
+3. CONCISO MA COMPLETO: Niente giri di parole, niente melodramma, niente padding. Struttura il briefing in 3 o 4 punti chiave rapidi ma densi di contenuto informativo:
    - *1. Catalyst Notturno / Ultime Ore:* Il fatto politico, macroeconomico o geopolitico più rilevante e la reazione di Asia ed Europa.
    - *2. Wall Street & Big Tech / Crypto:* Il driver principale (tassi ^TNX, petrolio, trimestrali, o sentiment AI/crypto).
    - *3. Connessione con il Briefing Precedente:* Ricollegati in 1-2 frasi a quanto avevi segnalato prima per mostrare se l'ipotesi si è confermata o se c'è stata una svolta.
    - *4. Bussola Operativa per la Seduta:* Livelli di attenzione, orario dei dati macro cruciali e disciplina su Trade Republic.
-3. Tono istituzionale, posato, lucido ed elegante.
-4. Tutte le quotazioni rigorosamente in Euro (€).
+4. Tono istituzionale, posato, lucido ed elegante.
+5. Tutte le quotazioni rigorosamente in Euro (€).
 """
         return self._call_gemini(prompt)
 
@@ -344,7 +349,7 @@ L'utente ti pone questa domanda su Telegram:
 LINEE GUIDA RIGOROSE:
 1. ANCORAGGIO TEMPORALE REALE E ANTI-ALLUCINAZIONE:
    - Siamo a {now_str}. Sii trasparente e accurato sulle date degli eventi.
-   - Non confondere mai eventi del passato della tua base di conoscenza pregressa (come DeepSeek R1 uscito a gennaio 2025) con i movimenti odierni di mercato.
+   - Non confondere mai eventi del passato della tua base di conoscenza pregressa (come DeepSeek R1 uscito a gennaio 2025) con i movimenti odierni di mercato. DIVIETO ASSOLUTO di attribuire i movimenti di oggi a eventi del 2025 o 2024.
    - Se l'utente ti chiede spiegazioni su una notizia o un evento, specifica sempre chiaramente quando è accaduto realmente e non spacciare eventi datati come spiegazioni dei movimenti di oggi.
 2. STILE E REGISTRO ISTITUZIONALE:
    - DIVIETO CATEGORICO DI APERTURE COLLOQUIALI, PATERNALISTICHE O AFFETTATE: VIETATO iniziare con "Caro amico", "Mettiamoci comodi", "Caro investitore", "Entriamo subito nel vivo/merito", "Capisco perfettamente la tua curiosità", o salamelecchi analoghi.
