@@ -25,8 +25,14 @@ DEFAULT_WATCHLISTS: Dict[str, List[str]] = {
     "Indici & Macro ETF": ["SPY", "QQQ", "IWM", "EEM", "GLD", "TLT"]
 }
 
-# Feed RSS per breaking news finanziarie
+# Feed RSS Istituzionali Premium per Breaking News Finanziarie, Macro, Politica USA ed Europa
 RSS_NEWS_FEEDS: List[str] = [
-    "https://finance.yahoo.com/news/rssindex",
-    "https://feeds.content.dowjones.io/public/rss/mw_topstories"
+    "https://feeds.a.dj.com/rss/RSSMarketsMain.xml",          # Wall Street Journal: Markets
+    "https://feeds.a.dj.com/rss/WSJcomUSBusiness.xml",         # Wall Street Journal: US Business & Policy
+    "https://feeds.bloomberg.com/markets/news.rss",            # Bloomberg Markets
+    "https://feeds.content.dowjones.io/public/rss/mw_topstories", # MarketWatch: Top Stories & Earnings
+    "https://www.cnbc.com/id/10000664/device/rss/rss.html",     # CNBC: Finance & Central Banks
+    "https://www.cnbc.com/id/20910258/device/rss/rss.html",     # CNBC: Economy, Macro & Politics
+    "https://cointelegraph.com/rss",                            # Cointelegraph: Crypto & ETF Flows
+    "https://www.coindesk.com/arc/outboundfeeds/rss/"           # CoinDesk: Global Digital Assets & Regulation
 ]
