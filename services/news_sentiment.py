@@ -86,24 +86,31 @@ class NewsSentimentService:
     @classmethod
     def fetch_global_rss_news(cls, feeds: List[str], max_per_feed: int = 5) -> List[Dict[str, Any]]:
         """
-        Scarica breaking news finanziarie da feed RSS globali.
+        Scarica breaking news finanziarie e geopolitiche da feed RSS globali (WSJ, Bloomberg, CNBC, CoinDesk).
+        Include titolo, sommario/descrizione estesa e fonte editoriale.
         """
         all_news = []
         for url in feeds:
             try:
                 parsed = feedparser.parse(url)
+                source_name = parsed.feed.get("title", "Global Market Feed")
                 for entry in parsed.entries[:max_per_feed]:
-                    title = entry.get("title", "")
+                    title = entry.get("title", "").strip()
+                    summary = entry.get("summary", "") or entry.get("description", "")
+                    # Pulizia da tag HTML grezzi nel sommario
+                    clean_summary = re.sub(r"<[^>]+>", "", summary).strip()
                     link = entry.get("link", "#")
                     pub = entry.get("published", "")
                     sentiment = cls.analyze_text(title)
-                    all_news.append({
-                        "title": title,
-                        "link": link,
-                        "published": pub,
-                        "source": parsed.feed.get("title", "Market Feed"),
-                        "sentiment": sentiment
-                    })
+                    if title:
+                        all_news.append({
+                            "title": title,
+                            "summary": clean_summary[:300],
+                            "link": link,
+                            "published": pub,
+                            "source": source_name,
+                            "sentiment": sentiment
+                        })
             except Exception as e:
                 print(f"[NewsSentimentService] Errore RSS {url}: {e}")
         return all_news
