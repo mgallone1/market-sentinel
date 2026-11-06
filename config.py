@@ -27,12 +27,16 @@ DEFAULT_WATCHLISTS: Dict[str, List[str]] = {
 
 # Feed RSS Istituzionali Premium per Breaking News Finanziarie, Macro, Politica USA ed Europa
 RSS_NEWS_FEEDS: List[str] = [
-    "https://feeds.a.dj.com/rss/RSSMarketsMain.xml",          # Wall Street Journal: Markets
-    "https://feeds.a.dj.com/rss/WSJcomUSBusiness.xml",         # Wall Street Journal: US Business & Policy
-    "https://feeds.bloomberg.com/markets/news.rss",            # Bloomberg Markets
-    "https://feeds.content.dowjones.io/public/rss/mw_topstories", # MarketWatch: Top Stories & Earnings
-    "https://www.cnbc.com/id/10000664/device/rss/rss.html",     # CNBC: Finance & Central Banks
-    "https://www.cnbc.com/id/20910258/device/rss/rss.html",     # CNBC: Economy, Macro & Politics
-    "https://cointelegraph.com/rss",                            # Cointelegraph: Crypto & ETF Flows
-    "https://www.coindesk.com/arc/outboundfeeds/rss/"           # CoinDesk: Global Digital Assets & Regulation
+    "https://feeds.a.dj.com/rss/RSSMarketsMain.xml",               # Wall Street Journal: Markets
+    "https://feeds.a.dj.com/rss/WSJcomUSBusiness.xml",              # Wall Street Journal: US Business & Economy
+    "https://feeds.a.dj.com/rss/RSSWorldNews.xml",                  # Wall Street Journal: World News & Geopolitics
+    "https://feeds.bloomberg.com/markets/news.rss",                 # Bloomberg Markets
+    "https://feeds.content.dowjones.io/public/rss/mw_topstories",      # MarketWatch: Top Stories & Earnings
+    "https://feeds.marketwatch.com/marketwatch/marketpulse/",       # MarketWatch: MarketPulse
+    "https://www.cnbc.com/id/10000664/device/rss/rss.html",          # CNBC: Finance & Central Banks
+    "https://www.cnbc.com/id/20910258/device/rss/rss.html",          # CNBC: Economy, Macro & Rates
+    "https://www.cnbc.com/id/100003114/device/rss/rss.html",         # CNBC: US Politics & World Events
+    "https://feeds.bbci.co.uk/news/world/rss.xml",                  # BBC: Geopolitics & Global Trade
+    "https://cointelegraph.com/rss",                                 # Cointelegraph: Crypto & ETF Flows
+    "https://www.coindesk.com/arc/outboundfeeds/rss/"                # CoinDesk: Global Digital Assets & Regulation
 ]
