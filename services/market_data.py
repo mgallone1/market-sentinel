@@ -21,6 +21,38 @@ class MarketDataService:
     }
 
     @classmethod
+    def is_euro_asset(cls, ticker: str, fund: Optional[Dict[str, Any]] = None) -> bool:
+        """
+        Determina in modo deterministico se un asset è già denominato in Euro (€).
+        Evita categoricamente la doppia conversione (divisione per EUR/USD che causava 75.66 € -> 67.89 €).
+        """
+        sym = ticker.strip().upper()
+        
+        # 1. Ticker con estensioni di borsa europee
+        euro_suffixes = (
+            ".DE", ".F", ".MI", ".PA", ".AS", ".BR", ".MC", ".LS", ".VI", ".IR", ".BE", ".DU", ".HM", ".MU", ".SG"
+        )
+        if any(sym.endswith(suf) for suf in euro_suffixes):
+            return True
+
+        # 2. Coppie crypto esplicite in Euro
+        if sym.endswith("-EUR") or sym.endswith("EUR"):
+            return True
+
+        # 3. Noti strumenti Trade Republic / indici europei
+        base_sym = sym.split(".")[0]
+        if base_sym in ["XDEM", "XDWD", "BY6", "FTSEMIB", "DAX", "SX5E", "EUNL", "IWDA"]:
+            return True
+
+        # 4. Controllo esplicito sui fondamentali se disponibili
+        if fund:
+            curr = str(fund.get("currency", "")).upper()
+            if curr == "EUR":
+                return True
+
+        return False
+
+    @classmethod
     def get_trade_republic_ls_quote(cls, ticker: str) -> Dict[str, float]:
         """
         Recupera le quotazioni in tempo reale da Lang & Schwarz Exchange (il market maker ufficiale di Trade Republic).
