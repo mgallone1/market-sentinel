@@ -469,39 +469,45 @@ async def memoria_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def occasioni_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     ACTIVE_CHAT_IDS.add(user_id)
-    await update.message.reply_text("🔍 *Scansione mercati in corso... cerco le migliori asimmetrie di prezzo in Euro (€)...*", parse_mode="Markdown")
+    await update.message.reply_text("🔍 *Scansione quantitativa in corso sui mercati... elaboro le 10 migliori occasioni con approfondimento discorsivo in Euro (€)...*", parse_mode="Markdown")
     
-    opps = OpportunityScannerService.scan_best_opportunities(top_n=3)
+    opps = OpportunityScannerService.scan_best_opportunities(top_n=10)
     if not opps:
         await update.message.reply_text("Nessun titolo attualmente in forte anomalia statistica.")
         return
 
-    lines = ["💎 *LE 3 MIGLIORI OCCASIONI A SCONTO OGGI (IN EURO):*\n"]
-    for i, o in enumerate(opps, 1):
-        tr_info = ""
-        if o.get("tr_bid") and o.get("tr_ask"):
-            tr_info = f"  └─ 📱 *Trade Republic (L&S Live):* Vendita `{o['tr_bid']:.2f} €` | Acquisto `{o['tr_ask']:.2f} €`\n"
+    # Genera il report approfondito e discorsivo del CIO tramite Gemini
+    detailed_report = llm_svc.generate_detailed_opportunities_report(opps)
+    
+    if not detailed_report:
+        # Fallback strutturato algoritmico se l'LLM non risponde
+        lines = ["💎 *TOP 10 MIGLIORI OCCASIONI A SCONTO OGGI (IN EURO):*\n"]
+        for i, o in enumerate(opps, 1):
+            tr_info = ""
+            if o.get("tr_bid") and o.get("tr_ask"):
+                tr_info = f"  └─ 📱 *Trade Republic (L&S Live):* Vendita `{o['tr_bid']:.2f} €` | Acquisto `{o['tr_ask']:.2f} €`\n"
 
-        lines.append(
-            f"*{i}. {o['name']}* (`{o['ticker']}`)\n"
-            f"• Prezzo di Riferimento: `{o['price_eur']:.2f} €` (Oggi: `{o['change_pct']:+.2f}%`)\n"
-            f"{tr_info}"
-            f"• Livello RSI: `{o['rsi']:.1f}` | Z-Score: `{o['z_score']:.2f}`\n"
-            f"• 📈 Probabilità Rimbalzo: *{o['rebound_prob']}*\n"
-            f"• 🎯 Target Stimato: `{o['tp1_eur']:.2f} €`\n"
-            f"• 🛑 Stop Loss Calcolato: `{o['sl_eur']:.2f} €` (Rapporto R:R `{o['rr_ratio']}`)\n"
-            f"• ⚡ *Azione:* _{o['primary_action']}_\n"
-        )
+            lines.append(
+                f"*{i}. {o['name']}* (`{o['ticker']}`)\n"
+                f"• Prezzo di Riferimento: `{o['price_eur']:.2f} €` (Oggi: `{o['change_pct']:+.2f}%`)\n"
+                f"{tr_info}"
+                f"• Livello RSI: `{o['rsi']:.1f}` | Z-Score: `{o['z_score']:.2f}`\n"
+                f"• 📈 Probabilità Rimbalzo: *{o['rebound_prob']}*\n"
+                f"• 🎯 Target Stimato: `{o['tp1_eur']:.2f} €`\n"
+                f"• 🛑 Stop Loss Calcolato: `{o['sl_eur']:.2f} €` (Rapporto R:R `{o['rr_ratio']}`)\n"
+                f"• ⚡ *Azione:* _{o['primary_action']}_\n"
+                f"📝 *Perché è un'occasione:* Il titolo presenta una deviazione statistica di {o['z_score']:.2f}σ rispetto alla media a 20 periodi con RSI a {o['rsi']:.1f}, configurando un netto ipervenduto con elevata asimmetria statistica favorevole all'accumulo strategico.\n"
+            )
 
-    lines.append("───────────────────────")
-    lines.append("💡 *Consiglio Esecutivo su Trade Republic:*")
-    lines.append("Per evitare lo spread di Lang & Schwarz, usa sempre un **Ordine Limite** qualche centesimo sotto il prezzo corrente anziché comprare a mercato.")
-    lines.append("Per simulare l'acquisto di uno di questi titoli, scrivi ad esempio: `/simula NVDA 500`")
+        lines.append("───────────────────────")
+        lines.append("💡 *Consiglio Esecutivo su Trade Republic:*")
+        lines.append("Per evitare lo spread di Lang & Schwarz, usa sempre un **Ordine Limite** qualche centesimo sotto il prezzo corrente anziché comprare a mercato.")
+        lines.append("Per simulare l'acquisto di uno di questi titoli, scrivi ad esempio: `/simula XDEM 500`")
+        detailed_report = "\n".join(lines)
 
-    reply_text = "\n".join(lines)
-    await update.message.reply_text(reply_text, parse_mode="Markdown")
+    await send_safe_text(update, detailed_report)
     supabase_svc.log_message(user_id, "user", "/occasioni")
-    supabase_svc.log_message(user_id, "assistant", reply_text)
+    supabase_svc.log_message(user_id, "assistant", detailed_report)
 
 async def simula_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     args = context.args
