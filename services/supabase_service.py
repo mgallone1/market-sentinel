@@ -235,3 +235,84 @@ class SupabaseService:
             ON CONFLICT(user_id) DO UPDATE SET summary_text = excluded.summary_text, updated_at = CURRENT_TIMESTAMP
             """, (user_id, summary_text))
             conn.commit()
+
+    def get_active_chat_ids(self) -> set:
+        """Restituisce l'insieme di tutti i chat ID attivi registrati nel DB."""
+        chat_ids = set()
+        default_user = 424093845
+        chat_ids.add(default_user)
+
+        if self.client:
+            try:
+                res_hist = self.client.table("finance_chat_history").select("user_id").execute()
+                if res_hist.data:
+                    for r in res_hist.data:
+                        uid = r.get("user_id")
+                        if uid and uid > 0:
+                            chat_ids.add(int(uid))
+            except Exception as e:
+                print(f"[SupabaseService] Errore lettura chat_ids da chat_history: {e}")
+
+            try:
+                res_port = self.client.table("finance_portfolio").select("user_id").execute()
+                if res_port.data:
+                    for r in res_port.data:
+                        uid = r.get("user_id")
+                        if uid and uid > 0:
+                            chat_ids.add(int(uid))
+            except Exception as e:
+                print(f"[SupabaseService] Errore lettura chat_ids da portfolio: {e}")
+
+        # Controlla anche SQLite locale
+        try:
+            with sqlite3.connect(SQLITE_PATH) as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT DISTINCT user_id FROM chat_history WHERE user_id > 0")
+                for r in cursor.fetchall():
+                    chat_ids.add(int(r[0]))
+                cursor.execute("SELECT DISTINCT user_id FROM portfolio WHERE user_id > 0")
+                for r in cursor.fetchall():
+                    chat_ids.add(int(r[0]))
+        except Exception:
+            pass
+
+        return chat_ids
+
+    def get_latest_macro_briefing(self) -> str:
+        """Recupera il testo dell'ultimo briefing macro erogato (per continuità di memoria tra 07:00 e 15:00)."""
+        BRIEFING_SYSTEM_ID = 0
+        if self.client:
+            try:
+                res = self.client.table("finance_memory_summary").select("summary_text").eq("user_id", BRIEFING_SYSTEM_ID).limit(1).execute()
+                if res.data and res.data[0].get("summary_text"):
+                    return res.data[0]["summary_text"]
+            except Exception as e:
+                print(f"[SupabaseService] Errore recupero briefing da Supabase: {e}")
+
+        with sqlite3.connect(SQLITE_PATH) as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT summary_text FROM memory_summary WHERE user_id = ?", (BRIEFING_SYSTEM_ID,))
+            row = cursor.fetchone()
+            return row[0] if row else ""
+
+    def save_latest_macro_briefing(self, slot: str, briefing_text: str):
+        """Salva l'ultimo briefing macro per consentire al prossimo briefing di ricordarsene ed evolvere il quadro."""
+        BRIEFING_SYSTEM_ID = 0
+        content = f"[{slot.upper()}] {briefing_text}"
+        if self.client:
+            try:
+                self.client.table("finance_memory_summary").upsert({
+                    "user_id": BRIEFING_SYSTEM_ID,
+                    "summary_text": content
+                }, on_conflict="user_id").execute()
+            except Exception as e:
+                print(f"[SupabaseService] Errore salvataggio briefing Supabase: {e}")
+
+        with sqlite3.connect(SQLITE_PATH) as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+            INSERT INTO memory_summary (user_id, summary_text, updated_at)
+            VALUES (?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(user_id) DO UPDATE SET summary_text = excluded.summary_text, updated_at = CURRENT_TIMESTAMP
+            """, (BRIEFING_SYSTEM_ID, content))
+            conn.commit()
