@@ -7,10 +7,12 @@ finanziario specialistico (Earnings, Guidance, Upgrades, Downgrades, etc.).
 import feedparser
 import re
 import time
+import calendar
 import html
 import urllib.request
 import urllib.parse
-from datetime import datetime
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 from typing import List, Dict, Any
 
 # Lessico finanziario ponderato
@@ -112,12 +114,12 @@ class NewsSentimentService:
                     parsed_time = entry.get("published_parsed")
                     pub_str = ""
                     if parsed_time:
-                        pub_ts = time.mktime(parsed_time)
+                        pub_ts = calendar.timegm(parsed_time)
                         age_hours = (now_ts - pub_ts) / 3600.0
                         if age_hours > 48.0 or age_hours < -5.0:
                             # Notizia obsoleta (vecchia di giorni/anni): scarta assolutamente
                             continue
-                        dt = datetime.fromtimestamp(pub_ts)
+                        dt = datetime.fromtimestamp(pub_ts, tz=timezone.utc).astimezone(ZoneInfo("Europe/Rome"))
                         pub_str = dt.strftime("%d/%m/%Y %H:%M")
                     else:
                         pub_str = entry.get("published", "")[:25]
@@ -161,7 +163,7 @@ class NewsSentimentService:
                     )
                     for dt_str, text_html in raw_blocks[-max_items_per_channel:]:
                         clean_text = re.sub(r"<[^>]+>", "", text_html)
-                        clean_text = html.unescape(clean_text).strip()
+                        clean_text = html.unescape(clean_text).replace("|FJ", "").strip()
                         if not clean_text:
                             continue
 
@@ -169,7 +171,8 @@ class NewsSentimentService:
                         try:
                             # Filtro: controlla se recente (meno di 24h)
                             dt_obj = datetime.fromisoformat(dt_str.replace("Z", "+00:00"))
-                            pub_formatted = dt_obj.strftime("%d/%m/%Y %H:%M")
+                            dt_rome = dt_obj.astimezone(ZoneInfo("Europe/Rome"))
+                            pub_formatted = dt_rome.strftime("%d/%m/%Y %H:%M")
                             age_hours = (now_ts - dt_obj.timestamp()) / 3600.0
                             if age_hours > 24.0:
                                 continue
@@ -207,11 +210,11 @@ class NewsSentimentService:
                 p = e.get("published_parsed")
                 pub_str = ""
                 if p:
-                    pub_ts = time.mktime(p)
+                    pub_ts = calendar.timegm(p)
                     age_hours = (now_ts - pub_ts) / 3600.0
                     if age_hours > 48.0 or age_hours < -5.0:
                         continue
-                    dt = datetime.fromtimestamp(pub_ts)
+                    dt = datetime.fromtimestamp(pub_ts, tz=timezone.utc).astimezone(ZoneInfo("Europe/Rome"))
                     pub_str = dt.strftime("%d/%m/%Y %H:%M")
                 else:
                     pub_str = e.get("published", "")[:25]
