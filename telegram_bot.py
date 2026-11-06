@@ -467,6 +467,8 @@ async def memoria_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
 
 async def occasioni_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    ACTIVE_CHAT_IDS.add(user_id)
     await update.message.reply_text("🔍 *Scansione mercati in corso... cerco le migliori asimmetrie di prezzo in Euro (€)...*", parse_mode="Markdown")
     
     opps = OpportunityScannerService.scan_best_opportunities(top_n=3)
@@ -476,9 +478,14 @@ async def occasioni_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     lines = ["💎 *LE 3 MIGLIORI OCCASIONI A SCONTO OGGI (IN EURO):*\n"]
     for i, o in enumerate(opps, 1):
+        tr_info = ""
+        if o.get("tr_bid") and o.get("tr_ask"):
+            tr_info = f"  └─ 📱 *Trade Republic (L&S Live):* Vendita `{o['tr_bid']:.2f} €` | Acquisto `{o['tr_ask']:.2f} €`\n"
+
         lines.append(
             f"*{i}. {o['name']}* (`{o['ticker']}`)\n"
-            f"• Prezzo Attuale: `{o['price_eur']:.2f} €` (Oggi: `{o['change_pct']:+.2f}%`)\n"
+            f"• Prezzo di Riferimento: `{o['price_eur']:.2f} €` (Oggi: `{o['change_pct']:+.2f}%`)\n"
+            f"{tr_info}"
             f"• Livello RSI: `{o['rsi']:.1f}` | Z-Score: `{o['z_score']:.2f}`\n"
             f"• 📈 Probabilità Rimbalzo: *{o['rebound_prob']}*\n"
             f"• 🎯 Target Stimato: `{o['tp1_eur']:.2f} €`\n"
@@ -491,7 +498,10 @@ async def occasioni_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lines.append("Per evitare lo spread di Lang & Schwarz, usa sempre un **Ordine Limite** qualche centesimo sotto il prezzo corrente anziché comprare a mercato.")
     lines.append("Per simulare l'acquisto di uno di questi titoli, scrivi ad esempio: `/simula NVDA 500`")
 
-    await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
+    reply_text = "\n".join(lines)
+    await update.message.reply_text(reply_text, parse_mode="Markdown")
+    supabase_svc.log_message(user_id, "user", "/occasioni")
+    supabase_svc.log_message(user_id, "assistant", reply_text)
 
 async def simula_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     args = context.args
@@ -578,11 +588,16 @@ async def portfolio_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         total_invested += invested_val
         total_current += current_val
 
+        tr_info = ""
+        tr_quote = MarketDataService.get_trade_republic_ls_quote(ticker)
+        if tr_quote and "bid" in tr_quote:
+            tr_info = f" (TR Vendita: `{tr_quote['bid']:.2f} €`)"
+
         icon = "🟢" if pnl_eur >= 0 else "🔴"
         text_lines.append(
             f"*{pos['asset_name']}* (`{ticker}`)\n"
             f"• Quote: `{shares:.4f}` | PMC: `{pmc:.2f} €`\n"
-            f"• Prezzo Live: `{current_price_eur:.2f} €`\n"
+            f"• Prezzo Live: `{current_price_eur:.2f} €`{tr_info}\n"
             f"• Controvalore: `{current_val:.2f} €` | Risultato: {icon} `{pnl_eur:+.2f} €` (`{pnl_pct:+.2f}%`)\n"
         )
 
@@ -729,7 +744,7 @@ async def _handle_text_message_core(update: Update, context: ContextTypes.DEFAUL
         await portfolio_cmd(update, context)
         return
 
-    if upper_text in ["OCCASIONI", "/OCCASIONI", "SCONTI", "SCONTO"]:
+    if any(w in upper_text for w in ["OCCASIONI", "/OCCASIONI", "OCCASIONE", "SCONTI", "SCONTO", "OPPORTUNITY", "OPPORTUNITÀ", "MIGLIORI TITOLI", "COSA COMPRARE"]):
         await occasioni_cmd(update, context)
         return
 
@@ -755,12 +770,17 @@ async def _handle_text_message_core(update: Update, context: ContextTypes.DEFAUL
     intent = classification.get("intent", "general_chat")
     ticker = classification.get("ticker")
 
-    # 1. Se l'utente chiede una panoramica di mercato
+    # 1. Se l'utente chiede le migliori occasioni o idee di trading
+    if intent == "opportunities":
+        await occasioni_cmd(update, context)
+        return
+
+    # 2. Se l'utente chiede una panoramica di mercato
     if intent == "market_overview":
         await briefing_cmd(update, context)
         return
 
-    # 2. Se l'utente chiede di aggiornare/sostituire i ticker del portafoglio
+    # 3. Se l'utente chiede di aggiornare/sostituire i ticker del portafoglio
     if intent == "update_portfolio_ticker":
         replacements = classification.get("replacements") or []
         user_portfolio = supabase_svc.get_portfolio(user_id)
@@ -971,9 +991,15 @@ async def _handle_text_message_core(update: Update, context: ContextTypes.DEFAUL
                     f"💡 {cycle_context['consiglio_pratico']}"
                 )
 
+            tr_quote = MarketDataService.get_trade_republic_ls_quote(pred['ticker'])
+            tr_line = ""
+            if tr_quote and "bid" in tr_quote and "ask" in tr_quote:
+                tr_line = f"📱 *Trade Republic (L&S Live):* Vendita `{tr_quote['bid']:.2f} €` | Acquisto `{tr_quote['ask']:.2f} €`\n"
+
             reply_primary = (
                 f"🌍 *QUADRO DEL MOMENTO & STRATEGIA: {fund.get('short_name', pred['ticker'])}* (`{pred['ticker']}`)\n\n"
-                f"💶 *Prezzo Live in Euro:* `{current_p:.2f} €`" + (f" (${pred['raw_price']:.2f})" if is_usd else "") + "\n\n"
+                f"💶 *Prezzo Live in Euro:* `{current_p:.2f} €`" + (f" (${pred['raw_price']:.2f})" if is_usd else "") + "\n"
+                f"{tr_line}\n"
                 f"📰 *Cosa sta succedendo & Tesi di Mercato:*\n{exec_brief}\n\n"
                 f"🔄 *Inquadramento Ciclico (Migliorino):*\n"
                 f"• Fase: *{cycle_context['tempo_battleplan']}*\n"
