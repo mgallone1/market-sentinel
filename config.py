@@ -19,10 +19,10 @@ class AppConfig:
 
 # Watchlist di riferimento raggruppate per settore/categoria
 DEFAULT_WATCHLISTS: Dict[str, List[str]] = {
-    "Big Tech USA": ["AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "TSLA"],
-    "Semiconduttori & AI": ["NVDA", "TSM", "AMD", "ASML", "AVGO", "QCOM", "ARM"],
-    "Borse Europee / Italia": ["RACE.MI", "UCG.MI", "ISP.MI", "ENI.MI", "STLAM.MI", "SAP.DE", "MC.PA"],
-    "Indici & Macro ETF": ["SPY", "QQQ", "IWM", "EEM", "GLD", "TLT"]
+    "Big Tech USA": ["AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "TSLA", "LLY"],
+    "Semiconduttori & AI": ["NVDA", "TSM", "AMD", "ASML", "AVGO", "QCOM", "ARM", "MRVL"],
+    "Borse Europee & Trade Republic": ["BY6.F", "RACE.MI", "UCG.MI", "ISP.MI", "ENI.MI", "SAP.DE"],
+    "ETF Core & Momentum (Trade Republic)": ["XDWD.DE", "XDEM.DE", "SPY", "QQQ", "SMH", "GLD"]
 }
 
 # Feed RSS Istituzionali Premium Verificati Live (Solo feed attivi in tempo reale)
