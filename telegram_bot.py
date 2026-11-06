@@ -262,7 +262,7 @@ async def build_macro_briefing(slot: str = "auto") -> str:
             q = MarketDataService.get_realtime_quote(sym)
             p = q.get("last_price", 0.0)
             c = q.get("change_pct", 0.0)
-            is_already_eur = "MI" in sym or "EUR" in sym or sym.endswith(".DE") or sym.endswith(".F")
+            is_already_eur = MarketDataService.is_euro_asset(sym)
             p_eur = p if is_already_eur else (p / eur_rate if eur_rate > 0 else p)
             icon = "🟢" if c >= 0 else "🔴"
             header_lines.append(f"{icon} *{label}:* `{p_eur:.2f} €` (`{c:+.2f}%`)")
@@ -576,8 +576,8 @@ async def portfolio_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         # Converte in Euro solo se il ticker è nativamente quotato in USD
         fund = MarketDataService.get_ticker_fundamentals(ticker)
-        is_already_eur = ticker.endswith(".DE") or ticker.endswith(".F") or ticker.endswith(".MI") or ticker.endswith("-EUR")
-        is_usd = fund.get("currency", "USD").upper() == "USD" and not is_already_eur
+        is_already_eur = MarketDataService.is_euro_asset(ticker, fund)
+        is_usd = not is_already_eur
         current_price_eur = raw_price / eur_rate if is_usd else raw_price
         
         invested_val = shares * pmc
@@ -675,9 +675,9 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 q_live = MarketDataService.get_realtime_quote(ticker)
                 raw_live_p = q_live.get("last_price") or pmc
                 fund_info = MarketDataService.get_ticker_fundamentals(ticker)
-                is_usd = fund_info.get("currency", "USD").upper() == "USD"
-                eur_rate = MarketDataService.get_eur_usd_rate() if is_usd else 1.0
-                live_p_eur = raw_live_p / eur_rate if is_usd else raw_live_p
+                is_eur = MarketDataService.is_euro_asset(ticker, fund_info)
+                eur_rate = 1.0 if is_eur else MarketDataService.get_eur_usd_rate()
+                live_p_eur = raw_live_p / eur_rate if not is_eur else raw_live_p
                 
                 cur_val_eur = shares * live_p_eur
                 invested_eur = shares * pmc
@@ -845,11 +845,12 @@ async def _handle_text_message_core(update: Update, context: ContextTypes.DEFAUL
 
         if not df_hist.empty and len(df_hist) >= 20:
             fund = MarketDataService.get_ticker_fundamentals(resolved)
-            is_usd = fund.get("currency", "USD").upper() == "USD" or resolved.endswith("-USD")
-            eur_rate = MarketDataService.get_eur_usd_rate() if is_usd else 1.0
+            is_already_eur = MarketDataService.is_euro_asset(resolved, fund)
+            is_usd = not is_already_eur
+            eur_rate = 1.0 if is_already_eur else MarketDataService.get_eur_usd_rate()
 
             df_tech = TechnicalAnalysisService.calculate_indicators(df_hist)
-            pred = PredictiveTradingEngine.generate_prediction_and_trade_plan(df_hist, resolved, currency="USD" if is_usd else "EUR")
+            pred = PredictiveTradingEngine.generate_prediction_and_trade_plan(df_hist, resolved, currency="EUR" if is_already_eur else "USD")
             news = MarketDataService.get_ticker_news(resolved, max_items=3)
             # Breaking news mirate in tempo reale sul ticker (ultime 24-48 ore via Google News Real-time)
             fast_ticker_news = NewsSentimentService.fetch_ticker_breaking_news(resolved, max_items=3)
@@ -1052,11 +1053,12 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
             return
 
         fund = MarketDataService.get_ticker_fundamentals(ticker)
-        is_usd = fund.get("currency", "USD").upper() == "USD" or ticker.endswith("-USD")
-        eur_rate = MarketDataService.get_eur_usd_rate() if is_usd else 1.0
+        is_already_eur = MarketDataService.is_euro_asset(ticker, fund)
+        is_usd = not is_already_eur
+        eur_rate = 1.0 if is_already_eur else MarketDataService.get_eur_usd_rate()
 
         df_tech = TechnicalAnalysisService.calculate_indicators(df_hist)
-        pred = PredictiveTradingEngine.generate_prediction_and_trade_plan(df_hist, ticker, currency="USD" if is_usd else "EUR")
+        pred = PredictiveTradingEngine.generate_prediction_and_trade_plan(df_hist, ticker, currency="EUR" if is_already_eur else "USD")
         div_data = CycleAnalystService.detect_rsi_divergence(df_tech)
         wyck_data = CycleAnalystService.detect_wyckoff_phase(df_tech)
         fib_data = CycleAnalystService.calculate_fibonacci_and_fvg(df_tech, eur_rate)
