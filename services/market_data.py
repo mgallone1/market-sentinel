@@ -6,9 +6,47 @@ dati storici OHLCV e fondamentali aziendali.
 
 import yfinance as yf
 import pandas as pd
+import urllib.request
+import re
 from typing import Dict, Any, Optional
 
 class MarketDataService:
+    ISIN_MAP = {
+        "XDEM.DE": "IE00BL25JP72",
+        "XDEM": "IE00BL25JP72",
+        "XDWD.DE": "IE00BJ0KDQ92",
+        "XDWD": "IE00BJ0KDQ92",
+        "BY6.F": "CNE100000296",
+        "BYD": "CNE100000296"
+    }
+
+    @classmethod
+    def get_trade_republic_ls_quote(cls, ticker: str) -> Dict[str, float]:
+        """
+        Recupera le quotazioni in tempo reale da Lang & Schwarz Exchange (il market maker ufficiale di Trade Republic).
+        Restituisce prezzo di vendita (Bid), prezzo di acquisto (Ask) e Mid price in Euro (€).
+        """
+        sym = ticker.strip().upper()
+        isin = cls.ISIN_MAP.get(sym)
+        if not isin:
+            return {}
+
+        url = f"https://www.ls-x.de/de/etf/{isin}"
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
+        try:
+            with urllib.request.urlopen(req, timeout=4) as resp:
+                html_text = resp.read().decode("utf-8", errors="ignore")
+                data = {}
+                for m in re.finditer(r'field=\"(bid|ask|mid|last)\"[^>]*>([^<]+)', html_text):
+                    val_str = m.group(2).strip().replace(".", "").replace(",", ".")
+                    try:
+                        data[m.group(1)] = float(val_str)
+                    except Exception:
+                        pass
+                return data
+        except Exception:
+            return {}
+
     @classmethod
     def get_eur_usd_rate(cls) -> float:
         """Restituisce il tasso di cambio EUR/USD in tempo reale."""
@@ -19,19 +57,20 @@ class MarketDataService:
         except Exception:
             return 1.08
 
-    @staticmethod
-    def get_realtime_quote(ticker: str) -> Dict[str, Any]:
+    @classmethod
+    def get_realtime_quote(cls, ticker: str) -> Dict[str, Any]:
         """
-        Recupera il prezzo esatto in tempo reale tramite fast_info.
+        Recupera il prezzo esatto in tempo reale tramite fast_info e arricchisce con dati Trade Republic (L&S).
         """
         try:
-            t = yf.Ticker(ticker.strip().upper())
+            sym = ticker.strip().upper()
+            t = yf.Ticker(sym)
             fi = t.fast_info
             last_price = float(fi.last_price) if fi.last_price is not None else 0.0
             prev_close = float(fi.previous_close) if fi.previous_close is not None else last_price
             change_pct = ((last_price - prev_close) / prev_close) * 100 if prev_close else 0.0
             
-            return {
+            res = {
                 "last_price": round(last_price, 2),
                 "previous_close": round(prev_close, 2),
                 "change_pct": round(change_pct, 2),
@@ -40,6 +79,15 @@ class MarketDataService:
                 "day_low": round(float(fi.day_low), 2) if fi.day_low else None,
                 "market_cap": fi.market_cap
             }
+
+            # Se disponibile quotazione Lang & Schwarz (Trade Republic), arricchisce con bid/ask reali
+            ls_quote = cls.get_trade_republic_ls_quote(sym)
+            if ls_quote and "bid" in ls_quote and "ask" in ls_quote:
+                res["tr_bid"] = round(ls_quote["bid"], 2)
+                res["tr_ask"] = round(ls_quote["ask"], 2)
+                res["tr_mid"] = round(ls_quote.get("mid", (ls_quote["bid"] + ls_quote["ask"]) / 2), 2)
+
+            return res
         except Exception as e:
             print(f"[MarketDataService] Errore realtime quote {ticker}: {e}")
             return {"last_price": 0.0, "change_pct": 0.0, "currency": "USD"}
