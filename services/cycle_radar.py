@@ -19,7 +19,8 @@ WATCHED_ASSETS = [
     ("SMH", "Semiconduttori VanEck"),
     ("NVDA", "NVIDIA Corp"),
     ("TSLA", "Tesla Inc"),
-    ("URTH", "MSCI World ETF")
+    ("XDWD.DE", "MSCI World ETF (XDWD)"),
+    ("XDEM.DE", "MSCI World Momentum ETF (XDEM)")
 ]
 
 class CycleRadarService:
@@ -54,11 +55,12 @@ class CycleRadarService:
             if df.empty or len(df) < 70:
                 continue
 
-            rate = eur_rate if ticker != "URTH" else 1.0
+            is_eur = ticker.endswith(".DE") or ticker.endswith(".MI") or ticker.endswith("-EUR") or ticker.endswith(".F")
+            rate = 1.0 if is_eur else eur_rate
 
             # 1. Modello Predittivo
             df_tech = TechnicalAnalysisService.calculate_indicators(df)
-            pred = PredictiveTradingEngine.generate_prediction_and_trade_plan(df, ticker, currency="USD" if ticker != "URTH" else "EUR")
+            pred = PredictiveTradingEngine.generate_prediction_and_trade_plan(df, ticker, currency="EUR" if is_eur else "USD")
             curr_price_eur = pred["current_price_eur"]
 
             prices = df["Close"].values
