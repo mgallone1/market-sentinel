@@ -9,6 +9,8 @@ import os
 import json
 from pathlib import Path
 from typing import Dict, Any, Optional
+from zoneinfo import ZoneInfo
+from datetime import datetime
 from dotenv import load_dotenv
 
 ENV_PATH = Path(__file__).parent.parent / ".env"
@@ -31,6 +33,10 @@ class LLMReasoningService:
                 self.client = genai.Client(api_key=self.api_key)
             except Exception as e:
                 print(f"[LLMReasoningService] Errore init client Gemini: {e}")
+
+    @staticmethod
+    def _get_current_time_str() -> str:
+        return datetime.now(ZoneInfo("Europe/Rome")).strftime("%A %d %B %Y ore %H:%M CET")
 
     def _call_gemini(self, contents) -> str:
         if not self.client:
@@ -166,10 +172,12 @@ LINEE GUIDA DI RISPOSTA:
                 news_details.append(f"• Titolo: {t_str}\n  Dettaglio: {s_str}")
         news_block_text = "\n".join(news_details) if news_details else "Nessuna notizia recente rilevante."
 
+        now_str = self._get_current_time_str()
         mem_block = f"\nContesto e decisioni precedenti dell'utente negli ultimi 7-30 giorni:\n{memory_context}\n" if memory_context else ""
 
         prompt = f"""
 Sei un Senior Quantitative Strategist e Portfolio Manager di livello hedge fund globale.
+DATA E ORA ATTUALE DI ANALISI: {now_str}.
 Il tuo interlocutore è un investitore intelligente ma non un addetto ai lavori finanziari: per questo, la tua dote più grande è spiegare in modo chiaro, logico, trasparente e collegato TUTTI i pezzi del puzzle, senza dare nulla per scontato e senza tecnicismi fini a se stessi.
 {mem_block}
 QUADRO QUANTITATIVO COMPLETO SUL TITOLO (tutto espresso in Euro €):
@@ -214,27 +222,9 @@ LINEE GUIDA DI COMPOSIZIONE (OBBLIGATORIE):
 - Per le AZIONI spiega le cause specifiche (es. M&A, diluizioni azionarie, trimestrali, tassi e colli di bottiglia energetici dei Data Center AI).
 - Spiega in parole semplici cosa significano insieme i numeri: ad esempio come la discesa fondamentale si incastra con l'Onda correttiva di Elliott e il minimo del ciclo di Hurst/Migliorino.
 - Spiega PERCHÉ è fondamentale impostare un ORDINE LIMITE scontato (es. sui supporti statistici dell'intervallo 1-Sigma di Monte Carlo) invece di comprare a mercato: mostra come l'ordine limite abbatte il rischio e fa schizzare il rapporto Rischio/Rendimento (Risk/Reward) a livelli vantaggiosi (es. da 1:0.8 a mercato a oltre 1:2.5 o 1:3 con limite).
+- ANCORAGGIO TEMPORALE E FATTUALE: Siamo a {now_str}. È severamente vietato inventare o citare notizie e crolli del passato (come il rilascio di DeepSeek del gennaio 2025 o vecchi sell-off storici) attribuendoli a oggi. Se non ci sono notizie specifiche recenti nei dati forniti, spiega l'andamento basandoti rigorosamente sulla pura dinamica tecnica dei prezzi, sui flussi macro (tassi ^TNX, VIX, dollaro) e sui cicli.
 - Tono: Istituzionale, didattico, posato, lucido, autorevole ma accessibile e privo di melodrammi.
 - Tutte le cifre RIGOROSAMENTE in Euro (€).
-"""
-        return self._call_gemini(prompt)
-
-    def answer_general_query(self, query: str, memory_context: str = "") -> str:
-        """
-        Risponde a domande finanziarie, macroeconomiche o teoriche con registro sobrio e istituzionale.
-        """
-        mem_block = f"\nMemoria storica e conversazioni precedenti con l'utente (ultimi 7-30 giorni):\n{memory_context}\n" if memory_context else ""
-        prompt = f"""
-Sei un Senior Investment Strategist di una primaria casa di gestione istituzionale. Padroneggi i mercati globali, l'asset allocation e l'Analisi Ciclica (Hurst & Migliorino).
-{mem_block}
-L'utente ti pone questa domanda:
-"{query}"
-
-LINEE GUIDA DI STILE:
-- Rispondi in italiano con un registro posato, sobrio, equilibrato, rigoroso e chiaro (registro da Private Banking / Research Desk).
-- Evita toni enfatici, allarmistici, teatrali o paternalistici.
-- Fornisci un'analisi lucida basata sui dati oggettivi, sui fondamentali e sulla corretta gestione del rischio.
-- Valori monetari espressi sempre in Euro (€).
 """
         return self._call_gemini(prompt)
 
@@ -286,52 +276,75 @@ Analizza questa immagine inviata dall'utente:
             "text": text_resp
         }
 
-    def generate_macro_market_briefing(self, indices_data: list, news_list: list) -> str:
+    def generate_macro_market_briefing(self, indices_data: list, news_list: list, slot: str = "morning", previous_briefing_context: str = "") -> str:
         """
-        Genera un briefing macro completo, posato e analitico sui mercati globali,
-        spiegando i fatti politici (elezioni, midterms), la crisi data center,
-        l'impatto sui semiconduttori e le considerazioni di portafoglio.
+        Genera un briefing macro periodico (mattino ore 07:00 o pomeriggio ore 15:00):
+        - Ore 07:00: Sintesi delle ultime 12 ore (chiusura Asia, Wall Street overnight, futures europei, geopolitica e dati macro).
+        - Ore 15:00: Sintesi delle ultime ore e pre-apertura USA (apertura borse europee, dati lavoro/inflazione USA, futures pre-market).
+        - Si ricorda e si collega direttamente a quanto detto nel briefing precedente, evitando ripetizioni e mostrando l'evoluzione.
+        - Conciso, ad altissima densità informativa e rigorosamente basato su dati reali aggiornati in Euro (€).
         """
         if not self.client:
             return ""
 
+        now_str = self._get_current_time_str()
         indices_str = "\n".join([f"- {item['label']}: {item['price_eur']} € ({item['change']:+.2f}%)" for item in indices_data])
-        news_str = "\n".join([f"• {n.get('title', '')}" for n in news_list[:12]])
+        news_str = "\n".join([f"• [{n.get('source', 'Top Media')}] ({n.get('published', 'Oggi')}): {n.get('title', '')}: {n.get('summary', '')[:160]}" for n in news_list[:12]])
+
+        prev_block = f"\nCOSA AVEVI DETTO NEL BRIEFING PRECEDENTE (DA RICORDARE E COLLEGARE):\n{previous_briefing_context}\n" if previous_briefing_context else ""
+
+        if slot == "morning":
+            time_focus = "BRIEFING DEL MATTINO (ORE 07:00 CET): Sintesi ragionata e densa delle ultime 12 ore (sessione asiatica, chiusura notturna USA, futures europei e catalyst geopolitici prima dell'apertura)."
+        else:
+            time_focus = "BRIEFING DEL POMERIGGIO (ORE 15:00 CET): Sintesi delle ultime ore di contrattazione europea, dati macro USA pomeridiani (jobless claims/inflazione) e posizionamento per l'apertura di Wall Street delle 15:30."
 
         prompt = f"""
-Sei un Senior Investment Strategist e Direttore di Ricerca di una primaria istituzione finanziaria.
-Redigi una nota informativa chiara, analitica, rigorosa e posata sulla sessione di mercato corrente per un investitore informato.
-
-Dati di Mercato Live di oggi (in Euro €):
+Sei il Chief Investment Officer (CIO) e Senior Market Strategist.
+DATA E ORA ATTUALE DI REDAZIONE: {now_str}.
+{time_focus}
+{prev_block}
+DATI DI MERCATO LIVE DI OGGI (Tutti espressi in Euro €):
 {indices_str}
 
-Notizie, Catalyst e Rassegna Stampa Internazionale:
+NOTIZIE, BREAKING NEWS & RASSEGNA STAMPA INTERNAZIONALE IN TEMPO REALE (Bloomberg, CNBC, BBC, CoinDesk):
 {news_str}
 
-LINEE GUIDA DI STILE (TASSATIVE):
-- Tono sobrio, posato, analitico, rigoroso ed equilibrato (registro da Research Note istituzionale / Memorandum di Mercato).
-- VIETATO qualsiasi tono teatrale, enfatico, allarmistico o paternalistico (vietato scrivere 'sediti e respira', 'se ti trema la mano', 'sangue nelle strade' o espressioni melodrammatiche da film).
-- Struttura l'analisi con lucidità professionale:
-  1. I Catalyst macroeconomici e politici (consultazioni/elezioni, orientamento normativo e fiscale).
-  2. I vincoli infrastrutturali ed energetici legati all'Intelligenza Artificiale (analisi di Goldman Sachs sul 45% dei progetti di data center a rischio ritardo o blocco permessi).
-  3. L'impatto sul comparto dei semiconduttori (revisione del Capex e del ritorno sul capitale investito - ROI).
-  4. Le dinamiche dei flussi istituzionali (deleveraging e riduzione della leva finanziaria).
-  5. Considerazioni di portafoglio e gestione operativa per Trade Republic (disciplina sui livelli tecnici, ordini limite anziché market order, prospettiva temporale).
-- Tutte le cifre monetarie rigorosamente in Euro (€).
+LINEE GUIDA RIGOROSE DI REDAZIONE E ANCORAGGIO TEMPORALE:
+1. ANCORAGGIO TEMPORALE ASSOLUTO (ANTI-ALLUCINAZIONE):
+   - Oggi è {now_str}. Fai riferimento ESCLUSIVAMENTE a questa data e ai dati e alle breaking news fornite sopra.
+   - DIVIETO CATEGORICO di citare eventi storici passati (come il rilascio di DeepSeek di gennaio 2025 o vecchi sell-off passati) come se fossero notizie o driver di oggi.
+   - Se una notizia o spiegazione non è documentata nelle news o nei dati forniti sopra, NON INVENTARE catalizzatori passati. Riporta solo i fatti confermati o la pura dinamica tecnica e ciclica dei prezzi.
+2. CONCISO MA COMPLETO: Niente giri di parole, niente melodramma, niente padding. Struttura il briefing in 3 o 4 punti chiave rapidi ma densi di contenuto informativo:
+   - *1. Catalyst Notturno / Ultime Ore:* Il fatto politico, macroeconomico o geopolitico più rilevante e la reazione di Asia ed Europa.
+   - *2. Wall Street & Big Tech / Crypto:* Il driver principale (tassi ^TNX, petrolio, trimestrali, o sentiment AI/crypto).
+   - *3. Connessione con il Briefing Precedente:* Ricollegati in 1-2 frasi a quanto avevi segnalato prima per mostrare se l'ipotesi si è confermata o se c'è stata una svolta.
+   - *4. Bussola Operativa per la Seduta:* Livelli di attenzione, orario dei dati macro cruciali e disciplina su Trade Republic.
+3. Tono istituzionale, posato, lucido ed elegante.
+4. Tutte le quotazioni rigorosamente in Euro (€).
 """
         return self._call_gemini(prompt)
 
     def answer_general_query(self, query: str, memory_context: str = "") -> str:
         """
-        Risponde a domande finanziarie, macroeconomiche o teoriche (inclusa analisi ciclica Hurst & Migliorino).
+        Risponde a domande finanziarie, macroeconomiche o teoriche con registro sobrio e istituzionale.
         """
-        mem_block = f"\nMemoria storica e conversazioni precedenti con l'utente (ultimi 7-30 giorni):\n{memory_context}\n" if memory_context else ""
+        now_str = self._get_current_time_str()
+        mem_block = f"\nMemoria storica e conversazioni recenti con l'utente:\n{memory_context}\n" if memory_context else ""
         prompt = f"""
-Sei un Senior Financial Advisor, Portfolio Manager e Maestro dell'Analisi Ciclica. Padroneggi alla perfezione sia l'Analisi Ciclica di J.M. Hurst (Harmonicity, Synchronicity, Proportionality, Summation, FLD) sia l'Analisi Ciclica e il Battleplan di Giuseppe Migliorino (cicli T-1, T, T+1, T+2 Mensile, T+3 Intermedio, la sequenza dei 4 tempi e la teoria dei Vincoli Ciclici).
+Sei un Senior Financial Advisor, Portfolio Manager e Maestro dell'Analisi Ciclica (Hurst & Giuseppe Migliorino).
+DATA E ORA ATTUALE DI RIFERIMENTO: {now_str}.
 {mem_block}
-L'utente ti fa questa domanda in chat su Telegram:
+L'utente ti pone questa domanda su Telegram:
 "{query}"
 
-Rispondi in italiano chiaro, autorevole, brillante e approfondito. Se la domanda riguarda i cicli, Hurst o Migliorino, spiega la logica teorica e applicativa con rigore (come si contano le barre, come funziona il Battleplan, cosa comporta un vincolo ribassista). Esprimi eventuali valori monetari sempre in Euro (€).
+LINEE GUIDA RIGOROSE:
+1. ANCORAGGIO TEMPORALE REALE E ANTI-ALLUCINAZIONE:
+   - Siamo a {now_str}. Sii trasparente e accurato sulle date degli eventi.
+   - Non confondere mai eventi del passato della tua base di conoscenza pregressa (come DeepSeek R1 uscito a gennaio 2025) con i movimenti odierni di mercato.
+   - Se l'utente ti chiede spiegazioni su una notizia o un evento, specifica sempre chiaramente quando è accaduto realmente e non spacciare eventi datati come spiegazioni dei movimenti di oggi.
+2. STILE:
+   - Registro sobrio, istituzionale, posato, privo di enfasi teatrale o allarmismo.
+   - Se la domanda riguarda i cicli, Hurst o Migliorino, spiega la logica teorica e applicativa con rigore (conteggio barre, Battleplan, vincoli ciclici, FLD).
+3. Prezzi sempre in Euro (€).
 """
         return self._call_gemini(prompt)
