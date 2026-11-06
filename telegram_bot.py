@@ -202,14 +202,32 @@ async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     await update.message.reply_text(msg, parse_mode="Markdown")
 
-async def build_macro_briefing(slot: str = "morning") -> str:
+async def build_macro_briefing(slot: str = "auto") -> str:
     """
-    Costruisce il briefing macro e geopolitico:
-    - slot="morning" (07:00 CET): Sintesi ultime 12 ore (Asia, chiusura Wall Street, futures UE, driver geopolitici).
-    - slot="afternoon" (15:00 CET): Sintesi ultime ore (seduta UE, macro USA jobless/CPI, pre-market Wall Street).
+    Costruisce il briefing macro e geopolitico in tempo reale:
+    - Calcola la sessione di mercato in base all'ora esatta di Roma:
+      * morning: 06:00-11:59 (apertura Europa & Asia overnight)
+      * afternoon: 12:00-17:29 (metà seduta UE & sessione USA)
+      * evening: 17:30-22:30 (chiusura Europa, Wall Street closing & bilancio)
+      * night: 22:31-05:59 (overnight, crypto 24/7 & pre-Asia)
     - Mantiene memoria del briefing precedente tramite Supabase.
     - Prezzi espressi rigorosamente in Euro (€).
     """
+    now_rome = datetime.now(ZoneInfo("Europe/Rome"))
+    h = now_rome.hour
+    m = now_rome.minute
+    cur_time = now_rome.strftime("%H:%M")
+
+    if slot == "auto":
+        if 6 <= h < 12:
+            slot = "morning"
+        elif 12 <= h < 17 or (h == 17 and m < 30):
+            slot = "afternoon"
+        elif (h == 17 and m >= 30) or (18 <= h <= 22):
+            slot = "evening"
+        else:
+            slot = "night"
+
     eur_rate = MarketDataService.get_eur_usd_rate()
     
     indices = [
@@ -225,9 +243,13 @@ async def build_macro_briefing(slot: str = "morning") -> str:
     
     indices_summary = []
     if slot == "morning":
-        title_header = "🌅 *BRIEFING MATTINO (ORE 07:00 CET) - SINTESI ULTIME 12 ORE*"
+        title_header = f"🌅 *BRIEFING MATTINO (ORE {cur_time} CET) - APERTURA BORSE EUROPEE*"
+    elif slot == "afternoon":
+        title_header = f"☕ *BRIEFING POMERIGGIO (ORE {cur_time} CET) - SESSIONE USA & MACRO*"
+    elif slot == "evening":
+        title_header = f"🌙 *BRIEFING SERALE (ORE {cur_time} CET) - CHIUSURA WALL STREET & BILANCIO*"
     else:
-        title_header = "☕ *BRIEFING POMERIGGIO (ORE 15:00 CET) - PRE-APERTURA WALL STREET*"
+        title_header = f"🌌 *BRIEFING NOTTURNO (ORE {cur_time} CET) - OVERNIGHT & MERCATI GLOBALI*"
 
     header_lines = [
         title_header + "\n",
@@ -290,10 +312,20 @@ async def build_macro_briefing(slot: str = "morning") -> str:
                 "Sessione asiatica mista con futures europei cauti. L'overnight di Wall Street riflette un riposizionamento "
                 "in attesa dei catalizzatori macroeconomici e delle decisioni sui tassi. Focus sui titoli tech ed energia."
             )
-        else:
+        elif slot == "afternoon":
             macro_comment = (
                 "Borse europee a metà seduta con scambi selettivi. I futures statunitensi indicano un'apertura guardinga "
                 "in vista dei dati macro pomeridiani su mercato del lavoro ed inflazione."
+            )
+        elif slot == "evening":
+            macro_comment = (
+                "Borse europee chiuse in territorio misto. Wall Street chiude la sessione settimanale assorbendo "
+                "i dati sul mercato del lavoro e le tensioni sui titoli tecnologici e tassi d'interesse."
+            )
+        else:
+            macro_comment = (
+                "Fase di contrattazioni notturne a volumi ridotti. Mercati azionari chiusi, focus sui mercati asiatici "
+                "e sugli scambi continui delle principali criptovalute."
             )
 
     # Format top breaking real-time news with exact timestamps for transparency
@@ -352,12 +384,26 @@ async def briefing_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     ACTIVE_CHAT_IDS.add(user_id)
     
-    # Determina automaticamente lo slot orario in base al fuso orario di Roma
+    # Determina automaticamente la fase di mercato e l'orario attuale esatto
     now_rome = datetime.now(ZoneInfo("Europe/Rome"))
-    slot = "morning" if now_rome.hour < 12 else "afternoon"
-    slot_label = "del mattino (ultime 12 ore)" if slot == "morning" else "del pomeriggio (pre-apertura USA)"
+    h = now_rome.hour
+    m = now_rome.minute
+    cur_time = now_rome.strftime("%H:%M")
 
-    await update.message.reply_text(f"☕ *Sto elaborando il briefing {slot_label} con dati aggiornati e memoria storica in Euro...*", parse_mode="Markdown")
+    if 6 <= h < 12:
+        slot = "morning"
+        slot_label = f"del mattino (ore {cur_time} CET)"
+    elif 12 <= h < 17 or (h == 17 and m < 30):
+        slot = "afternoon"
+        slot_label = f"del pomeriggio (ore {cur_time} CET)"
+    elif (h == 17 and m >= 30) or (18 <= h <= 22):
+        slot = "evening"
+        slot_label = f"serale di chiusura (ore {cur_time} CET)"
+    else:
+        slot = "night"
+        slot_label = f"notturno / overnight (ore {cur_time} CET)"
+
+    await update.message.reply_text(f"📊 *Sto elaborando l'aggiornamento attuale ({slot_label}) con quotazioni live in Euro e breaking news...*", parse_mode="Markdown")
     
     full_reply = await build_macro_briefing(slot=slot)
     await send_safe_text(update, full_reply)
@@ -1110,6 +1156,13 @@ async def post_init(application):
             CronTrigger(hour=15, minute=0, timezone="Europe/Rome"),
             args=[application, "afternoon"],
             id="afternoon_briefing_1500",
+            replace_existing=True
+        )
+        scheduler.add_job(
+            send_scheduled_briefing,
+            CronTrigger(hour=21, minute=30, timezone="Europe/Rome"),
+            args=[application, "evening"],
+            id="evening_briefing_2130",
             replace_existing=True
         )
         scheduler.start()
