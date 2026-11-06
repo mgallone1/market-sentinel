@@ -118,11 +118,13 @@ Restituisci ESCLUSIVAMENTE un JSON valido:
                 news_details.append(f"• Titolo: {t_str}\n  Dettaglio: {s_str}")
         news_block_text = "\n".join(news_details) if news_details else "Nessuna notizia recente rilevante."
 
+        now_str = self._get_current_time_str()
         mem_block = f"\nContesto e decisioni precedenti dell'utente negli ultimi 7-30 giorni:\n{memory_context}\n" if memory_context else ""
 
         prompt = f"""
 Sei un Senior Investment Strategist e Portfolio Manager.
-Il tuo obiettivo è spiegare in modo chiaro, fluido e colloquiale MA professionale cosa sta succedendo ORA allo strumento {fund_data.get('short_name', ticker)} ({ticker}).
+DATA E ORA ATTUALE DI RIFERIMENTO: {now_str}.
+Il tuo obiettivo è spiegare in modo chiaro, asciutto, analitico, istituzionale e professionale cosa sta succedendo ORA allo strumento {fund_data.get('short_name', ticker)} ({ticker}).
 {mem_block}
 DATI FONDAMENTALI & PREZZO:
 - Prezzo Attuale in Euro: {pred_data.get('current_price_eur')} €
@@ -133,11 +135,12 @@ DATI FONDAMENTALI & PREZZO:
 - Consiglio del ciclo: {cycle_data.get('consiglio_pratico', '')}
 - Mancano circa ~{cycle_data.get('candele_al_minimo', 'N/D')} sedute al minimo ciclico
 
-LINEE GUIDA DI RISPOSTA:
-1. Spiega con parole semplici la CAUSA REALE del movimento odierno (cosa sta succedendo a Wall Street, perché gli investitori vendono o comprano, news aziendali o correlazioni macro). Se è una crypto (es. Bitcoin), spiega la correlazione con la fuga dal rischio su Wall Street e il deleveraging.
-2. Spiega in un breve paragrafo dove ci troviamo nel ciclo attuale e se ha senso aspettare o prepararsi all'acquisto.
-3. Mantieni un tono rassicurante, posato, lucido ed elegante. Niente tecnicismi astrusi come 'matrice browniana', 'Itô' o '2-sigma' (quelli andranno nel deep dive tecnico).
-4. Tutte le cifre RIGOROSAMENTE in Euro (€).
+LINEE GUIDA RIGOROSE DI RISPOSTA:
+1. DIVIETO ASSOLUTO DI APERTURE COLLOQUIALI, PATERNALISTICHE O AFFETTATE: NON usare MAI formule come 'Caro amico', 'Mettiamoci comodi', 'Mio caro', 'Entriamo nel vivo/merito'. Inizia DIRETTAMENTE con l'analisi dei fatti e dei dati.
+2. Spiega con chiarezza e rigore analitico la CAUSA REALE del movimento odierno (dinamiche di Wall Street, macro, trimestrali, correlazioni). Se è una crypto (es. Bitcoin), spiega la correlazione con la liquidità istituzionale, il VIX e i tassi USA.
+3. Spiega in un breve paragrafo dove ci troviamo nel ciclo attuale e se ha senso attendere o impostare un ordine limite.
+4. Tono sobrio, istituzionale, posato, privo di enfasi teatrale o formule paternalistiche.
+5. Tutte le cifre RIGOROSAMENTE in Euro (€).
 """
         return self._call_gemini(prompt)
 
@@ -222,6 +225,7 @@ LINEE GUIDA DI COMPOSIZIONE (OBBLIGATORIE):
 - Per le AZIONI spiega le cause specifiche (es. M&A, diluizioni azionarie, trimestrali, tassi e colli di bottiglia energetici dei Data Center AI).
 - Spiega in parole semplici cosa significano insieme i numeri: ad esempio come la discesa fondamentale si incastra con l'Onda correttiva di Elliott e il minimo del ciclo di Hurst/Migliorino.
 - Spiega PERCHÉ è fondamentale impostare un ORDINE LIMITE scontato (es. sui supporti statistici dell'intervallo 1-Sigma di Monte Carlo) invece di comprare a mercato: mostra come l'ordine limite abbatte il rischio e fa schizzare il rapporto Rischio/Rendimento (Risk/Reward) a livelli vantaggiosi (es. da 1:0.8 a mercato a oltre 1:2.5 o 1:3 con limite).
+- DIVIETO ASSOLUTO DI APERTURE COLLOQUIALI, PATERNALISTICHE O AFFETTATE: Non usare MAI formule come 'Caro amico', 'Mettiamoci comodi', 'Mio caro', 'Entriamo subito nel merito'. Inizia DIRETTAMENTE con il quadro oggettivo, i dati e i livelli tecnici.
 - ANCORAGGIO TEMPORALE E FATTUALE: Siamo a {now_str}. È severamente vietato inventare o citare notizie e crolli del passato (come il rilascio di DeepSeek del gennaio 2025 o vecchi sell-off storici) attribuendoli a oggi. Se non ci sono notizie specifiche recenti nei dati forniti, spiega l'andamento basandoti rigorosamente sulla pura dinamica tecnica dei prezzi, sui flussi macro (tassi ^TNX, VIX, dollaro) e sui cicli.
 - Tono: Istituzionale, didattico, posato, lucido, autorevole ma accessibile e privo di melodrammi.
 - Tutte le cifre RIGOROSAMENTE in Euro (€).
@@ -342,9 +346,11 @@ LINEE GUIDA RIGOROSE:
    - Siamo a {now_str}. Sii trasparente e accurato sulle date degli eventi.
    - Non confondere mai eventi del passato della tua base di conoscenza pregressa (come DeepSeek R1 uscito a gennaio 2025) con i movimenti odierni di mercato.
    - Se l'utente ti chiede spiegazioni su una notizia o un evento, specifica sempre chiaramente quando è accaduto realmente e non spacciare eventi datati come spiegazioni dei movimenti di oggi.
-2. STILE:
-   - Registro sobrio, istituzionale, posato, privo di enfasi teatrale o allarmismo.
-   - Se la domanda riguarda i cicli, Hurst o Migliorino, spiega la logica teorica e applicativa con rigore (conteggio barre, Battleplan, vincoli ciclici, FLD).
+2. STILE E REGISTRO ISTITUZIONALE:
+   - DIVIETO CATEGORICO DI APERTURE COLLOQUIALI, PATERNALISTICHE O AFFETTATE: VIETATO iniziare con "Caro amico", "Mettiamoci comodi", "Caro investitore", "Entriamo subito nel vivo/merito", "Capisco perfettamente la tua curiosità", o salamelecchi analoghi.
+   - Inizia SUBITO e DIRETTAMENTE con la risposta analitica, oggettiva, chiara, priva di preamboli o convenevoli.
+   - Tono da Senior Portfolio Manager e CIO: lucido, asciutto, autorevole, analitico, rispettoso del tempo dell'interlocutore.
+   - Zero enfasi melodrammatica, zero allarmismo, zero padding.
 3. Prezzi sempre in Euro (€).
 """
         return self._call_gemini(prompt)
