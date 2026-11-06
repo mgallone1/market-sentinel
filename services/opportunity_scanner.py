@@ -47,12 +47,13 @@ class OpportunityScannerService:
                 continue
 
             fund = MarketDataService.get_ticker_fundamentals(ticker)
-            is_usd = fund.get("currency", "USD").upper() == "USD"
-            rate = eur_rate if is_usd else 1.0
+            is_eur = MarketDataService.is_euro_asset(ticker, fund)
+            is_usd = not is_eur
+            rate = 1.0 if is_eur else eur_rate
 
             df_tech = TechnicalAnalysisService.calculate_indicators(df)
             tech_sum = TechnicalAnalysisService.get_latest_technical_summary(df_tech)
-            pred = PredictiveTradingEngine.generate_prediction_and_trade_plan(df, ticker, currency="USD" if is_usd else "EUR")
+            pred = PredictiveTradingEngine.generate_prediction_and_trade_plan(df, ticker, currency="EUR" if is_eur else "USD")
 
             price_eur = tech_sum.get("current_price", 0.0) / rate
             rsi = tech_sum.get("rsi", 50.0) or 50.0
