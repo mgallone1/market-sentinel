@@ -53,11 +53,26 @@ ACTIVE_CHAT_IDS: Set[int] = set()
 
 # Mappa alias titoli comuni
 TICKER_MAP = {
-    "XDWD": "XDWD.DE",
+    # ETF World e Momentum negoziati su Trade Republic (Xetra/Francoforte in Euro)
+    "IWMO": "XDEM.DE",
+    "IWMO.L": "XDEM.DE",
     "XDEM": "XDEM.DE",
-    "MSCI WORLD MOMENTUM": "XDEM.DE",
-    "MSCI WORLD": "XDWD.DE",
+    "XDEM.DE": "XDEM.DE",
     "MOMENTUM": "XDEM.DE",
+    "MSCI WORLD MOMENTUM": "XDEM.DE",
+    "URTH": "XDWD.DE",
+    "EUNL": "XDWD.DE",
+    "EUNL.DE": "XDWD.DE",
+    "XDWD": "XDWD.DE",
+    "XDWD.DE": "XDWD.DE",
+    "MSCI WORLD": "XDWD.DE",
+    # BYD Company (Auto Elettriche - quotata a Francoforte / Trade Republic in Euro)
+    "BYD": "BY6.F",
+    "BY6": "BY6.F",
+    "BY6.F": "BY6.F",
+    "BYD COMPANY": "BY6.F",
+    "BYD AUTO": "BY6.F",
+    # Big Tech USA
     "NVIDIA": "NVDA",
     "NVDA": "NVDA",
     "TESLA": "TSLA",
@@ -83,6 +98,9 @@ TICKER_MAP = {
     "QUALCOMM": "QCOM",
     "QCOM": "QCOM",
     "ARM": "ARM",
+    "LILLY": "LLY",
+    "ELI LILLY": "LLY",
+    "LLY": "LLY",
     "UNICREDIT": "UCG.MI",
     "UCG": "UCG.MI",
     "INTESA": "ISP.MI",
@@ -91,10 +109,6 @@ TICKER_MAP = {
     "RACE": "RACE.MI",
     "STELLANTIS": "STLAM.MI",
     "ENI": "ENI.MI",
-    # BYD Company (Auto Elettriche - quotata a Francoforte / Trade Republic)
-    "BYD": "BY6.F",
-    "BYD COMPANY": "BY6.F",
-    "BYD AUTO": "BY6.F",
     # Principali Criptovalute negoziabili su Trade Republic
     "BITCOIN": "BTC-EUR",
     "BTC": "BTC-EUR",
@@ -128,6 +142,9 @@ COMMON_WORDS = {
 
 def resolve_ticker(text: str) -> Optional[str]:
     cleaned = text.strip().upper()
+    if cleaned in TICKER_MAP:
+        return TICKER_MAP[cleaned]
+
     for name, sym in TICKER_MAP.items():
         if re.search(r"\b" + re.escape(name) + r"\b", cleaned):
             return sym
@@ -199,7 +216,8 @@ async def build_macro_briefing(slot: str = "morning") -> str:
         ("S&P 500 (SPY)", "SPY"),
         ("Nasdaq 100 (QQQ)", "QQQ"),
         ("Semiconduttori (SMH)", "SMH"),
-        ("MSCI World (URTH)", "URTH"),
+        ("MSCI World Core (XDWD)", "XDWD.DE"),
+        ("MSCI World Momentum (XDEM)", "XDEM.DE"),
         ("Borsa Italiana (FTSE MIB)", "FTSEMIB.MI"),
         ("Bitcoin (BTC)", "BTC-EUR"),
         ("Oro (GLD)", "GLD")
@@ -222,7 +240,8 @@ async def build_macro_briefing(slot: str = "morning") -> str:
             q = MarketDataService.get_realtime_quote(sym)
             p = q.get("last_price", 0.0)
             c = q.get("change_pct", 0.0)
-            p_eur = p if ("MI" in sym or "EUR" in sym) else (p / eur_rate if eur_rate > 0 else p)
+            is_already_eur = "MI" in sym or "EUR" in sym or sym.endswith(".DE") or sym.endswith(".F")
+            p_eur = p if is_already_eur else (p / eur_rate if eur_rate > 0 else p)
             icon = "🟢" if c >= 0 else "🔴"
             header_lines.append(f"{icon} *{label}:* `{p_eur:.2f} €` (`{c:+.2f}%`)")
             indices_summary.append({
@@ -434,8 +453,8 @@ async def portfolio_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "Puoi registrare una posizione con il comando:\n"
             "`/add TICKER QUOTE PREZZO`\n\n"
             "Esempi:\n"
-            "• `/add URTH 30.054 131.89` (MSCI World)\n"
-            "• `/add IWMO.L 32.242 81.50` (Momentum)\n\n"
+            "• `/add XDWD.DE 30.054 131.89` (MSCI World)\n"
+            "• `/add XDEM.DE 32.242 81.50` (Momentum)\n\n"
             "Oppure mandami direttamente lo screenshot da Trade Republic!",
             parse_mode="Markdown"
         )
@@ -454,9 +473,11 @@ async def portfolio_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         quote = MarketDataService.get_realtime_quote(ticker)
         raw_price = quote.get("last_price") or pmc
         
-        # Converte in Euro se il ticker è quotato in USD
+        # Converte in Euro solo se il ticker è nativamente quotato in USD
         fund = MarketDataService.get_ticker_fundamentals(ticker)
-        current_price_eur = raw_price / eur_rate if fund.get("currency", "USD").upper() == "USD" else raw_price
+        is_already_eur = ticker.endswith(".DE") or ticker.endswith(".F") or ticker.endswith(".MI") or ticker.endswith("-EUR")
+        is_usd = fund.get("currency", "USD").upper() == "USD" and not is_already_eur
+        current_price_eur = raw_price / eur_rate if is_usd else raw_price
         
         invested_val = shares * pmc
         current_val = shares * current_price_eur
@@ -492,7 +513,8 @@ async def add_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if len(args) < 3:
         await update.message.reply_text(
             "Uso: `/add TICKER QUOTE PREZZO`\n"
-            "Es: `/add URTH 30.05 131.89`",
+            "Es: `/add XDWD.DE 30.05 131.89`\n"
+            "Oppure: `/add XDEM.DE 32.24 81.50`",
             parse_mode="Markdown"
         )
         return
