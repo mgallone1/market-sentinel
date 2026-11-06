@@ -296,7 +296,52 @@ async def build_macro_briefing(slot: str = "morning") -> str:
                 "in vista dei dati macro pomeridiani su mercato del lavoro ed inflazione."
             )
 
-    full_reply = "\n".join(header_lines) + "\n\n" + macro_comment
+    # Format top breaking real-time news with exact timestamps for transparency
+    news_display_lines = ["\n⚡ *BREAKING NEWS IN TEMPO REALE (ULTIME ORE):*"]
+    displayed_items = []
+    seen_titles = set()
+    for item in (squawk_news + google_fast_news + institutional_news):
+        raw_title = item.get("title", "").replace("|FJ", "").strip()
+        clean_title = raw_title.replace("*", "").replace("`", "").replace("_", " ")
+        if not clean_title or clean_title.lower() in seen_titles:
+            continue
+        seen_titles.add(clean_title.lower())
+        pub = item.get("published", "")
+        time_str = "Ultime ore"
+        if len(pub) >= 16 and ":" in pub:
+            time_str = pub[-5:] + " CET"
+        elif pub:
+            time_str = pub
+
+        src = item.get("source", "Wire")
+        if "financialjuice" in src.lower():
+            src = "Squawk Wire"
+        elif "google" in src.lower():
+            src = "Google Fast"
+        elif "forexlive" in src.lower():
+            src = "ForexLive"
+        elif "bloomberg" in src.lower():
+            src = "Bloomberg"
+        elif "cnbc" in src.lower():
+            src = "CNBC"
+        elif "guardian" in src.lower():
+            src = "The Guardian"
+
+        displayed_items.append(f"• 🔴 `[{time_str}]` *{src}:* {clean_title}")
+        if len(displayed_items) >= 4:
+            break
+
+    if displayed_items:
+        news_display_lines.extend(displayed_items)
+    else:
+        news_display_lines.append("• ⚪ *Wire:* Nessun breaking news straordinario nelle ultime ore.")
+
+    full_reply = (
+        "\n".join(header_lines) + "\n" +
+        "\n".join(news_display_lines) + "\n\n" +
+        "🧭 *ANALISI STRATEGICA & CATALYST DI MERCATO:*\n" +
+        macro_comment
+    )
 
     # Salva il briefing appena generato nel database per memoria del briefing successivo
     supabase_svc.save_latest_macro_briefing(slot=slot, briefing_text=macro_comment)
