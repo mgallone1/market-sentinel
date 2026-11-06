@@ -8,7 +8,7 @@ analisi macro e visione artificiale per screenshot di Trade Republic.
 import os
 import json
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 from zoneinfo import ZoneInfo
 from datetime import datetime
 from dotenv import load_dotenv
@@ -377,5 +377,55 @@ LINEE GUIDA RIGOROSE:
    - Tono da Senior Portfolio Manager e CIO: lucido, asciutto, autorevole, analitico, rispettoso del tempo dell'interlocutore.
    - Zero enfasi melodrammatica, zero allarmismo, zero padding.
 3. Prezzi sempre in Euro (€).
+"""
+        return self._call_gemini(prompt)
+
+    def generate_detailed_opportunities_report(
+        self,
+        opportunities: List[Dict[str, Any]]
+    ) -> str:
+        """
+        Genera un report approfondito e discorsivo per le 10 migliori occasioni di mercato.
+        Per ciascuno strumento analizza in modo discorsivo il PERCHÉ è un'occasione,
+        la tesi fondamentale/macro, l'asimmetria tecnica quantitativa e la condotta operativa su Trade Republic.
+        """
+        if not self.client or not opportunities:
+            return ""
+
+        now_str = self._get_current_time_str()
+        
+        items_text = []
+        for i, o in enumerate(opportunities, 1):
+            tr_part = f" (Trade Republic L&S: Bid {o.get('tr_bid')} € / Ask {o.get('tr_ask')} €)" if o.get('tr_bid') else ""
+            items_text.append(
+                f"{i}. {o['name']} ({o['ticker']}):\n"
+                f"   - Prezzo: {o['price_eur']} €{tr_part} | Variazione odierna: {o.get('change_pct', 0.0):+.2f}%\n"
+                f"   - RSI (14): {o.get('rsi')} | Z-Score (distanza da SMA20): {o.get('z_score')}\n"
+                f"   - Probabilità Rimbalzo Statistico: {o.get('rebound_prob')}\n"
+                f"   - Target TP1: {o.get('tp1_eur')} € | Stop Loss: {o.get('sl_eur')} € | Rapporto R:R: {o.get('rr_ratio')}\n"
+                f"   - Azione Algoritmica: {o.get('primary_action')}\n"
+            )
+        data_block = "\n".join(items_text)
+
+        prompt = f"""
+Sei il Chief Investment Officer (CIO) e Senior Quantitative Strategist.
+DATA E ORA ATTUALE: {now_str}.
+L'algoritmo quantitativo ha selezionato e ordinato le 10 migliori occasioni di mercato con il massimo sconto statistico e asimmetria favorevole:
+
+{data_block}
+
+COMPITO OBBLIGATORIO:
+Redigi il report strategico ufficiale '💎 TOP 10 MIGLIORI OCCASIONI DI MERCATO (APPROFONDIMENTO ESECUTIVO)'.
+Per TUTTI e 10 gli strumenti elencati sopra (senza saltarne alcuno, rigorosamente da 1 a 10), devi fornire una scheda dettagliata e un APPROFONDIMENTO DISCORSIVO (un paragrafo denso e articolato di 3-4 frasi per ciascuno) che spieghi con chiarezza:
+1. *Perché è un'occasione reale:* Quale catalyst macro, settoriale o societario ha creato la discesa (es. rotazione dai titoli growth, sell-off tecnologico, colli di bottiglia energetici, reazione a tassi o flussi ETF) e perché i fondamentali non giustificano questo sconto.
+2. *Asimmetria Tecnica & Statistica:* Spiega cosa significa il livello di RSI e Z-Score (es. distanza dalla media a 20 sedute, probabilità di rimbalzo statistico / mean reversion).
+3. *Guida Tattica su Trade Republic:* Suggerisci l'approccio migliore (uso dell'Ordine Limite qualche frazione sotto mercato per proteggersi dallo spread di Lang & Schwarz, orizzonte temporale, livello di Take Profit e Stop Loss).
+
+LINEE GUIDA RIGOROSE:
+- DIVIETO ASSOLUTO DI APERTURE O CHIUSURE COLLOQUIALI ('Caro amico', 'Mettiamoci comodi', 'Mio caro', 'Entriamo nel vivo'). Inizia DIRETTAMENTE con il report.
+- ANCORAGGIO TEMPORALE REALE: Siamo a {now_str}. È tassativamente vietato citare anni passati (2025, 2024) per giustificare i movimenti di oggi.
+- Tutte le quotazioni RIGOROSAMENTE in Euro (€).
+- Per ciascuno dei 10 strumenti mantieni la numerazione (1, 2, 3... 10), il nome, il ticker, i prezzi in Euro e il paragrafo di approfondimento discorsivo '📝 Perché è un'occasione:'.
+- Mantieni una formattazione Markdown ordinata con elenchi puntati e grassetti per rendere la lettura chiara e piacevole su Telegram.
 """
         return self._call_gemini(prompt)
