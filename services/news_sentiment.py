@@ -6,6 +6,8 @@ finanziario specialistico (Earnings, Guidance, Upgrades, Downgrades, etc.).
 
 import feedparser
 import re
+import time
+from datetime import datetime
 from typing import List, Dict, Any
 
 # Lessico finanziario ponderato
@@ -86,10 +88,12 @@ class NewsSentimentService:
     @classmethod
     def fetch_global_rss_news(cls, feeds: List[str], max_per_feed: int = 5) -> List[Dict[str, Any]]:
         """
-        Scarica breaking news finanziarie e geopolitiche da feed RSS globali (WSJ, Bloomberg, CNBC, CoinDesk).
-        Include titolo, sommario/descrizione estesa e fonte editoriale.
+        Scarica breaking news finanziarie e geopolitiche da feed RSS globali verificati.
+        Include filtro temporale rigido (scarta notizie con più di 48 ore di anzianità o nel passato).
         """
         all_news = []
+        now_ts = time.time()
+
         for url in feeds:
             try:
                 parsed = feedparser.parse(url)
@@ -100,14 +104,28 @@ class NewsSentimentService:
                     # Pulizia da tag HTML grezzi nel sommario
                     clean_summary = re.sub(r"<[^>]+>", "", summary).strip()
                     link = entry.get("link", "#")
-                    pub = entry.get("published", "")
+
+                    # Validazione temporale rigorosa (anti-allucinazione da feed obsoleti)
+                    parsed_time = entry.get("published_parsed")
+                    pub_str = ""
+                    if parsed_time:
+                        pub_ts = time.mktime(parsed_time)
+                        age_hours = (now_ts - pub_ts) / 3600.0
+                        if age_hours > 48.0 or age_hours < -5.0:
+                            # Notizia obsoleta (vecchia di giorni/anni): scarta assolutamente
+                            continue
+                        dt = datetime.fromtimestamp(pub_ts)
+                        pub_str = dt.strftime("%d/%m/%Y %H:%M")
+                    else:
+                        pub_str = entry.get("published", "")[:25]
+
                     sentiment = cls.analyze_text(title)
                     if title:
                         all_news.append({
                             "title": title,
                             "summary": clean_summary[:300],
                             "link": link,
-                            "published": pub,
+                            "published": pub_str,
                             "source": source_name,
                             "sentiment": sentiment
                         })
