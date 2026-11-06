@@ -233,9 +233,19 @@ async def build_macro_briefing(slot: str = "morning") -> str:
         except Exception as e:
             print(f"[!] Errore recupero {sym}: {e}")
 
-    # Raccogli feed RSS globali e geopolitici (WSJ, Bloomberg, CNBC, BBC, CoinDesk)
-    from config import RSS_NEWS_FEEDS
-    global_news = NewsSentimentService.fetch_global_rss_news(RSS_NEWS_FEEDS, max_per_feed=3)
+    # Raccogli flussi ultra-rapidi: Squawk Telegram + Google News Realtime + Feed Istituzionali
+    from config import RSS_NEWS_FEEDS, FAST_SQUAWK_CHANNELS
+    
+    # 1. Breaking Squawk in tempo reale sub-minuto (FinancialJuice terminal stream)
+    squawk_news = NewsSentimentService.fetch_telegram_squawk_news(FAST_SQUAWK_CHANNELS, max_items_per_channel=5)
+    
+    # 2. Google News Real-Time (notizie ad altissima frequenza emerse nelle ultime 4 ore)
+    google_fast_news = NewsSentimentService.fetch_google_realtime_news("stock market breaking news when:4h", max_items=4)
+    
+    # 3. Feed RSS Istituzionali verificati (ForexLive, Bloomberg, CNBC, BBC, etc.)
+    institutional_news = NewsSentimentService.fetch_global_rss_news(RSS_NEWS_FEEDS, max_per_feed=2)
+    
+    global_news = squawk_news + google_fast_news + institutional_news
     
     # News mirate sui principali leader di mercato
     for sym in ["NVDA", "SMH", "TSM"]:
@@ -708,6 +718,9 @@ async def _handle_text_message_core(update: Update, context: ContextTypes.DEFAUL
             df_tech = TechnicalAnalysisService.calculate_indicators(df_hist)
             pred = PredictiveTradingEngine.generate_prediction_and_trade_plan(df_hist, resolved, currency="USD" if is_usd else "EUR")
             news = MarketDataService.get_ticker_news(resolved, max_items=3)
+            # Breaking news mirate in tempo reale sul ticker (ultime 24-48 ore via Google News Real-time)
+            fast_ticker_news = NewsSentimentService.fetch_ticker_breaking_news(resolved, max_items=3)
+            news = (fast_ticker_news or []) + (news or [])
 
             # Ingestione Intelligente News: Ticker specifico + Contesto Macro/Politico Globale
             is_crypto = "-EUR" in resolved or "-USD" in resolved or resolved in ["BTC", "ETH", "SOL", "XRP", "ADA"]
