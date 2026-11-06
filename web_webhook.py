@@ -49,10 +49,7 @@ async def main():
     app.add_handler(MessageHandler(filters.PHOTO, telegram_bot.handle_photo))
     app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), telegram_bot.handle_text_message))
 
-    scheduler = BackgroundScheduler()
-    scheduler.start()
-
-    print("🤖 Bot Telegram avviato in modalità 24/7 con server HTTP attivo...")
+    print("🤖 Bot Telegram avviato in modalità 24/7 con server HTTP attivo e scheduler ore 07:00 / 15:00 CET...")
     async with app:
         await app.start()
         await app.updater.start_polling()
