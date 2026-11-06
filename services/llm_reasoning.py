@@ -298,10 +298,28 @@ Analizza questa immagine inviata dall'utente:
 
         prev_block = f"\nCOSA AVEVI DETTO NEL BRIEFING PRECEDENTE (DA RICORDARE E COLLEGARE):\n{previous_briefing_context}\n" if previous_briefing_context else ""
 
+        now_dt = datetime.now(ZoneInfo("Europe/Rome"))
+        cur_hhmm = now_dt.strftime("%H:%M")
         if slot == "morning":
-            time_focus = "BRIEFING DEL MATTINO (ORE 07:00 CET): Sintesi ragionata e densa delle ultime 12 ore (sessione asiatica, chiusura notturna USA, futures europei e catalyst geopolitici prima dell'apertura)."
+            time_focus = (
+                f"FASCIA ORARIA: MATTINO (ORE {cur_hhmm} CET). "
+                "Sintesi ragionata e densa delle ultime 12 ore: chiusura sessione asiatica, overnight USA, futures europei e catalizzatori in apertura borse europee (ore 09:00 CET)."
+            )
+        elif slot == "afternoon":
+            time_focus = (
+                f"FASCIA ORARIA: POMERIGGIO (ORE {cur_hhmm} CET). "
+                "Sintesi delle contrattazioni europee a metà seduta, dati macro USA (ore 14:30) e sessione attiva di Wall Street."
+            )
+        elif slot == "evening":
+            time_focus = (
+                f"FASCIA ORARIA: SERA / CHIUSURA MERCATI (ORE {cur_hhmm} CET). "
+                "Borse europee CHIUSE (alle 17:30 CET). Focus su: andamento e chiusura di Wall Street (ore 22:00 CET), bilancio giornaliero definitivo, flussi crypto e prospettive per la seduta successiva."
+            )
         else:
-            time_focus = "BRIEFING DEL POMERIGGIO (ORE 15:00 CET): Sintesi delle ultime ore di contrattazione europea, dati macro USA pomeridiani (jobless claims/inflazione) e posizionamento per l'apertura di Wall Street delle 15:30."
+            time_focus = (
+                f"FASCIA ORARIA: NOTTE / OVERNIGHT (ORE {cur_hhmm} CET). "
+                "Mercati azionari occidentali chiusi. Focus su: bilancio finale di Wall Street, futures notturni, crypto 24/7 e prime indicazioni dall'Asia."
+            )
 
         prompt = f"""
 Sei il Chief Investment Officer (CIO) e Senior Market Strategist.
