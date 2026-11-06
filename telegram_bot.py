@@ -651,13 +651,23 @@ async def _handle_text_message_core(update: Update, context: ContextTypes.DEFAUL
             pred = PredictiveTradingEngine.generate_prediction_and_trade_plan(df_hist, resolved, currency="USD" if is_usd else "EUR")
             news = MarketDataService.get_ticker_news(resolved, max_items=3)
 
-            # Se il ticker è una crypto o non ha news specifiche, recupera le breaking news macro di mercato
+            # Ingestione Intelligente News: Ticker specifico + Contesto Macro/Politico Globale
             is_crypto = "-EUR" in resolved or "-USD" in resolved or resolved in ["BTC", "ETH", "SOL", "XRP", "ADA"]
             from config import RSS_NEWS_FEEDS
-            macro_rss_news = NewsSentimentService.fetch_global_rss_news(RSS_NEWS_FEEDS[:2], max_per_feed=2)
-            if is_crypto or len(news) < 2:
-                # Arricchisci le notizie con il contesto generale di Wall Street e macro
-                news = news + [{"title": m.get("title", ""), "summary": "Notizia macro / Wall Street del giorno."} for m in macro_rss_news]
+            
+            # Recupera breaking news di prima fascia (WSJ, Bloomberg, CNBC, CoinDesk)
+            target_feeds = RSS_NEWS_FEEDS[6:] if is_crypto else RSS_NEWS_FEEDS[:6]
+            macro_rss_news = NewsSentimentService.fetch_global_rss_news(target_feeds, max_per_feed=2)
+            
+            # Combina notizie societarie con il quadro geopolitico / Wall Street del momento
+            macro_formatted = [
+                {
+                    "title": f"[{m.get('source', 'Top Media')}] {m.get('title', '')}",
+                    "summary": m.get("summary", "")
+                }
+                for m in macro_rss_news[:3]
+            ]
+            news = (news or []) + macro_formatted
 
             # Analisi Struttura Ciclica, Hurst & Migliorino
             div_data = CycleAnalystService.detect_rsi_divergence(df_tech)
