@@ -55,7 +55,7 @@ class CycleRadarService:
             if df.empty or len(df) < 70:
                 continue
 
-            is_eur = ticker.endswith(".DE") or ticker.endswith(".MI") or ticker.endswith("-EUR") or ticker.endswith(".F")
+            is_eur = MarketDataService.is_euro_asset(ticker)
             rate = 1.0 if is_eur else eur_rate
 
             # 1. Modello Predittivo
