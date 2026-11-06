@@ -7,6 +7,9 @@ finanziario specialistico (Earnings, Guidance, Upgrades, Downgrades, etc.).
 import feedparser
 import re
 import time
+import html
+import urllib.request
+import urllib.parse
 from datetime import datetime
 from typing import List, Dict, Any
 
@@ -132,3 +135,110 @@ class NewsSentimentService:
             except Exception as e:
                 print(f"[NewsSentimentService] Errore RSS {url}: {e}")
         return all_news
+
+    @classmethod
+    def fetch_telegram_squawk_news(cls, channels: List[str] = None, max_items_per_channel: int = 6) -> List[Dict[str, Any]]:
+        """
+        Scarica breaking news sub-minuto dai canali pubblici di Financial Squawk (FinancialJuice, etc.).
+        Estrae le ultime headline flash dei terminali senza ritardo e con sentiment score.
+        """
+        if not channels:
+            channels = ["financialjuice"]
+
+        squawk_items = []
+        now_ts = time.time()
+
+        for ch in channels:
+            url = f"https://t.me/s/{ch}"
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
+            try:
+                with urllib.request.urlopen(req, timeout=6) as resp:
+                    content = resp.read().decode("utf-8", errors="ignore")
+                    raw_blocks = re.findall(
+                        r'<div class="tgme_widget_message_wrap[^>]*>.*?<time datetime="([^"]+)".*?<div class="tgme_widget_message_text[^>]*>(.*?)</div>',
+                        content,
+                        re.DOTALL
+                    )
+                    for dt_str, text_html in raw_blocks[-max_items_per_channel:]:
+                        clean_text = re.sub(r"<[^>]+>", "", text_html)
+                        clean_text = html.unescape(clean_text).strip()
+                        if not clean_text:
+                            continue
+
+                        # Parsing timestamp ISO (es. 2026-11-06T19:41:41+00:00)
+                        try:
+                            # Filtro: controlla se recente (meno di 24h)
+                            dt_obj = datetime.fromisoformat(dt_str.replace("Z", "+00:00"))
+                            pub_formatted = dt_obj.strftime("%d/%m/%Y %H:%M")
+                            age_hours = (now_ts - dt_obj.timestamp()) / 3600.0
+                            if age_hours > 24.0:
+                                continue
+                        except Exception:
+                            pub_formatted = dt_str[:16]
+
+                        sentiment = cls.analyze_text(clean_text)
+                        squawk_items.append({
+                            "title": clean_text[:140],
+                            "summary": clean_text,
+                            "link": f"https://t.me/{ch}",
+                            "published": pub_formatted,
+                            "source": f"Squawk Wire (@{ch})",
+                            "sentiment": sentiment
+                        })
+            except Exception as e:
+                print(f"[NewsSentimentService] Errore lettura Squawk Telegram @{ch}: {e}")
+
+        return squawk_items
+
+    @classmethod
+    def fetch_google_realtime_news(cls, query: str = "stock market breaking news when:4h", max_items: int = 8) -> List[Dict[str, Any]]:
+        """
+        Interroga Google News in tempo reale per catturare articoli usciti nelle ultimissime ore.
+        """
+        encoded_query = urllib.parse.quote(query)
+        url = f"https://news.google.com/rss/search?q={encoded_query}&hl=en-US&gl=US&ceid=US:en"
+        items = []
+        now_ts = time.time()
+
+        try:
+            d = feedparser.parse(url)
+            for e in d.entries[:max_items]:
+                title = e.get("title", "").strip()
+                p = e.get("published_parsed")
+                pub_str = ""
+                if p:
+                    pub_ts = time.mktime(p)
+                    age_hours = (now_ts - pub_ts) / 3600.0
+                    if age_hours > 48.0 or age_hours < -5.0:
+                        continue
+                    dt = datetime.fromtimestamp(pub_ts)
+                    pub_str = dt.strftime("%d/%m/%Y %H:%M")
+                else:
+                    pub_str = e.get("published", "")[:25]
+
+                summary = e.get("summary", "")
+                clean_summary = re.sub(r"<[^>]+>", "", summary).strip()
+                source = e.get("source", {}).get("title", "Google Real-Time News")
+                sentiment = cls.analyze_text(title)
+
+                if title:
+                    items.append({
+                        "title": title,
+                        "summary": clean_summary[:250],
+                        "link": e.get("link", "#"),
+                        "published": pub_str,
+                        "source": source,
+                        "sentiment": sentiment
+                    })
+        except Exception as e:
+            print(f"[NewsSentimentService] Errore Google Realtime News: {e}")
+
+        return items
+
+    @classmethod
+    def fetch_ticker_breaking_news(cls, ticker: str, max_items: int = 5) -> List[Dict[str, Any]]:
+        """
+        Raccoglie breaking news mirate sul singolo ticker intercettando notizie delle ultime 24-48 ore.
+        """
+        query = f"{ticker} stock news when:2d"
+        return cls.fetch_google_realtime_news(query=query, max_items=max_items)
