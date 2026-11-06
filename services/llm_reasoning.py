@@ -63,20 +63,22 @@ Sei un classificatore di intenti finanziari avanzato. Analizza attentamente il m
 "{text}"
 
 DISTINZIONE CRITICA DEGLI INTENTI:
-1. "update_portfolio_ticker":
+1. "opportunities":
+   - Se l'utente chiede le migliori occasioni, opportunità di mercato, titoli a sconto statistico, idee di trading o cosa comprare (es. "le migliori occasioni", "quali sono le occasioni", "cosa comprare oggi", "titoli a sconto", "migliori opportunità", "occasioni").
+2. "update_portfolio_ticker":
    - Se l'utente chiede di correggere, cambiare, modificare o sostituire uno o più ticker nel portafoglio (es. "hai sbagliato i ticket dei due etf sono XDWD e XDEM", "aggiorna il portafoglio con i ticker giusti", "cambia il ticker di BYD in BY6.F", "sostituisci URTH con XDWD").
-2. "portfolio":
+3. "portfolio":
    - Se l'utente chiede di vedere il portafoglio o chiarimenti sui calcoli/numeri/controvalore mostrati senza specificare cambi di ticker (es. "mostra portafoglio", "ricontrolla i calcoli", "non si trovano i numeri").
-3. "ticker_analysis":
+4. "ticker_analysis":
    - Solo ed esclusivamente quando l'utente chiede una NUOVA analisi tecnica/fondamentale/ciclica di un'azione o crypto (es. "cosa ne pensi di Apple", "analizza Nvidia", "Marvell", "dimmi di Bitcoin").
-4. "market_overview":
-   - Se chiede cosa è successo sul mercato, news generali o il briefing (es. "cosa succede oggi in borsa", "briefing").
-5. "general_chat":
+5. "market_overview":
+   - Se chiede cosa è successo sul mercato in generale, news o il briefing (es. "cosa succede oggi in borsa", "briefing", "aggiornamento mercato").
+6. "general_chat":
    - Domande generiche, concettuali o saluti.
 
 Restituisci ESCLUSIVAMENTE un JSON valido:
 {{
-  "intent": "update_portfolio_ticker" | "portfolio" | "ticker_analysis" | "market_overview" | "general_chat",
+  "intent": "opportunities" | "update_portfolio_ticker" | "portfolio" | "ticker_analysis" | "market_overview" | "general_chat",
   "ticker": "SIMBOLO_TICKER" o null,
   "replacements": [
      {{"old_ticker_or_name": "...", "new_ticker": "..."}}
