@@ -27,6 +27,7 @@ DEFAULT_WATCHLISTS: Dict[str, List[str]] = {
 
 # Feed RSS Istituzionali Premium Verificati Live (Solo feed attivi in tempo reale)
 RSS_NEWS_FEEDS: List[str] = [
+    "https://www.forexlive.com/feed/news",                          # ForexLive: Fast Macro, Central Banks & Geopolitics
     "https://feeds.bloomberg.com/markets/news.rss",                 # Bloomberg Markets
     "https://feeds.content.dowjones.io/public/rss/mw_topstories",      # MarketWatch: Top Stories & Earnings
     "https://www.cnbc.com/id/10000664/device/rss/rss.html",          # CNBC: Finance & Central Banks
@@ -36,4 +37,9 @@ RSS_NEWS_FEEDS: List[str] = [
     "https://www.investing.com/rss/news_25.rss",                    # Investing.com: Stock Market News Live
     "https://cointelegraph.com/rss",                                 # Cointelegraph: Crypto & ETF Flows
     "https://www.coindesk.com/arc/outboundfeeds/rss/"                # CoinDesk: Global Digital Assets & Regulation
+]
+
+# Canali Social & Squawk ad altissima frequenza (aggiornamenti in secondi/minuti)
+FAST_SQUAWK_CHANNELS: List[str] = [
+    "financialjuice"                                                # Terminal Squawk Wire (Bloomberg/Reuters mirror)
 ]
