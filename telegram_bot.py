@@ -952,14 +952,29 @@ async def send_scheduled_briefing(app, slot: str):
         print(f"📡 [Scheduler] Invio a {len(chat_ids)} utenti registrati: {chat_ids}")
 
         for chat_id in chat_ids:
-            try:
-                await app.bot.send_message(chat_id=chat_id, text=briefing_text, parse_mode="Markdown")
-            except Exception as e_md:
-                print(f"[!] Fallback markdown briefing per chat_id {chat_id}: {e_md}")
+            chunks = []
+            if len(briefing_text) <= 3500:
+                chunks = [briefing_text]
+            else:
+                curr = ""
+                for p in briefing_text.split("\n\n"):
+                    if len(curr) + len(p) + 2 > 3500:
+                        if curr:
+                            chunks.append(curr)
+                        curr = p
+                    else:
+                        curr = (curr + "\n\n" + p) if curr else p
+                if curr:
+                    chunks.append(curr)
+
+            for chunk in chunks:
                 try:
-                    await app.bot.send_message(chat_id=chat_id, text=briefing_text)
-                except Exception as e_plain:
-                    print(f"[!] Errore invio briefing a {chat_id}: {e_plain}")
+                    await app.bot.send_message(chat_id=chat_id, text=chunk, parse_mode="Markdown")
+                except Exception:
+                    try:
+                        await app.bot.send_message(chat_id=chat_id, text=chunk)
+                    except Exception as e_plain:
+                        print(f"[!] Errore invio briefing a {chat_id}: {e_plain}")
             
             # Registra il briefing nella chat history per memoria
             try:
