@@ -21,8 +21,8 @@ class OrderSimulatorService:
             return {"error": f"Nessun dato per il ticker {ticker}"}
 
         fund = MarketDataService.get_ticker_fundamentals(ticker)
-        is_usd = fund.get("currency", "USD").upper() == "USD"
-        pred = PredictiveTradingEngine.generate_prediction_and_trade_plan(df, ticker, currency="USD" if is_usd else "EUR")
+        is_eur = MarketDataService.is_euro_asset(ticker, fund)
+        pred = PredictiveTradingEngine.generate_prediction_and_trade_plan(df, ticker, currency="EUR" if is_eur else "USD")
 
         price_eur = pred["current_price_eur"]
         tp1_eur = pred["take_profit_1_eur"]
