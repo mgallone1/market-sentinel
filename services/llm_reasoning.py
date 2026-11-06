@@ -250,7 +250,7 @@ Analizza questa immagine inviata dall'utente:
    {
       "is_position": true,
       "asset_name": "Nome strumento es. MSCI World Momentum",
-      "ticker_candidate": "Ticker o sigla presunta es. IWMO.L o URTH",
+      "ticker_candidate": "Ticker o sigla presunta es. XDEM.DE o XDWD.DE",
       "shares": 32.2419,
       "average_buy_price": 81.50,
       "total_value": 2393.64,
