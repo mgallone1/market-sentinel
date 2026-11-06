@@ -938,14 +938,25 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         )
         await send_safe_text(query, deep_dive_text)
 
+_last_briefing_sent: Dict[str, float] = {}
+
 # Funzione per inviare briefing automatici programmati (07:00 e 15:00 CET)
-async def send_scheduled_briefing(app, slot: str):
+async def send_scheduled_briefing(app, slot: str, force: bool = False):
     """
     Eroga il briefing programmato a tutti gli utenti attivi:
     - slot='morning' alle 07:00 CET (sintesi ultime 12 ore)
     - slot='afternoon' alle 15:00 CET (sintesi ultime ore e pre-apertura USA)
+    - Deduplicazione automatica entro 40 minuti per evitare doppi invii.
     """
-    print(f"⏰ [Scheduler] Esecuzione briefing programmato: slot={slot}...")
+    import time
+    now_ts = time.time()
+    last_sent = _last_briefing_sent.get(slot, 0)
+    if not force and (now_ts - last_sent < 2400):
+        print(f"⏩ [Scheduler] Briefing {slot} già inviato {int(now_ts - last_sent)}s fa. Deduplicato.")
+        return
+    _last_briefing_sent[slot] = now_ts
+
+    print(f"⏰ [Scheduler] Esecuzione briefing programmato: slot={slot} (force={force})...")
     try:
         briefing_text = await build_macro_briefing(slot=slot)
         chat_ids = supabase_svc.get_active_chat_ids()
