@@ -33,11 +33,12 @@ class PredictiveTradingEngine:
         data = df.copy()
         raw_price = float(data["Close"].iloc[-1])
         
-        # Tasso di conversione in Euro se la valuta nativa è USD
-        eur_rate = MarketDataService.get_eur_usd_rate() if currency.upper() == "USD" else 1.0
+        # Tasso di conversione in Euro: solo se lo strumento è in USD e NON è già in Euro
+        is_eur = (currency.upper() == "EUR") or MarketDataService.is_euro_asset(ticker)
+        eur_rate = 1.0 if is_eur else MarketDataService.get_eur_usd_rate()
         
         # Prezzo convertito in Euro (€)
-        current_price_eur = raw_price / eur_rate
+        current_price_eur = raw_price / eur_rate if eur_rate > 0 else raw_price
         
         # 1. Calcolo ATR e Volatilità Giornaliera (convertito in Euro)
         atr_series = cls.calculate_atr(data, 14)
