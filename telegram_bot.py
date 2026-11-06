@@ -29,7 +29,10 @@ from telegram.ext import (
     ContextTypes,
     filters
 )
-from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.cron import CronTrigger
+from zoneinfo import ZoneInfo
+from datetime import datetime
 
 from services.market_data import MarketDataService
 from services.technical_analysis import TechnicalAnalysisService
@@ -177,13 +180,19 @@ async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🎯 *Analisi Approfondita Titolo:* Scrivi semplicemente il nome o ticker (es. `NVIDIA`, `TSLA`, `TSMC`, `Marvell`) per ricevere una tesi discorsiva con livelli di ingresso, target e probabilità di rimbalzo in Euro.\n"
         "💎 *Opportunity Hunter:* Digita `/occasioni` per scansionare all'istante l'intero mercato e trovare i titoli a forte sconto statistico.\n"
         "🧮 *Simulatore Ordini Trade Republic:* Digita `/simula TICKER BUDGET` (es. `/simula TSM 500`) per calcolare quote esatte, prezzo limite consigliato e rischio in Euro.\n"
-        "🌅 *Briefing di Mercato:* Digita `/briefing` per il resoconto completo su Wall Street, Europa e i catalyst del giorno (attivo anche in automatico alle 08:30 e 15:35).\n"
+        "🌅 *Briefing di Mercato:* Digita `/briefing` per il resoconto completo su Wall Street, Europa e geopolitica (erogato in automatico alle **07:00** e **15:00 CET** con continuità di memoria storica).\n"
         "💼 *Portafoglio:* Digita `/portafoglio` o mandami uno screenshot per vedere il riepilogo in tempo reale."
     )
     await update.message.reply_text(msg, parse_mode="Markdown")
 
-async def briefing_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("☕ *Sto elaborando il quadro macro, i dati politici e le news sui mercati in Euro...*", parse_mode="Markdown")
+async def build_macro_briefing(slot: str = "morning") -> str:
+    """
+    Costruisce il briefing macro e geopolitico:
+    - slot="morning" (07:00 CET): Sintesi ultime 12 ore (Asia, chiusura Wall Street, futures UE, driver geopolitici).
+    - slot="afternoon" (15:00 CET): Sintesi ultime ore (seduta UE, macro USA jobless/CPI, pre-market Wall Street).
+    - Mantiene memoria del briefing precedente tramite Supabase.
+    - Prezzi espressi rigorosamente in Euro (€).
+    """
     eur_rate = MarketDataService.get_eur_usd_rate()
     
     indices = [
@@ -191,48 +200,97 @@ async def briefing_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ("Nasdaq 100 (QQQ)", "QQQ"),
         ("Semiconduttori (SMH)", "SMH"),
         ("MSCI World (URTH)", "URTH"),
-        ("Borsa Italiana (FTSE MIB)", "FTSEMIB.MI")
+        ("Borsa Italiana (FTSE MIB)", "FTSEMIB.MI"),
+        ("Bitcoin (BTC)", "BTC-EUR"),
+        ("Oro (GLD)", "GLD")
     ]
     
     indices_summary = []
+    if slot == "morning":
+        title_header = "🌅 *BRIEFING MATTINO (ORE 07:00 CET) - SINTESI ULTIME 12 ORE*"
+    else:
+        title_header = "☕ *BRIEFING POMERIGGIO (ORE 15:00 CET) - PRE-APERTURA WALL STREET*"
+
     header_lines = [
-        "🌅 *QUADRO DI MERCATO & MACRO BRIEFING IN TEMPO REALE*\n",
+        title_header + "\n",
         f"💶 *Tasso di Cambio EUR/USD:* `1.00 € = {eur_rate:.4f} $`\n",
-        "📊 *Indici Principali (in Euro):*"
+        "📊 *Indici & Asset Chiave (in Euro):*"
     ]
 
     for label, sym in indices:
-        q = MarketDataService.get_realtime_quote(sym)
-        p = q.get("last_price", 0.0)
-        c = q.get("change_pct", 0.0)
-        p_eur = p / eur_rate if "MI" not in sym else p
-        icon = "🟢" if c >= 0 else "🔴"
-        header_lines.append(f"{icon} *{label}:* `{p_eur:.2f} €` (`{c:+.2f}%`)")
-        indices_summary.append({
-            "label": label,
-            "price_eur": round(p_eur, 2),
-            "change": round(c, 2)
-        })
+        try:
+            q = MarketDataService.get_realtime_quote(sym)
+            p = q.get("last_price", 0.0)
+            c = q.get("change_pct", 0.0)
+            p_eur = p if ("MI" in sym or "EUR" in sym) else (p / eur_rate if eur_rate > 0 else p)
+            icon = "🟢" if c >= 0 else "🔴"
+            header_lines.append(f"{icon} *{label}:* `{p_eur:.2f} €` (`{c:+.2f}%`)")
+            indices_summary.append({
+                "label": label,
+                "price_eur": round(p_eur, 2),
+                "change": round(c, 2)
+            })
+        except Exception as e:
+            print(f"[!] Errore recupero {sym}: {e}")
 
-    # Raccogli le ultime news internazionali
+    # Raccogli feed RSS globali e geopolitici (WSJ, Bloomberg, CNBC, BBC, CoinDesk)
     from config import RSS_NEWS_FEEDS
-    global_news = NewsSentimentService.fetch_global_rss_news(RSS_NEWS_FEEDS, max_per_feed=4)
-    # Aggiungi news dei ticker leader
-    for sym in ["NVDA", "SMH", "MRVL"]:
-        tk_news = MarketDataService.get_ticker_news(sym, max_items=2)
-        global_news.extend(tk_news)
+    global_news = NewsSentimentService.fetch_global_rss_news(RSS_NEWS_FEEDS, max_per_feed=3)
+    
+    # News mirate sui principali leader di mercato
+    for sym in ["NVDA", "SMH", "TSM"]:
+        try:
+            tk_news = MarketDataService.get_ticker_news(sym, max_items=2)
+            global_news.extend(tk_news)
+        except Exception:
+            pass
 
-    # Genera l'analisi macro profonda tramite Gemini
-    macro_comment = llm_svc.generate_macro_market_briefing(indices_summary, global_news)
+    # Recupera il contesto del briefing precedente per continuità
+    prev_briefing = supabase_svc.get_latest_macro_briefing()
+
+    # Genera analisi tramite LLM
+    macro_comment = llm_svc.generate_macro_market_briefing(
+        indices_data=indices_summary,
+        news_list=global_news,
+        slot=slot,
+        previous_briefing_context=prev_briefing
+    )
     if not macro_comment:
-        macro_comment = (
-            "I mercati stanno subendo una forte correzione sul comparto AI e semiconduttori: "
-            "il mix di incertezza politica post-elettorale e allarmi sui limiti di espansione dei data center "
-            "sta innescando prese di beneficio violente e liquidazioni di posizioni a leva."
-        )
+        if slot == "morning":
+            macro_comment = (
+                "Sessione asiatica mista con futures europei cauti. L'overnight di Wall Street riflette un riposizionamento "
+                "in attesa dei catalizzatori macroeconomici e delle decisioni sui tassi. Focus sui titoli tech ed energia."
+            )
+        else:
+            macro_comment = (
+                "Borse europee a metà seduta con scambi selettivi. I futures statunitensi indicano un'apertura guardinga "
+                "in vista dei dati macro pomeridiani su mercato del lavoro ed inflazione."
+            )
 
     full_reply = "\n".join(header_lines) + "\n\n" + macro_comment
+
+    # Salva il briefing appena generato nel database per memoria del briefing successivo
+    supabase_svc.save_latest_macro_briefing(slot=slot, briefing_text=macro_comment)
+
+    return full_reply
+
+async def briefing_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    ACTIVE_CHAT_IDS.add(user_id)
+    
+    # Determina automaticamente lo slot orario in base al fuso orario di Roma
+    now_rome = datetime.now(ZoneInfo("Europe/Rome"))
+    slot = "morning" if now_rome.hour < 12 else "afternoon"
+    slot_label = "del mattino (ultime 12 ore)" if slot == "morning" else "del pomeriggio (pre-apertura USA)"
+
+    await update.message.reply_text(f"☕ *Sto elaborando il briefing {slot_label} con dati aggiornati e memoria storica in Euro...*", parse_mode="Markdown")
+    
+    full_reply = await build_macro_briefing(slot=slot)
     await send_safe_text(update, full_reply)
+    
+    # Registra nella cronologia conversazione
+    supabase_svc.log_message(user_id, "user", "/briefing")
+    supabase_svc.log_message(user_id, "assistant", full_reply)
 
 async def cicli_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -880,28 +938,41 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         )
         await send_safe_text(query, deep_dive_text)
 
-# Funzione per inviare briefing automatici programmati
-async def scheduled_morning_briefing(app):
-    for chat_id in ACTIVE_CHAT_IDS:
-        try:
-            eur_rate = MarketDataService.get_eur_usd_rate()
-            radar = CycleRadarService.scan_active_cycles()
-            radar_preview = ""
-            for r in radar[:2]:
-                radar_preview += f"• *{r['name']}:* {r['alert_type']} ({r['cycle_status_text']})\n"
+# Funzione per inviare briefing automatici programmati (07:00 e 15:00 CET)
+async def send_scheduled_briefing(app, slot: str):
+    """
+    Eroga il briefing programmato a tutti gli utenti attivi:
+    - slot='morning' alle 07:00 CET (sintesi ultime 12 ore)
+    - slot='afternoon' alle 15:00 CET (sintesi ultime ore e pre-apertura USA)
+    """
+    print(f"⏰ [Scheduler] Esecuzione briefing programmato: slot={slot}...")
+    try:
+        briefing_text = await build_macro_briefing(slot=slot)
+        chat_ids = supabase_svc.get_active_chat_ids()
+        print(f"📡 [Scheduler] Invio a {len(chat_ids)} utenti registrati: {chat_ids}")
 
-            text = (
-                "🌅 *ALERT PROATTIVO & RADAR DEI CICLI (08:30 CET)*\n\n"
-                f"💶 *Tasso EUR/USD:* `1.00 € = {eur_rate:.4f} $`\n\n"
-                f"📡 *Monitoraggio Punti di Svolta Ciclici:*\n{radar_preview}\n"
-                "Usa `/cicli` per il quadro completo con tutte le candele rimanenti o `/occasioni` per i titoli a sconto!"
-            )
-            await app.bot.send_message(chat_id=chat_id, text=text, parse_mode="Markdown")
-        except Exception as e:
-            print(f"Errore invio morning briefing: {e}")
+        for chat_id in chat_ids:
+            try:
+                await app.bot.send_message(chat_id=chat_id, text=briefing_text, parse_mode="Markdown")
+            except Exception as e_md:
+                print(f"[!] Fallback markdown briefing per chat_id {chat_id}: {e_md}")
+                try:
+                    await app.bot.send_message(chat_id=chat_id, text=briefing_text)
+                except Exception as e_plain:
+                    print(f"[!] Errore invio briefing a {chat_id}: {e_plain}")
+            
+            # Registra il briefing nella chat history per memoria
+            try:
+                supabase_svc.log_message(chat_id, "assistant", briefing_text)
+            except Exception:
+                pass
+
+        print(f"✅ [Scheduler] Briefing {slot} completato con successo!")
+    except Exception as e:
+        print(f"[!] Errore critico generazione scheduled briefing: {e}")
 
 async def post_init(application):
-    """Configura il menu dei comandi nativo di Telegram visibile con il tasto [/] e Menu."""
+    """Configura il menu dei comandi nativo di Telegram e avvia lo scheduler dei briefing alle 07:00 e 15:00 CET."""
     bot_commands = [
         BotCommand("portafoglio", "💼 Visualizza il portafoglio in tempo reale"),
         BotCommand("briefing", "🌅 Quadro di mercato, Wall Street ed Europa"),
@@ -917,6 +988,29 @@ async def post_init(application):
         print("✅ Menu comandi Telegram registrato con successo!")
     except Exception as e:
         print(f"[!] Errore registrazione comandi Telegram: {e}")
+
+    # Avvio Scheduler Asincrono per briefing alle 07:00 e alle 15:00 fuso orario di Roma
+    try:
+        scheduler = AsyncIOScheduler(timezone="Europe/Rome")
+        scheduler.add_job(
+            send_scheduled_briefing,
+            CronTrigger(hour=7, minute=0, timezone="Europe/Rome"),
+            args=[application, "morning"],
+            id="morning_briefing_0700",
+            replace_existing=True
+        )
+        scheduler.add_job(
+            send_scheduled_briefing,
+            CronTrigger(hour=15, minute=0, timezone="Europe/Rome"),
+            args=[application, "afternoon"],
+            id="afternoon_briefing_1500",
+            replace_existing=True
+        )
+        scheduler.start()
+        application.bot_data["briefing_scheduler"] = scheduler
+        print("⏰ [Scheduler] Programmato: Briefing Mattino ore 07:00 CET | Briefing Pomeriggio ore 15:00 CET!")
+    except Exception as e:
+        print(f"[!] Errore configurazione scheduler in post_init: {e}")
 
 def main():
     token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
@@ -939,11 +1033,6 @@ def main():
     app.add_handler(CallbackQueryHandler(handle_callback_query))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_text_message))
-
-    # Scheduler per briefing giornalieri alle 08:30 e 15:35
-    scheduler = BackgroundScheduler()
-    # Esegue il job su un thread di background
-    scheduler.start()
 
     print("🤖 Bot Telegram Market Sentinel (Senior Edition - Full Italian & EUR) avviato...")
     app.run_polling()
