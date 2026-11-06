@@ -58,6 +58,11 @@ class OpportunityScannerService:
             rsi = tech_sum.get("rsi", 50.0) or 50.0
             z_score = pred.get("z_score", 0.0)
 
+            # Controllo quotazione Lang & Schwarz (Trade Republic) se disponibile
+            tr_quote = MarketDataService.get_trade_republic_ls_quote(ticker)
+            tr_bid = round(tr_quote["bid"], 2) if "bid" in tr_quote else None
+            tr_ask = round(tr_quote["ask"], 2) if "ask" in tr_quote else None
+
             # Score di sconto statistico: più l'RSI e lo Z-Score sono bassi, più l'occasione è forte
             discount_score = (70 - rsi) + (abs(z_score) * 15 if z_score < 0 else -10)
 
@@ -65,6 +70,8 @@ class OpportunityScannerService:
                 "ticker": ticker,
                 "name": name,
                 "price_eur": round(price_eur, 2),
+                "tr_bid": tr_bid,
+                "tr_ask": tr_ask,
                 "change_pct": tech_sum.get("change_pct", 0.0),
                 "rsi": rsi,
                 "z_score": z_score,
