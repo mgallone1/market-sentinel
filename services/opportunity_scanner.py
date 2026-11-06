@@ -24,7 +24,9 @@ CANDIDATES = [
     ("GOOGL", "Alphabet Inc"),
     ("META", "Meta Platforms"),
     ("SMH", "VanEck Semiconductor ETF"),
-    ("IWMO.L", "MSCI World Momentum ETF"),
+    ("XDEM.DE", "Xtrackers MSCI World Momentum ETF"),
+    ("XDWD.DE", "Xtrackers MSCI World ETF"),
+    ("BY6.F", "BYD Company"),
     ("UCG.MI", "UniCredit"),
     ("ISP.MI", "Intesa Sanpaolo"),
     ("RACE.MI", "Ferrari")
