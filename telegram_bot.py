@@ -46,6 +46,7 @@ from services.cycle_analyst import CycleAnalystService
 from services.hurst_migliorino_cycles import HurstMigliorinoCycleService
 from services.cycle_radar import CycleRadarService
 from services.advanced_predictive_system import AdvancedPredictiveSystem
+from services.video_downloader import VideoDownloaderService
 
 supabase_svc = SupabaseService()
 llm_svc = LLMReasoningService()
@@ -198,7 +199,8 @@ async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "💎 *Opportunity Hunter:* Digita `/occasioni` per scansionare all'istante l'intero mercato e trovare i titoli a forte sconto statistico.\n"
         "🧮 *Simulatore Ordini Trade Republic:* Digita `/simula TICKER BUDGET` (es. `/simula TSM 500`) per calcolare quote esatte, prezzo limite consigliato e rischio in Euro.\n"
         "🌅 *Briefing di Mercato:* Digita `/briefing` per il resoconto completo su Wall Street, Europa e geopolitica (erogato in automatico alle **07:00** e **15:00 CET** con continuità di memoria storica).\n"
-        "💼 *Portafoglio:* Digita `/portafoglio` o mandami uno screenshot per vedere il riepilogo in tempo reale."
+        "💼 *Portafoglio:* Digita `/portafoglio` o mandami uno screenshot per vedere il riepilogo in tempo reale.\n"
+        "🎬 *Visione Video & Social:* Mandami un video (anche registrazione schermo del portafoglio) o incolla un link da YouTube Shorts, TikTok, Instagram Reel o X/Twitter per una decodifica approfondita di parlato e grafici con fact-checking del CIO."
     )
     await update.message.reply_text(msg, parse_mode="Markdown")
 
@@ -713,6 +715,84 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         print(f"Errore handle_photo: {e}")
         await update.message.reply_text("⚠️ Si è verificato un errore durante l'elaborazione dell'immagine. Puoi comunque registrarla manualmente con `/add TICKER QUOTE PREZZO`.")
 
+async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Riceve ed esamina video inviati direttamente su Telegram (video, video note, animazioni/gif).
+    Supporta:
+    - Registrazioni schermo di Trade Republic / Degiro per auto-importazione del portafoglio.
+    - Video di approfondimento finanziario con trascrizione audio e OCR dei fotogrammi.
+    """
+    user_id = update.effective_user.id
+    ACTIVE_CHAT_IDS.add(user_id)
+    msg = update.message
+    video_obj = msg.video or msg.video_note or msg.animation
+    if not video_obj:
+        return
+
+    caption = msg.caption or ""
+    file_size_mb = (video_obj.file_size or 0) / (1024 * 1024)
+    if file_size_mb > 20:
+        await msg.reply_text(
+            f"⚠️ *Video troppo pesante per il download diretto di Telegram* (limite Bot API: 20MB, questo file è `{file_size_mb:.1f} MB`).\n"
+            "Se è un video social, inviami direttamente il link (YouTube Shorts, TikTok, Instagram Reel o X)!",
+            parse_mode="Markdown"
+        )
+        return
+
+    status_msg = await msg.reply_text(
+        "🎬 *Video ricevuto! Scarico ed esamino il contenuto (audio, parlato e fotogrammi) con la visione multimodale di Gemini...*",
+        parse_mode="Markdown"
+    )
+
+    local_file_path = None
+    try:
+        tg_file = await context.bot.get_file(video_obj.file_id)
+        os.makedirs(VideoDownloaderService.DOWNLOAD_DIR, exist_ok=True)
+        ext = "mp4"
+        if hasattr(video_obj, "mime_type") and video_obj.mime_type and "webm" in video_obj.mime_type:
+            ext = "webm"
+        local_file_path = os.path.join(VideoDownloaderService.DOWNLOAD_DIR, f"{video_obj.file_unique_id}.{ext}")
+
+        await tg_file.download_to_drive(custom_path=local_file_path)
+
+        analysis = llm_svc.analyze_video(local_file_path, user_prompt=caption)
+        if analysis.get("type") == "error":
+            await status_msg.edit_text(f"⚠️ {analysis.get('text', 'Errore durante l\'analisi del video.')}")
+            return
+
+        # Posizioni di portafoglio da registrazione schermo
+        if analysis.get("is_portfolio") and analysis.get("positions"):
+            positions = analysis["positions"]
+            saved_lines = []
+            for p in positions:
+                asset_name = p.get("asset_name", "Strumento")
+                shares = float(p.get("shares", 0.0))
+                pmc = float(p.get("average_buy_price", 0.0))
+                cand_ticker = p.get("ticker_candidate", "")
+                resolved_ticker = resolve_ticker(cand_ticker or asset_name) or cand_ticker or "ASSET"
+                if shares > 0 and pmc > 0:
+                    supabase_svc.upsert_position(user_id, resolved_ticker, asset_name, shares, pmc, currency="EUR")
+                    saved_lines.append(f"• *{asset_name}* (`{resolved_ticker}`): `{shares}` quote a `{pmc:.2f} €`")
+
+            header = "✅ *POSIZIONI ESTRATTE DAL VIDEO E REGISTRATE SU SUPABASE!*\n\n"
+            pos_summary = "\n".join(saved_lines)
+            reply = f"{header}{pos_summary}\n\nUsa `/portafoglio` per vedere la situazione aggiornata in tempo reale."
+            await send_safe_text(update, reply)
+            return
+
+        report_text = analysis.get("text", "Analisi video completata.")
+        await status_msg.edit_text("🎬 *Analisi Multimodale del Video:*")
+        await send_safe_text(update, report_text)
+
+        supabase_svc.log_message(user_id, "user", f"[Video inviato] {caption}")
+        supabase_svc.log_message(user_id, "assistant", report_text)
+
+    except Exception as e:
+        print(f"Errore handle_video: {e}")
+        await msg.reply_text(f"⚠️ Si è verificato un errore durante l'elaborazione del video: {str(e)}")
+    finally:
+        VideoDownloaderService.cleanup(local_file_path)
+
 async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         await _handle_text_message_core(update, context)
@@ -728,6 +808,60 @@ async def _handle_text_message_core(update: Update, context: ContextTypes.DEFAUL
     ACTIVE_CHAT_IDS.add(user_id)
     raw_text = update.message.text.strip()
     upper_text = raw_text.upper()
+
+    # 0. Controllo presenza link video social (YouTube, Shorts, TikTok, Instagram Reels, X/Twitter, direct video)
+    video_url = VideoDownloaderService.extract_video_url(raw_text)
+    if video_url:
+        status_msg = await update.message.reply_text(
+            "🎬 *Link video social rilevato!*\nScarico ed esamino il contenuto (audio, fotogrammi e parlato) con la visione multimodale di Gemini...",
+            parse_mode="Markdown"
+        )
+        local_path = VideoDownloaderService.download_video(video_url)
+        if not local_path:
+            await status_msg.edit_text(
+                "⚠️ Non è stato possibile scaricare il video dal link indicato. Il video potrebbe essere privato, rimosso o superare la dimensione massima consentita (40MB)."
+            )
+            return
+
+        try:
+            user_comment = raw_text.replace(video_url, "").strip()
+            analysis = llm_svc.analyze_video(local_path, user_prompt=user_comment or "Analizza questo video finanziario")
+            if analysis.get("type") == "error":
+                await status_msg.edit_text(f"⚠️ {analysis.get('text', 'Errore durante l\'analisi del video.')}")
+                return
+
+            if analysis.get("is_portfolio") and analysis.get("positions"):
+                positions = analysis["positions"]
+                saved_lines = []
+                for p in positions:
+                    asset_name = p.get("asset_name", "Strumento")
+                    shares = float(p.get("shares", 0.0))
+                    pmc = float(p.get("average_buy_price", 0.0))
+                    cand_ticker = p.get("ticker_candidate", "")
+                    resolved_ticker = resolve_ticker(cand_ticker or asset_name) or cand_ticker or "ASSET"
+                    if shares > 0 and pmc > 0:
+                        supabase_svc.upsert_position(user_id, resolved_ticker, asset_name, shares, pmc, currency="EUR")
+                        saved_lines.append(f"• *{asset_name}* (`{resolved_ticker}`): `{shares}` quote a `{pmc:.2f} €`")
+
+                header = "✅ *POSIZIONI ESTRATTE DAL VIDEO E SALVATE SU SUPABASE!*\n\n"
+                pos_summary = "\n".join(saved_lines)
+                reply = f"{header}{pos_summary}\n\nUsa `/portafoglio` per la situazione aggiornata in tempo reale."
+                await send_safe_text(update, reply)
+                return
+
+            report_text = analysis.get("text", "Analisi video completata.")
+            await status_msg.edit_text("🎬 *Analisi Multimodale del Video Social:*")
+            await send_safe_text(update, report_text)
+
+            supabase_svc.log_message(user_id, "user", raw_text)
+            supabase_svc.log_message(user_id, "assistant", report_text)
+            return
+        except Exception as ve:
+            print(f"Errore analisi link video: {ve}")
+            await status_msg.edit_text(f"⚠️ Si è verificato un errore durante l'analisi del video: {str(ve)}")
+            return
+        finally:
+            VideoDownloaderService.cleanup(local_path)
 
     # Salva il messaggio dell'utente nella memoria di breve termine
     supabase_svc.log_message(user_id, "user", raw_text)
@@ -1225,6 +1359,7 @@ def main():
     app.add_handler(CommandHandler("add", add_cmd))
     app.add_handler(CallbackQueryHandler(handle_callback_query))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
+    app.add_handler(MessageHandler(filters.VIDEO | filters.VIDEO_NOTE | filters.ANIMATION, handle_video))
     app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_text_message))
 
     print("🤖 Bot Telegram Market Sentinel (Senior Edition - Full Italian & EUR) avviato...")
