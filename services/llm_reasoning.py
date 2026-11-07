@@ -27,7 +27,7 @@ class LLMReasoningService:
     def __init__(self):
         self.api_key = os.getenv("GEMINI_API_KEY", "").strip()
         self.client = None
-        self.models_to_try = ["gemini-3.1-flash-lite", "gemini-3.5-flash", "gemini-3.5-flash-lite"]
+        self.models_to_try = ["gemini-3.8-flash", "gemini-3.5-flash", "gemini-3.1-flash-lite"]
         if HAS_GENAI and self.api_key:
             try:
                 self.client = genai.Client(api_key=self.api_key)
@@ -282,6 +282,125 @@ Analizza questa immagine inviata dall'utente:
             "position_data": pos_data,
             "text": text_resp
         }
+
+    def analyze_video(self, video_path: str, user_prompt: str = "") -> Dict[str, Any]:
+        """
+        Analizza un video multimodale (audio, parlato, grafica e fotogrammi) caricato su Telegram
+        o scaricato da un link social (YouTube, Shorts, TikTok, Instagram Reels, X/Twitter).
+        Supporta:
+        1. Registrazioni schermo di broker (Trade Republic, Degiro): estrae le posizioni per l'importazione automatica.
+        2. Video social di finanza/investimenti: sintesi della tesi, fact-checking critico e verdetto operativo del CIO.
+        """
+        if not self.client:
+            return {"type": "error", "text": "Modulo AI Gemini non attivo o client non configurato."}
+
+        now_str = self._get_current_time_str()
+        user_note_block = f"\nNOTA/RICHIESTA DELL'UTENTE ALLEGATA:\n\"{user_prompt}\"\n" if user_prompt else ""
+        
+        prompt = f"""
+Sei il Chief Investment Officer (CIO), Senior Quantitative Strategist ed esperto di analisi multimodale.
+DATA E ORA ATTUALE DI ANALISI: {now_str}.
+{user_note_block}
+Hai davanti a te un video (con traccia audio, trascrizione del parlato e sequenza di fotogrammi).
+
+COMPITO:
+1. IDENTIFICA LA NATURA DEL VIDEO:
+   - CASO A: REGISTRAZIONE SCHERMO PORTAFOGLIO / BROKER (Trade Republic, Scalable, Degiro, TradingView).
+     Se mostra una schermata di portafoglio o una lista di titoli:
+     Estrai tassativamente tutte le posizioni visibili in un blocco JSON valido:
+     ```json
+     {{
+       "is_portfolio_recording": true,
+       "positions": [
+          {{
+            "asset_name": "Nome strumento es. MSCI World Momentum",
+            "ticker_candidate": "XDEM.DE",
+            "shares": 32.2419,
+            "average_buy_price": 75.10,
+            "currency": "EUR"
+          }}
+       ]
+     }}
+     ```
+     Accompagnalo con un commento esecutivo di sintesi delle posizioni rilevate.
+
+   - CASO B: VIDEO SOCIAL / ANALISI FINANZIARIA / MARKET COMMENTARY (TikTok, Instagram Reel, YouTube Shorts, X/Twitter, TV/Web clip).
+     Fornisci un'analisi di qualità istituzionale e alta densità informativa strutturata esattamente così:
+     🎬 *Contenuto & Tesi Esposta:* Chi parla e qual è il punto focale del video (asset citati, previsioni, strategie o promesse dichiarate).
+     🔍 *Fact-Checking & Valutazione Critica:* Verifica se le affermazioni corrispondono alla realtà dei dati macroeconomici odierni ({now_str}), dei multipli di mercato, della liquidità e dei rischi reali. Metti in guardia da claim fuorvianti, hype social o commissioni occulte/spread.
+     🧭 *Verdetto del CIO & Guida Operativa:* Giudizio chiaro e netto: ha senso operare su questa idea? Con quale strategia di accumulo o protezione su Trade Republic in Euro (€)?
+
+LINEE GUIDA RIGOROSE:
+- DIVIETO ASSOLUTO DI FORMULE COLLOQUIALI O PATERNALISTICHE ('Caro amico', 'Mettiamoci comodi', 'Mio caro', 'Entriamo nel vivo'). Inizia DIRETTAMENTE con il report analitico.
+- ANCORAGGIO TEMPORALE: Siamo a {now_str}. Tassativamente vietato citare anni passati (2024, 2025) per giustificare i mercati di oggi.
+- Prezzi e valutazioni RIGOROSAMENTE in Euro (€).
+- Formattazione Markdown pulita, con elenchi puntati ed emoji sobrie per una lettura perfetta su Telegram.
+"""
+        upload = None
+        try:
+            import time
+            upload = self.client.files.upload(file=video_path)
+            
+            # Attesa elaborazione file su Gemini
+            max_wait_secs = 60
+            waited = 0
+            while upload.state.name == "PROCESSING" and waited < max_wait_secs:
+                time.sleep(2)
+                waited += 2
+                upload = self.client.files.get(name=upload.name)
+            
+            if upload.state.name != "ACTIVE":
+                return {
+                    "type": "error",
+                    "text": f"Impossibile elaborare il video su Gemini (stato: {upload.state.name})."
+                }
+
+            text_resp = ""
+            for model in self.models_to_try:
+                try:
+                    res = self.client.models.generate_content(
+                        model=model,
+                        contents=[upload, prompt]
+                    )
+                    if res and res.text:
+                        text_resp = res.text.strip()
+                        break
+                except Exception as me:
+                    print(f"[LLMReasoningService] Tentativo video con {model} fallito: {me}")
+
+            if not text_resp:
+                return {"type": "error", "text": "Non è stato possibile ottenere una risposta per questo video dai modelli AI."}
+
+            positions = []
+            is_portfolio = False
+            if "```json" in text_resp:
+                try:
+                    json_str = text_resp.split("```json")[1].split("```")[0].strip()
+                    data = json.loads(json_str)
+                    if data.get("is_portfolio_recording") or "positions" in data or data.get("is_position"):
+                        is_portfolio = True
+                        if "positions" in data and isinstance(data["positions"], list):
+                            positions = data["positions"]
+                        elif data.get("is_position"):
+                            positions = [data]
+                except Exception as je:
+                    print(f"[LLMReasoningService] Errore parsing JSON video: {je}")
+
+            return {
+                "type": "portfolio" if is_portfolio else "social_analysis",
+                "is_portfolio": is_portfolio,
+                "positions": positions,
+                "text": text_resp
+            }
+        except Exception as e:
+            print(f"[LLMReasoningService] Errore analyze_video: {e}")
+            return {"type": "error", "text": f"Errore durante l'analisi del video: {str(e)}"}
+        finally:
+            if upload and hasattr(upload, "name"):
+                try:
+                    self.client.files.delete(name=upload.name)
+                except Exception:
+                    pass
 
     def generate_macro_market_briefing(self, indices_data: list, news_list: list, slot: str = "morning", previous_briefing_context: str = "") -> str:
         """
