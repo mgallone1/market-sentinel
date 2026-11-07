@@ -757,7 +757,8 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         analysis = llm_svc.analyze_video(local_file_path, user_prompt=caption)
         if analysis.get("type") == "error":
-            await status_msg.edit_text(f"⚠️ {analysis.get('text', 'Errore durante l\'analisi del video.')}")
+            err_msg = analysis.get("text") or "Errore durante l'analisi del video."
+            await status_msg.edit_text(f"⚠️ {err_msg}")
             return
 
         # Posizioni di portafoglio da registrazione schermo
@@ -827,7 +828,8 @@ async def _handle_text_message_core(update: Update, context: ContextTypes.DEFAUL
             user_comment = raw_text.replace(video_url, "").strip()
             analysis = llm_svc.analyze_video(local_path, user_prompt=user_comment or "Analizza questo video finanziario")
             if analysis.get("type") == "error":
-                await status_msg.edit_text(f"⚠️ {analysis.get('text', 'Errore durante l\'analisi del video.')}")
+                err_msg = analysis.get("text") or "Errore durante l'analisi del video."
+                await status_msg.edit_text(f"⚠️ {err_msg}")
                 return
 
             if analysis.get("is_portfolio") and analysis.get("positions"):
