@@ -77,11 +77,21 @@ async def main():
     global bot_application
     await start_web_server()
 
+    import telegram
     import telegram_bot
     token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
-    from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, filters
+    from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
 
     bot_application = ApplicationBuilder().token(token).post_init(telegram_bot.post_init).build()
+    
+    async def global_telegram_error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
+        if isinstance(context.error, telegram.error.Conflict):
+            print("⚠️ [Telegram] Conflitto temporaneo getUpdates (handover istanze cloud Render).")
+            return
+        print(f"[Telegram] Errore bot: {context.error}")
+
+    bot_application.add_error_handler(global_telegram_error_handler)
+
     bot_application.add_handler(CommandHandler("start", telegram_bot.start_cmd))
     bot_application.add_handler(CommandHandler("help", telegram_bot.start_cmd))
     bot_application.add_handler(CommandHandler("briefing", telegram_bot.briefing_cmd))
@@ -102,7 +112,20 @@ async def main():
     print("🤖 Bot Telegram avviato in modalità 24/7 con server HTTP, keep-alive e trigger cloud attivi...")
     async with bot_application:
         await bot_application.start()
-        await bot_application.updater.start_polling()
+        
+        # Connessione polling resiliente ai conflitti del rolling deploy di Render
+        for attempt in range(8):
+            try:
+                await bot_application.updater.start_polling(drop_pending_updates=True, bootstrap_retries=5)
+                print("✅ [Polling] Updater connesso a Telegram con successo (nessun conflitto).")
+                break
+            except telegram.error.Conflict:
+                print(f"⚠️ [Polling] Conflitto con istanza precedente (tentativo {attempt+1}/8). Attesa 5 secondi che la vecchia istanza termini...")
+                await asyncio.sleep(5)
+            except Exception as pe:
+                print(f"⚠️ [Polling] Errore start_polling: {pe}. Attendo 4 secondi...")
+                await asyncio.sleep(4)
+
         while True:
             await asyncio.sleep(3600)
 
