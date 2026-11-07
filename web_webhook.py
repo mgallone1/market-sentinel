@@ -99,6 +99,7 @@ async def main():
     bot_application.add_handler(CommandHandler("cicli", telegram_bot.cicli_cmd))
     bot_application.add_handler(CommandHandler("simula", telegram_bot.simula_cmd))
     bot_application.add_handler(CommandHandler("portafoglio", telegram_bot.portfolio_cmd))
+    bot_application.add_handler(CommandHandler("profilo", telegram_bot.profile_cmd))
     bot_application.add_handler(CommandHandler("memoria", telegram_bot.memoria_cmd))
     bot_application.add_handler(CommandHandler("add", telegram_bot.add_cmd))
     bot_application.add_handler(CallbackQueryHandler(telegram_bot.handle_callback_query))
