@@ -93,6 +93,7 @@ async def main():
     bot_application.add_handler(CommandHandler("add", telegram_bot.add_cmd))
     bot_application.add_handler(CallbackQueryHandler(telegram_bot.handle_callback_query))
     bot_application.add_handler(MessageHandler(filters.PHOTO, telegram_bot.handle_photo))
+    bot_application.add_handler(MessageHandler(filters.VIDEO | filters.VIDEO_NOTE | filters.ANIMATION, telegram_bot.handle_video))
     bot_application.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), telegram_bot.handle_text_message))
 
     # Avvia il loop di keep-alive in background
