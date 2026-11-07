@@ -81,7 +81,85 @@ class SupabaseService:
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
             """)
+            cursor.execute("""
+            CREATE TABLE IF NOT EXISTS user_profiles (
+                user_id INTEGER PRIMARY KEY,
+                profile_json TEXT NOT NULL,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+            """)
             conn.commit()
+
+    def get_user_profile(self, user_id: int) -> Dict[str, Any]:
+        """
+        Recupera il profilo di investimento personalizzato dell'utente
+        (orizzonte temporale, budget PAC mensile, propensione al rischio, strategia e broker).
+        """
+        import json
+        default_profile = {
+            "investor_name": "Michele",
+            "horizon": "Lungo termine (5-10 anni)",
+            "strategy": "Core-Satellite: Accumulo su ETF azionari globali (XDWD/XDEM) + posizioni satellite tattiche (Tech, Crypto BTC/ADA, Growth)",
+            "risk_profile": "Dinamico / Orientato alla Crescita (volatilità accettata in cambio di maggior rendimento composto)",
+            "monthly_pac_eur": 500.0,
+            "broker": "Trade Republic (Liquidità remunerata, esecuzione Lang & Schwarz, ordini limite anti-spread)",
+            "discipline": "Acquisti solo con Ordine Limite a sconto, zero inseguimento dei prezzi a mercato, ribilanciamento periodico"
+        }
+
+        if self.client:
+            try:
+                res = self.client.table("finance_user_rules").select("rule_text").eq("user_id", user_id).order("id", desc=True).execute()
+                if res.data:
+                    for r in res.data:
+                        txt = r.get("rule_text", "")
+                        if txt.startswith("PROFILE:"):
+                            saved = json.loads(txt[len("PROFILE:"):])
+                            default_profile.update(saved)
+                            return default_profile
+            except Exception as e:
+                print(f"[SupabaseService] Errore lettura profile Supabase: {e}")
+
+        with sqlite3.connect(SQLITE_PATH) as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT profile_json FROM user_profiles WHERE user_id = ?", (user_id,))
+            row = cursor.fetchone()
+            if row and row[0]:
+                try:
+                    saved = json.loads(row[0])
+                    default_profile.update(saved)
+                except Exception:
+                    pass
+
+        return default_profile
+
+    def save_user_profile(self, user_id: int, profile_data: Dict[str, Any]) -> bool:
+        """Salva o aggiorna il profilo investitore su Supabase e SQLite locale."""
+        import json
+        current = self.get_user_profile(user_id)
+        current.update(profile_data)
+        json_str = json.dumps(current, ensure_ascii=False)
+        rule_str = f"PROFILE:{json_str}"
+
+        if self.client:
+            try:
+                existing = self.client.table("finance_user_rules").select("id, rule_text").eq("user_id", user_id).execute()
+                if existing.data:
+                    for item in existing.data:
+                        if item.get("rule_text", "").startswith("PROFILE:"):
+                            self.client.table("finance_user_rules").delete().eq("id", item["id"]).execute()
+                self.client.table("finance_user_rules").insert({"user_id": user_id, "rule_text": rule_str}).execute()
+            except Exception as e:
+                print(f"[SupabaseService] Errore salvataggio profile Supabase: {e}")
+
+        with sqlite3.connect(SQLITE_PATH) as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+            INSERT INTO user_profiles (user_id, profile_json, updated_at)
+            VALUES (?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(user_id) DO UPDATE SET profile_json = excluded.profile_json, updated_at = CURRENT_TIMESTAMP
+            """, (user_id, json_str))
+            conn.commit()
+        return True
 
     def upsert_position(self, user_id: int, ticker: str, asset_name: str, shares: float, price: float, currency: str = "EUR") -> bool:
         """Salva o aggiorna una posizione in portafoglio."""
