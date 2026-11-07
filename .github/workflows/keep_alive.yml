@@ -1,0 +1,23 @@
+name: Market Sentinel Cloud Keep-Alive & Watchdog
+
+on:
+  schedule:
+    # Esegue ogni 10 minuti per impedire lo sleep mode di Render (timeout 15m)
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+
+jobs:
+  keep-alive:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Render Instance
+        run: |
+          curl -s -o /dev/null -w "%{http_code}" https://market-sentinel-bot.onrender.com/healthz
+      - name: Trigger 07:00 CET Morning Briefing
+        if: github.event.schedule == '0 6 * * *'
+        run: |
+          curl -s -X POST "https://market-sentinel-bot.onrender.com/api/trigger-briefing?slot=morning&key=market-sentinel-secret-2026"
+      - name: Trigger 15:00 CET Afternoon Briefing
+        if: github.event.schedule == '0 14 * * *'
+        run: |
+          curl -s -X POST "https://market-sentinel-bot.onrender.com/api/trigger-briefing?slot=afternoon&key=market-sentinel-secret-2026"
