@@ -161,13 +161,14 @@ def resolve_ticker(text: str) -> Optional[str]:
 
     return None
 
-async def send_safe_text(update: Update, text: str, parse_mode: str = "Markdown"):
+async def send_safe_text(update: Any, text: str, parse_mode: str = "Markdown", reply_markup: Optional[InlineKeyboardMarkup] = None):
     """Invia messaggi spezzandoli automaticamente se superano il limite Telegram di 4096 caratteri."""
+    target = getattr(update, "message", None) or update
     if len(text) <= 3500:
         try:
-            await update.message.reply_text(text, parse_mode=parse_mode)
+            await target.reply_text(text, parse_mode=parse_mode, reply_markup=reply_markup)
         except Exception:
-            await update.message.reply_text(text)
+            await target.reply_text(text, reply_markup=reply_markup)
         return
 
     chunks = []
@@ -182,25 +183,27 @@ async def send_safe_text(update: Update, text: str, parse_mode: str = "Markdown"
     if current_chunk:
         chunks.append(current_chunk)
 
-    for c in chunks:
+    for i, c in enumerate(chunks):
+        markup = reply_markup if i == len(chunks) - 1 else None
         try:
-            await update.message.reply_text(c, parse_mode=parse_mode)
+            await target.reply_text(c, parse_mode=parse_mode, reply_markup=markup)
         except Exception:
-            await update.message.reply_text(c)
+            await target.reply_text(c, reply_markup=markup)
 
 async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     ACTIVE_CHAT_IDS.add(user_id)
     msg = (
-        "👋 *Ciao! Sono il tuo Financial Strategist & Trading Copilot personale.*\n\n"
+        "👋 *Ciao! Sono il tuo Financial Strategist & Chief Investment Officer (CIO) personale.*\n\n"
         "Parliamo in italiano, con tutte le quotazioni e i calcoli convertiti rigorosamente in **Euro (€)**, pronti per le tue operazioni su Trade Republic.\n\n"
-        "Ecco le funzioni ad alto valore aggiunto che abbiamo attive:\n\n"
-        "🎯 *Analisi Approfondita Titolo:* Scrivi semplicemente il nome o ticker (es. `NVIDIA`, `TSLA`, `TSMC`, `Marvell`) per ricevere una tesi discorsiva con livelli di ingresso, target e probabilità di rimbalzo in Euro.\n"
-        "💎 *Opportunity Hunter:* Digita `/occasioni` per scansionare all'istante l'intero mercato e trovare i titoli a forte sconto statistico.\n"
-        "🧮 *Simulatore Ordini Trade Republic:* Digita `/simula TICKER BUDGET` (es. `/simula TSM 500`) per calcolare quote esatte, prezzo limite consigliato e rischio in Euro.\n"
-        "🌅 *Briefing di Mercato:* Digita `/briefing` per il resoconto completo su Wall Street, Europa e geopolitica (erogato in automatico alle **07:00** e **15:00 CET** con continuità di memoria storica).\n"
-        "💼 *Portafoglio:* Digita `/portafoglio` o mandami uno screenshot per vedere il riepilogo in tempo reale.\n"
-        "🎬 *Visione Video & Social:* Mandami un video (anche registrazione schermo del portafoglio) o incolla un link da YouTube Shorts, TikTok, Instagram Reel o X/Twitter per una decodifica approfondita di parlato e grafici con fact-checking del CIO."
+        "Ecco le funzioni di consulenza patrimoniale attive:\n\n"
+        "🧭 *Consulenza Titolo con Tesi del CIO:* Scrivi semplicemente il nome o ticker (es. `XDEM`, `XDWD`, `NVIDIA`, `TSMC`, `BYD`) per ricevere una vera consulenza strategica, con giudizio chiaro e piano d'azione in Euro.\n"
+        "💼 *Diagnosi Globale di Portafoglio:* Digita `/portafoglio` o inviami uno screenshot per visualizzare la diagnosi patrimoniale, i pesi di allocazione e il consiglio di ribilanciamento.\n"
+        "👤 *Profilo Investitore & PAC:* Digita `/profilo` per vedere o aggiornare i tuoi obiettivi, il budget mensile e l'orizzonte temporale.\n"
+        "💎 *Opportunity Hunter:* Digita `/occasioni` per scansionare all'istante l'intero mercato e trovare i titoli a forte sconto statistico con approfondimento discorsivo del CIO.\n"
+        "🧮 *Simulatore Ordini Trade Republic:* Digita `/simula TICKER BUDGET` (es. `/simula XDEM 500`) per calcolare quote esatte e prezzo limite anti-spread.\n"
+        "🌅 *Briefing di Mercato:* Digita `/briefing` per il resoconto completo su Wall Street, Europa e geopolitica (erogato in automatico alle **07:00** e **15:00 CET**).\n"
+        "🎬 *Visione Video & Social:* Mandami un video o incolla un link da YouTube Shorts, TikTok, Instagram Reel o X per una decodifica approfondita di parlato e grafici con fact-checking del CIO."
     )
     await update.message.reply_text(msg, parse_mode="Markdown")
 
@@ -551,6 +554,67 @@ async def simula_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     await update.message.reply_text(reply, parse_mode="Markdown")
 
+async def profile_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Visualizza o aggiorna la scheda investitore e gli obiettivi patrimoniali."""
+    user_id = update.effective_user.id
+    ACTIVE_CHAT_IDS.add(user_id)
+    args = context.args
+
+    if args:
+        full_arg = " ".join(args).lower()
+        profile = supabase_svc.get_user_profile(user_id)
+        
+        if "pac" in full_arg:
+            import re
+            nums = re.findall(r"\d+(?:[.,]\d+)?", full_arg)
+            if nums:
+                val = float(nums[0].replace(",", "."))
+                profile["monthly_pac_eur"] = val
+                supabase_svc.save_user_profile(user_id, profile)
+                await update.message.reply_text(
+                    f"✅ *Budget PAC aggiornato!*\n"
+                    f"Ora il tuo piano di accumulo mensile è impostato su `{val:.2f} €/mese`.\n"
+                    f"Tutti i consigli di acquisto, simulazione e ribilanciamento terranno conto di questo importo.",
+                    parse_mode="Markdown"
+                )
+                return
+
+        if "orizzonte" in full_arg or "anni" in full_arg:
+            profile["horizon"] = " ".join(args)
+            supabase_svc.save_user_profile(user_id, profile)
+            await update.message.reply_text(
+                f"✅ *Orizzonte temporale aggiornato a:*\n`{profile['horizon']}`",
+                parse_mode="Markdown"
+            )
+            return
+
+        if "rischio" in full_arg:
+            profile["risk_profile"] = " ".join(args)
+            supabase_svc.save_user_profile(user_id, profile)
+            await update.message.reply_text(
+                f"✅ *Profilo di rischio aggiornato a:*\n`{profile['risk_profile']}`",
+                parse_mode="Markdown"
+            )
+            return
+
+    profile = supabase_svc.get_user_profile(user_id)
+    msg = (
+        "👤 *SCHEDA INVESTITORE & OBIETTIVI PATRIMONIALI*\n\n"
+        f"• *Investitore:* {profile.get('investor_name', 'Michele')}\n"
+        f"• *Orizzonte Temporale:* {profile.get('horizon')}\n"
+        f"• *Strategia:* {profile.get('strategy')}\n"
+        f"• *Budget PAC Mensile:* `{profile.get('monthly_pac_eur', 500.0):.2f} €/mese`\n"
+        f"• *Profilo di Rischio:* {profile.get('risk_profile')}\n"
+        f"• *Broker Operativo:* {profile.get('broker')}\n"
+        f"• *Disciplina di Esecuzione:* {profile.get('discipline')}\n\n"
+        "───────────────────────\n"
+        "💡 *Come aggiornare i tuoi parametri:*\n"
+        "• Digita `/profilo pac 600` per modificare il budget mensile\n"
+        "• Digita `/profilo orizzonte 15 anni` per l'orizzonte temporale\n"
+        "• Oppure dimmi liberamente in chat: *'imposta il pac a 400€'* o *'voglio un approccio più prudente'*."
+    )
+    await update.message.reply_text(msg, parse_mode="Markdown")
+
 async def portfolio_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     ACTIVE_CHAT_IDS.add(user_id)
@@ -569,7 +633,8 @@ async def portfolio_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    text_lines = ["💼 *IL TUO PORTAFOGLIO IN TEMPO REALE (IN EURO):*\n"]
+    # Pass 1: Calcola controvalori individuali e totali
+    calc_items = []
     total_invested = 0.0
     total_current = 0.0
     eur_rate = MarketDataService.get_eur_usd_rate()
@@ -581,8 +646,6 @@ async def portfolio_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         quote = MarketDataService.get_realtime_quote(ticker)
         raw_price = quote.get("last_price") or pmc
-        
-        # Converte in Euro solo se il ticker è nativamente quotato in USD
         fund = MarketDataService.get_ticker_fundamentals(ticker)
         is_already_eur = MarketDataService.is_euro_asset(ticker, fund)
         is_usd = not is_already_eur
@@ -596,17 +659,38 @@ async def portfolio_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         total_invested += invested_val
         total_current += current_val
 
-        tr_info = ""
-        tr_quote = MarketDataService.get_trade_republic_ls_quote(ticker)
-        if tr_quote and "bid" in tr_quote:
-            tr_info = f" (TR Vendita: `{tr_quote['bid']:.2f} €`)"
+        calc_items.append({
+            "ticker": ticker,
+            "asset_name": pos["asset_name"],
+            "shares": shares,
+            "pmc": pmc,
+            "current_price_eur": current_price_eur,
+            "current_val": current_val,
+            "invested_val": invested_val,
+            "pnl_eur": pnl_eur,
+            "pnl_pct": pnl_pct
+        })
 
-        icon = "🟢" if pnl_eur >= 0 else "🔴"
+    # Calcola peso percentuale sul portafoglio
+    for item in calc_items:
+        item["weight_pct"] = (item["current_val"] / total_current) * 100 if total_current > 0 else 0.0
+
+    # Ordina posizioni per peso decrescente
+    calc_items.sort(key=lambda x: x["weight_pct"], reverse=True)
+
+    text_lines = ["💼 *IL TUO PORTAFOGLIO IN TEMPO REALE (IN EURO):*\n"]
+    for item in calc_items:
+        tr_info = ""
+        tr_quote = MarketDataService.get_trade_republic_ls_quote(item["ticker"])
+        if tr_quote and "bid" in tr_quote:
+            tr_info = f" *(TR: {tr_quote['bid']:.2f} €)*"
+
+        icon = "🟢" if item["pnl_eur"] >= 0 else "🔴"
         text_lines.append(
-            f"*{pos['asset_name']}* (`{ticker}`)\n"
-            f"• Quote: `{shares:.4f}` | PMC: `{pmc:.2f} €`\n"
-            f"• Prezzo Live: `{current_price_eur:.2f} €`{tr_info}\n"
-            f"• Controvalore: `{current_val:.2f} €` | Risultato: {icon} `{pnl_eur:+.2f} €` (`{pnl_pct:+.2f}%`)\n"
+            f"*{item['asset_name']}* (`{item['ticker']}`) — *Peso: {item['weight_pct']:.1f}%*\n"
+            f"• Quote: `{item['shares']:.4f}` | PMC: `{item['pmc']:.2f} €`\n"
+            f"• Prezzo Live: `{item['current_price_eur']:.2f} €`{tr_info}\n"
+            f"• Controvalore: `{item['current_val']:.2f} €` | Risultato: {icon} `{item['pnl_eur']:+.2f} €` (`{item['pnl_pct']:+.2f}%`)\n"
         )
 
     tot_pnl_eur = total_current - total_invested
@@ -616,9 +700,27 @@ async def portfolio_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text_lines.append("───────────────────────")
     text_lines.append(f"💰 *Capitale Investito:* `{total_invested:.2f} €`")
     text_lines.append(f"📈 *Valore Attuale:* `{total_current:.2f} €`")
-    text_lines.append(f"{tot_icon} *Plusvalenza / Minusvalenza:* `{tot_pnl_eur:+.2f} €` (`{tot_pnl_pct:+.2f}%`)")
+    text_lines.append(f"{tot_icon} *Plusvalenza / Minusvalenza Totale:* `{tot_pnl_eur:+.2f} €` (`{tot_pnl_pct:+.2f}%`)")
 
     await update.message.reply_text("\n".join(text_lines), parse_mode="Markdown")
+
+    # Diagnosi Strategica Esecutiva del Chief Investment Officer (CIO)
+    status_msg = await update.message.reply_text(
+        "🧠 *Elaboro la diagnosi patrimoniale di Asset Allocation e la strategia di ribilanciamento del CIO...*",
+        parse_mode="Markdown"
+    )
+    user_profile = supabase_svc.get_user_profile(user_id)
+    diagnosis = llm_svc.generate_portfolio_strategic_diagnosis(calc_items, total_invested, total_current, user_profile)
+    if diagnosis:
+        try:
+            await status_msg.delete()
+        except Exception:
+            pass
+        await send_safe_text(update, diagnosis)
+        supabase_svc.log_message(user_id, "user", "/portafoglio")
+        supabase_svc.log_message(user_id, "assistant", diagnosis)
+    else:
+        await status_msg.edit_text("💡 Ricorda di ribilanciare periodicamente gli asset più volatili verso il Core World.")
 
 async def add_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -898,6 +1000,11 @@ async def _handle_text_message_core(update: Update, context: ContextTypes.DEFAUL
         await memoria_cmd(update, context)
         return
 
+    if upper_text in ["PROFILO", "/PROFILO"] or ("PAC" in upper_text and any(k in upper_text for k in ["MESE", "EURO", "€", "IMPOSTA", "BUDGET"])):
+        context.args = raw_text.split()[1:] if " " in raw_text else []
+        await profile_cmd(update, context)
+        return
+
     if "CICLO" in upper_text or "CICLI" in upper_text or "/CICLI" in upper_text:
         await cicli_cmd(update, context)
         return
@@ -1118,51 +1225,61 @@ async def _handle_text_message_core(update: Update, context: ContextTypes.DEFAUL
             rr_lim_tp1 = round(gain_lim_tp1 / risk_lim, 1)
             rr_lim_tp2 = round(gain_lim_tp2 / risk_lim, 1)
 
-            # 1. LIVELLO PRIMARIO: Fotografia del Momento, Catalyst & Strategia Immediata
-            exec_brief = llm_svc.generate_executive_market_brief(
-                ticker,
-                pred,
-                fund,
-                news,
+            # Posizione esistente nel portafoglio di Michele
+            user_portfolio = supabase_svc.get_portfolio(user_id)
+            existing_pos = None
+            for p in user_portfolio:
+                if p["ticker"].upper() == resolved.upper() or p["ticker"].upper().startswith(resolved.upper().split(".")[0]):
+                    sh = float(p["shares"])
+                    pmc = float(p["average_buy_price"])
+                    c_val = sh * current_p
+                    pnl_e = c_val - (sh * pmc)
+                    pnl_p = ((current_p - pmc) / pmc) * 100 if pmc > 0 else 0.0
+                    existing_pos = {
+                        "shares": sh,
+                        "pmc": pmc,
+                        "current_val": c_val,
+                        "pnl_eur": pnl_e,
+                        "pnl_pct": pnl_p
+                    }
+                    break
+
+            user_profile = supabase_svc.get_user_profile(user_id)
+            tr_quote = MarketDataService.get_trade_republic_ls_quote(pred['ticker'])
+            pred["limit_price_eur"] = limit_price
+
+            # Consulenza Strategica Senior Wealth Advisor / CIO
+            advisor_note = llm_svc.generate_advisor_consultation(
+                ticker=resolved,
+                pred_data=pred,
+                fund_data=fund,
+                news_list=news,
                 cycle_data=cycle_context,
+                advanced_data=advanced_context,
+                existing_position=existing_pos,
+                user_profile=user_profile,
+                tr_quote=tr_quote,
                 memory_context=memory_context
             )
-            if not exec_brief:
-                exec_brief = (
-                    f"Il titolo {fund.get('short_name', ticker)} quota attualmente a {current_p:.2f} €.\n"
-                    f"Momento ciclico: {cycle_context['tempo_battleplan']}.\n"
-                    f"💡 {cycle_context['consiglio_pratico']}"
+
+            if not advisor_note:
+                advisor_note = (
+                    f"🧭 *CONSULENZA STRATEGICA: {fund.get('short_name', ticker)}* (`{pred['ticker']}`)\n\n"
+                    f"💶 Prezzo Live: `{current_p:.2f} €`\n\n"
+                    f"Consiglio di operare con Ordine Limite a `{limit_price:.2f} €` per proteggersi dallo spread di Lang & Schwarz, con primo target di rimbalzo a `{tp1:.2f} €` e stop di allerta a `{stop_loss:.2f} €`."
                 )
 
-            tr_quote = MarketDataService.get_trade_republic_ls_quote(pred['ticker'])
-            tr_line = ""
-            if tr_quote and "bid" in tr_quote and "ask" in tr_quote:
-                tr_line = f"📱 *Trade Republic (L&S Live):* Vendita `{tr_quote['bid']:.2f} €` | Acquisto `{tr_quote['ask']:.2f} €`\n"
-
-            reply_primary = (
-                f"🌍 *QUADRO DEL MOMENTO & STRATEGIA: {fund.get('short_name', pred['ticker'])}* (`{pred['ticker']}`)\n\n"
-                f"💶 *Prezzo Live in Euro:* `{current_p:.2f} €`" + (f" (${pred['raw_price']:.2f})" if is_usd else "") + "\n"
-                f"{tr_line}\n"
-                f"📰 *Cosa sta succedendo & Tesi di Mercato:*\n{exec_brief}\n\n"
-                f"🔄 *Inquadramento Ciclico (Migliorino):*\n"
-                f"• Fase: *{cycle_context['tempo_battleplan']}*\n"
-                f"• Indicazione pratica: 💡 *{cycle_context['consiglio_pratico']}*\n\n"
-                f"⚡ *Mappa Operativa (Trade Republic Ready):*\n"
-                f"• 🏷️ *Ordine Limite Consigliato:* `{limit_price:.2f} €`\n"
-                f"• 🎯 *Take Profit 1:* `{tp1:.2f} €` (R:R a mercato `{pred['risk_reward_tp1']}` ➔ *1:{rr_lim_tp1} con Limite*)\n"
-                f"• 🛑 *Stop Loss:* `{stop_loss:.2f} €`\n\n"
-                f"👉 *Vuoi simularne l'acquisto su Trade Republic?* Scrivi: `/simula {pred['ticker']} 500`"
-            )
-
-            # Tastiera Inline per il Deep Dive Tecnico su richiesta
+            # Tastiera Inline per Deep Dive Quantitativo o Simulazione rapida
             keyboard = [
-                [InlineKeyboardButton("📊 Apri Deep Dive Tecnico (Monte Carlo, FLD, Elliott)", callback_data=f"quant_{resolved}")]
+                [
+                    InlineKeyboardButton("📊 Indicatori Quantitativi di Supporto", callback_data=f"quant_{resolved}"),
+                    InlineKeyboardButton("🧮 Simula Ordine su TR", callback_data=f"sim_{resolved}")
+                ]
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
 
-            # Salva risposta nella cronologia
-            supabase_svc.log_message(user_id, "assistant", reply_primary)
-            await update.message.reply_text(reply_primary, parse_mode="Markdown", reply_markup=reply_markup)
+            supabase_svc.log_message(user_id, "assistant", advisor_note)
+            await send_safe_text(update, advisor_note, reply_markup=reply_markup)
             return
         else:
             await update.message.reply_text(f"⚠️ Dati storici non sufficienti per il titolo `{ticker}`.", parse_mode="Markdown")
@@ -1234,6 +1351,30 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         )
         await send_safe_text(query, deep_dive_text)
 
+    elif data.startswith("sim_"):
+        ticker = data.replace("sim_", "")
+        profile = supabase_svc.get_user_profile(query.from_user.id)
+        budget = profile.get("monthly_pac_eur", 500.0)
+        sim = OrderSimulatorService.simulate_trade_republic_order(ticker, budget)
+        if sim.get("status") == "error":
+            await query.message.reply_text(f"⚠️ Impossibile calcolare la simulazione per {ticker}.")
+            return
+        sim_text = (
+            f"📋 *SCHEDA OPERATIVA TRADE REPUBLIC: {sim['asset_name']}* (`{sim['ticker']}`)\n\n"
+            f"💶 *Budget Allocato:* `{sim['budget_eur']:.2f} €` (calibrato sul tuo PAC)\n"
+            f"🏷️ *Prezzo Attuale:* `{sim['current_price_eur']:.2f} €`\n"
+            f"📦 *Quote Esatte da Comprare:* `{sim['shares_to_buy']} quote`\n\n"
+            f"⚙️ *Parametri d'Ordine su Trade Republic:*\n"
+            f"• Tipo d'Ordine: *{sim['suggested_order_type']}*\n"
+            f"• Prezzo Limite Consigliato: `{sim['limit_price_eur']:.2f} €` (protezione anti-spread L&S)\n\n"
+            f"🎯 *Rapporto Rischio / Rendimento:*\n"
+            f"• Take Profit (TP1): `{sim['tp1_eur']:.2f} €` (R:R `{sim['risk_reward_tp1']}`)\n"
+            f"• Stop Loss Consigliato: `{sim['stop_loss_eur']:.2f} €`\n\n"
+            f"💡 *Come inserire l'ordine su Trade Republic:*\n"
+            f"Apri l'app > Cerca `{sim['ticker']}` > Clicca su **Acquista** > In alto a destra seleziona **Ordine Limite** > Inserisci `{sim['limit_price_eur']:.2f} €` e `{sim['shares_to_buy']}` quote."
+        )
+        await send_safe_text(query, sim_text)
+
 _last_briefing_sent: Dict[str, float] = {}
 
 # Funzione per inviare briefing automatici programmati (07:00 e 15:00 CET)
@@ -1296,9 +1437,10 @@ async def send_scheduled_briefing(app, slot: str, force: bool = False):
 async def post_init(application):
     """Configura il menu dei comandi nativo di Telegram e avvia lo scheduler dei briefing alle 07:00 e 15:00 CET."""
     bot_commands = [
-        BotCommand("portafoglio", "💼 Visualizza il portafoglio in tempo reale"),
+        BotCommand("portafoglio", "💼 Diagnosi del portafoglio e asset allocation"),
+        BotCommand("profilo", "👤 Profilo investitore, PAC e orizzonte temporale"),
         BotCommand("briefing", "🌅 Quadro di mercato, Wall Street ed Europa"),
-        BotCommand("occasioni", "💎 Scanner titoli a forte sconto statistico"),
+        BotCommand("occasioni", "💎 Top 10 occasioni a sconto con tesi del CIO"),
         BotCommand("cicli", "🔄 Radar ciclico Hurst & Battleplan"),
         BotCommand("simula", "🧮 Simula piano d'ordine su Trade Republic"),
         BotCommand("memoria", "🧠 Visualizza la memoria a lungo termine"),
@@ -1357,6 +1499,7 @@ def main():
     app.add_handler(CommandHandler("cicli", cicli_cmd))
     app.add_handler(CommandHandler("simula", simula_cmd))
     app.add_handler(CommandHandler("portafoglio", portfolio_cmd))
+    app.add_handler(CommandHandler("profilo", profile_cmd))
     app.add_handler(CommandHandler("memoria", memoria_cmd))
     app.add_handler(CommandHandler("add", add_cmd))
     app.add_handler(CallbackQueryHandler(handle_callback_query))
