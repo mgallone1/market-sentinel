@@ -147,6 +147,169 @@ LINEE GUIDA RIGOROSE DI RISPOSTA:
 """
         return self._call_gemini(prompt)
 
+    def generate_advisor_consultation(
+        self,
+        ticker: str,
+        pred_data: Dict[str, Any],
+        fund_data: Dict[str, Any],
+        news_list: list,
+        cycle_data: Optional[Dict[str, Any]] = None,
+        advanced_data: Optional[Dict[str, Any]] = None,
+        existing_position: Optional[Dict[str, Any]] = None,
+        portfolio_summary: Optional[Dict[str, Any]] = None,
+        user_profile: Optional[Dict[str, Any]] = None,
+        tr_quote: Optional[Dict[str, Any]] = None,
+        memory_context: str = ""
+    ) -> str:
+        """
+        Genera una vera consulenza strategica, umana, autorevole e ad alta convinzione
+        da Senior Portfolio Manager / Chief Investment Officer (CIO) personale per Michele.
+        Sostituisce gli elenchi grezzi di formule con un ragionamento economico chiaro,
+        integrato con il portafoglio esistente e con condotta tattica su Trade Republic.
+        """
+        if not self.client:
+            return ""
+
+        now_str = self._get_current_time_str()
+        cycle_data = cycle_data or {}
+        advanced_data = advanced_data or {}
+        user_profile = user_profile or {}
+
+        asset_name = fund_data.get("short_name") or fund_data.get("long_name") or ticker
+        cur_price_eur = pred_data.get("current_price_eur", 0.0)
+
+        # Trade Republic Lang & Schwarz Bid/Ask
+        tr_bid_str = f"{tr_quote['bid']:.2f} €" if (tr_quote and "bid" in tr_quote) else "N/D"
+        tr_ask_str = f"{tr_quote['ask']:.2f} €" if (tr_quote and "ask" in tr_quote) else "N/D"
+
+        # Posizione esistente in portafoglio
+        if existing_position:
+            sh = existing_position.get("shares", 0.0)
+            pmc = existing_position.get("pmc", 0.0)
+            pnl_pct = existing_position.get("pnl_pct", 0.0)
+            pnl_eur = existing_position.get("pnl_eur", 0.0)
+            icon = "🟢" if pnl_eur >= 0 else "🔴"
+            existing_pos_block = (
+                f"Michele possiede GIÀ questo strumento in portafoglio: {sh:.4f} quote in carico a un PMC di {pmc:.2f} €. "
+                f"Situazione P&L attuale: {icon} {pnl_eur:+.2f} € ({pnl_pct:+.2f}%)."
+            )
+        else:
+            existing_pos_block = "Michele NON possiede ancora questo strumento nel proprio portafoglio (nuova potenziale allocazione)."
+
+        # Rassegna notizie
+        news_details = []
+        for n in news_list[:4]:
+            t_str = n.get("title", "")
+            s_str = n.get("summary", "")
+            if t_str:
+                news_details.append(f"• {t_str}: {s_str}")
+        news_str = "\n".join(news_details) if news_details else "Nessuna notizia rilevante nelle ultime ore."
+
+        # Profilo Investitore
+        profile_str = (
+            f"Orizzonte: {user_profile.get('horizon', 'Lungo termine')} | "
+            f"Strategia: {user_profile.get('strategy', 'Core-Satellite')} | "
+            f"PAC Mensile stimato: {user_profile.get('monthly_pac_eur', 500)} € | "
+            f"Profilo Rischio: {user_profile.get('risk_profile', 'Dinamico')} | "
+            f"Broker: {user_profile.get('broker', 'Trade Republic')}"
+        )
+
+        limit_price = pred_data.get("limit_price_eur", round(cur_price_eur, 2))
+        tp1 = pred_data.get("take_profit_1_eur", round(cur_price_eur * 1.05, 2))
+        stop_loss = pred_data.get("stop_loss_eur", round(cur_price_eur * 0.94, 2))
+        rebound_prob = pred_data.get("mean_reversion_probability", "75%")
+        tempo_cycle = cycle_data.get("tempo_battleplan", "Consolidamento")
+        consiglio_cycle = cycle_data.get("consiglio_pratico", "Attesa")
+
+        prompt = f"""
+Sei il Chief Investment Officer (CIO) e Senior Wealth Advisor personale di Michele.
+DATA E ORA ATTUALE: {now_str}.
+
+Michele ti ha chiesto un parere su: {asset_name} ({ticker}).
+Tu NON sei un bot né un motore di ricerca che elenca dati grezzi. Tu sei il suo consulente di fiducia che ragiona, analizza, si assume una responsabilità strategica e gli dà un parere chiaro, netto e umano.
+
+DATI TECNICI ED ECONOMICI (USALI COME TUA INTELLIGENZA INTERNA, NON COPIARE FORMULE A RAFFICA):
+- Strumento: {asset_name} ({ticker})
+- Prezzo Live in Euro: {cur_price_eur:.2f} € (Trade Republic L&S: Denaro/Bid {tr_bid_str} | Lettera/Ask {tr_ask_str})
+- Portafoglio di Michele: {existing_pos_block}
+- Profilo Investitore: {profile_str}
+- Notizie e Catalyst delle ultime ore:
+{news_str}
+- Analisi Quantitativa Interna: Probabilità statistica di rimbalzo {rebound_prob}, Fase Ciclica di Migliorino: {tempo_cycle} ({consiglio_cycle}), Limite anti-spread stimato: {limit_price:.2f} €, Target rimbalzo TP1: {tp1:.2f} €, Livello allerta/SL: {stop_loss:.2f} €.
+
+LINEE GUIDA RIGOROSE DI REDAZIONE:
+1. DIVIETO ASSOLUTO DI ELENCHI MECCANICI DI INDICATORI:
+   - NON inserire elenchi puntati con 'RSI: 32', 'Z-Score: -2.1', 'Monte Carlo 10.000', 'Wyckoff Phase'.
+   - Traduci queste metriche in UN DISCORSO ECONOMICO E STRATEGICO FLUENTE.
+2. DIVIETO ASSOLUTO DI APERTURE COLLOQUIALI O PATERNALISTICHE ('Caro amico', 'Mettiamoci comodi', 'Mio caro', 'Entriamo nel vivo').
+   - Inizia con una riga istituzionale di testata e poi parla direttamente a Michele in tono sobrio, lucido, autorevole e rassicurante.
+3. STRUTTURA DELLA CONSULENZA (3 PUNTI FOCALI):
+   - 🔍 *1. La Situazione di Mercato (Cosa muove il titolo oggi):* Spiega in poche frasi limpide qual è il vero driver delle ultime ore (macro, rotazione, trimestrali, o sentiment).
+   - 🧭 *2. La Mia Valutazione (La Tesi del CIO):* Esprimi una convinzione netta. È una reale occasione a sconto o una trappola? Se Michele ha già il titolo in portafoglio, commenta l'impatto sul suo PMC (es. 'avendo un PMC a 81,50 €, comprare qui a 75 € abbassa la media e aumenta il rendimento atteso...'). Se non lo possiede, spiega come si colloca nella sua strategia Core-Satellite.
+   - ⚡ *3. Condotta Operativa su Trade Republic:* Spiega esattamente come operare (NON comprare a mercato per evitare lo spread di L&S; inserire un Ordine Limite a circa {limit_price:.2f} €; monitorare il target a {tp1:.2f} € e allerta a {stop_loss:.2f} €).
+4. Tutte le quotazioni RIGOROSAMENTE in Euro (€).
+"""
+        return self._call_gemini(prompt)
+
+    def generate_portfolio_strategic_diagnosis(
+        self,
+        portfolio_items: List[Dict[str, Any]],
+        total_invested: float,
+        total_current: float,
+        user_profile: Dict[str, Any]
+    ) -> str:
+        """
+        Genera la diagnosi complessiva di portafoglio da Senior Wealth Manager / CIO:
+        - Asset Allocation & Ripartizione del rischio (ETF Core vs Factor vs Crypto vs Single Stock)
+        - Analisi di correlazione e drawdown
+        - Prossima mossa esecutiva di ribilanciamento con il PAC o con la liquidità libera su Trade Republic.
+        """
+        if not self.client:
+            return ""
+
+        now_str = self._get_current_time_str()
+        items_summary = []
+        for p in portfolio_items:
+            items_summary.append(
+                f"• {p['asset_name']} ({p['ticker']}): Peso nel portafoglio: {p.get('weight_pct', 0.0):.1f}% | "
+                f"Controvalore: {p.get('current_val', 0.0):.2f} € | P&L: {p.get('pnl_eur', 0.0):+.2f} € ({p.get('pnl_pct', 0.0):+.2f}%)"
+            )
+        holdings_str = "\n".join(items_summary)
+
+        tot_pnl_eur = total_current - total_invested
+        tot_pnl_pct = ((total_current - total_invested) / total_invested) * 100 if total_invested > 0 else 0.0
+
+        prompt = f"""
+Sei il Chief Investment Officer (CIO) e Private Wealth Advisor di Michele.
+DATA E ORA ATTUALE: {now_str}.
+
+COMPOSIZIONE REALE DEL PORTAFOGLIO ATTUALE DI MICHELE:
+{holdings_str}
+- Capitale Totale Investito: {total_invested:.2f} €
+- Controvalore Totale Attuale: {total_current:.2f} €
+- Risultato Complessivo: {tot_pnl_eur:+.2f} € ({tot_pnl_pct:+.2f}%)
+- Profilo e Obiettivi dell'investitore: Orizzonte {user_profile.get('horizon', '5-10 anni')} | PAC Mensile {user_profile.get('monthly_pac_eur', 500)} € | Strategia: {user_profile.get('strategy', 'Core-Satellite')} | Broker: {user_profile.get('broker', 'Trade Republic')}.
+
+COMPITO OBBLIGATORIO:
+Redigi la *Diagnosi Strategica del Portafoglio* con il tono di un Senior Portfolio Manager in carne ed ossa (lucido, analitico, propositivo, che ragiona con lui).
+
+STRUTTURA LA CONSULENZA IN 2 SEZIONI CHIARE:
+🧭 *1. Diagnosi di Asset Allocation & Rischio:*
+- Analizza come è distribuito il capitale: qual è la quota dell'azionario globale Core (XDWD), quanto pesa il fattore Momentum (XDEM), quanto pesa la componente speculativa/satellitare (crypto Bitcoin/Cardano, single stock BYD).
+- Esprimi un giudizio schietto: il portafoglio è ben difeso o è troppo esposto alla volatilità? Sta lavorando bene per l'orizzonte di lungo termine?
+
+⚖️ *2. Ribilanciamento & Prossima Mossa Esecutiva:*
+- Dai un consiglio chiaro sulla prossima mossa: con la prossima tranche di liquidità o il prossimo PAC mensile, dove conviene incrementare? (Es. conviene abbassare il PMC sul titolo che ha corretto di più, oppure rafforzare il Core?).
+- Ricorda brevemente la gestione della liquidità su Trade Republic (mantenere una percentuale di liquidità remunerata al tasso del broker in attesa di cali di mercato).
+
+LINEE GUIDA RIGOROSE:
+- DIVIETO ASSOLUTO DI APERTURE PATERNALISTICHE ('Caro amico', 'Mettiamoci comodi', 'Mio caro').
+- Inizia direttamente con la diagnosi.
+- Parla in prima persona con autorevolezza istituzionale.
+- Tutte le cifre RIGOROSAMENTE in Euro (€).
+"""
+        return self._call_gemini(prompt)
+
     def generate_financial_commentary(
         self,
         ticker: str,
