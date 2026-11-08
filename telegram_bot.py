@@ -41,7 +41,7 @@ from services.news_sentiment import NewsSentimentService
 from services.opportunity_scanner import OpportunityScannerService
 from services.order_simulator import OrderSimulatorService
 from services.supabase_service import SupabaseService
-from services.llm_reasoning import LLMReasoningService
+from services.llm_reasoning import LLMReasoningService, clean_telegram_markdown, strip_markdown
 from services.cycle_analyst import CycleAnalystService
 from services.hurst_migliorino_cycles import HurstMigliorinoCycleService
 from services.cycle_radar import CycleRadarService
@@ -162,18 +162,26 @@ def resolve_ticker(text: str) -> Optional[str]:
     return None
 
 async def send_safe_text(update: Any, text: str, parse_mode: str = "Markdown", reply_markup: Optional[InlineKeyboardMarkup] = None):
-    """Invia messaggi spezzandoli automaticamente se superano il limite Telegram di 4096 caratteri."""
+    """
+    Invia messaggi spezzandoli automaticamente se superano il limite Telegram (3500 caratteri)
+    e sanificando preventivamente il Markdown per eliminare caratteri grezzi (*, #).
+    In caso di qualsiasi eccezione dell'entity parser di Telegram, esegue un fallback a strip_markdown
+    senza parse_mode per garantire che l'utente non veda MAI asterischi o cancelletti a schermo.
+    """
     target = getattr(update, "message", None) or update
-    if len(text) <= 3500:
+    cleaned = clean_telegram_markdown(text) if parse_mode == "Markdown" else text
+
+    if len(cleaned) <= 3500:
         try:
-            await target.reply_text(text, parse_mode=parse_mode, reply_markup=reply_markup)
-        except Exception:
-            await target.reply_text(text, reply_markup=reply_markup)
+            await target.reply_text(cleaned, parse_mode=parse_mode, reply_markup=reply_markup)
+        except Exception as e:
+            print(f"[!] Warning parsing Markdown Telegram ({e}): fallback a strip_markdown pulito")
+            await target.reply_text(strip_markdown(text), reply_markup=reply_markup)
         return
 
     chunks = []
     current_chunk = ""
-    for paragraph in text.split("\n\n"):
+    for paragraph in cleaned.split("\n\n"):
         if len(current_chunk) + len(paragraph) + 2 > 3500:
             if current_chunk:
                 chunks.append(current_chunk)
@@ -184,28 +192,30 @@ async def send_safe_text(update: Any, text: str, parse_mode: str = "Markdown", r
         chunks.append(current_chunk)
 
     for i, c in enumerate(chunks):
+        c_clean = clean_telegram_markdown(c) if parse_mode == "Markdown" else c
         markup = reply_markup if i == len(chunks) - 1 else None
         try:
-            await target.reply_text(c, parse_mode=parse_mode, reply_markup=markup)
-        except Exception:
-            await target.reply_text(c, reply_markup=markup)
+            await target.reply_text(c_clean, parse_mode=parse_mode, reply_markup=markup)
+        except Exception as e_chunk:
+            print(f"[!] Warning parsing chunk Markdown ({e_chunk}): fallback a strip_markdown pulito")
+            await target.reply_text(strip_markdown(c), reply_markup=markup)
 
 async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     ACTIVE_CHAT_IDS.add(user_id)
     msg = (
         "👋 *Ciao! Sono il tuo Financial Strategist & Chief Investment Officer (CIO) personale.*\n\n"
-        "Parliamo in italiano, con tutte le quotazioni e i calcoli convertiti rigorosamente in **Euro (€)**, pronti per le tue operazioni su Trade Republic.\n\n"
+        "Parliamo in italiano, con tutte le quotazioni e i calcoli convertiti rigorosamente in *Euro (€)*, pronti per le tue operazioni su Trade Republic.\n\n"
         "Ecco le funzioni di consulenza patrimoniale attive:\n\n"
         "🧭 *Consulenza Titolo con Tesi del CIO:* Scrivi semplicemente il nome o ticker (es. `XDEM`, `XDWD`, `NVIDIA`, `TSMC`, `BYD`) per ricevere una vera consulenza strategica, con giudizio chiaro e piano d'azione in Euro.\n"
         "💼 *Diagnosi Globale di Portafoglio:* Digita `/portafoglio` o inviami uno screenshot per visualizzare la diagnosi patrimoniale, i pesi di allocazione e il consiglio di ribilanciamento.\n"
         "👤 *Profilo Investitore & PAC:* Digita `/profilo` per vedere o aggiornare i tuoi obiettivi, il budget mensile e l'orizzonte temporale.\n"
         "💎 *Opportunity Hunter:* Digita `/occasioni` per scansionare all'istante l'intero mercato e trovare i titoli a forte sconto statistico con approfondimento discorsivo del CIO.\n"
         "🧮 *Simulatore Ordini Trade Republic:* Digita `/simula TICKER BUDGET` (es. `/simula XDEM 500`) per calcolare quote esatte e prezzo limite anti-spread.\n"
-        "🌅 *Briefing di Mercato:* Digita `/briefing` per il resoconto completo su Wall Street, Europa e geopolitica (erogato in automatico alle **07:00** e **15:00 CET**).\n"
+        "🌅 *Briefing di Mercato:* Digita `/briefing` per il resoconto completo su Wall Street, Europa e geopolitica (erogato in automatico alle *07:00* e *15:00 CET*).\n"
         "🎬 *Visione Video & Social:* Mandami un video o incolla un link da YouTube Shorts, TikTok, Instagram Reel o X per una decodifica approfondita di parlato e grafici con fact-checking del CIO."
     )
-    await update.message.reply_text(msg, parse_mode="Markdown")
+    await send_safe_text(update, msg)
 
 async def build_macro_briefing(slot: str = "auto") -> str:
     """
@@ -506,7 +516,7 @@ async def occasioni_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         lines.append("───────────────────────")
         lines.append("💡 *Consiglio Esecutivo su Trade Republic:*")
-        lines.append("Per evitare lo spread di Lang & Schwarz, usa sempre un **Ordine Limite** qualche centesimo sotto il prezzo corrente anziché comprare a mercato.")
+        lines.append("Per evitare lo spread di Lang & Schwarz, usa sempre un *Ordine Limite* qualche centesimo sotto il prezzo corrente anziché comprare a mercato.")
         lines.append("Per simulare l'acquisto di uno di questi titoli, scrivi ad esempio: `/simula XDEM 500`")
         detailed_report = "\n".join(lines)
 
@@ -807,12 +817,12 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     f"• P&L: {icon} `{diff_eur:+.2f} €` (`{diff_pct:+.2f}%`)\n\n"
                     f"La posizione è ora monitorata in tempo reale nel tuo `/portafoglio`."
                 )
-                await update.message.reply_text(reply, parse_mode="Markdown")
+                await send_safe_text(update, reply)
                 return
 
         # Se non è una posizione o è un grafico/notizia
         text_resp = analysis.get("text", "Analisi visiva completata.")
-        await update.message.reply_text(f"📸 *Analisi Visiva dello Screenshot:*\n\n{text_resp}", parse_mode="Markdown")
+        await send_safe_text(update, f"📸 *Analisi Visiva dello Screenshot:*\n\n{text_resp}")
     except Exception as e:
         print(f"Errore handle_photo: {e}")
         await update.message.reply_text("⚠️ Si è verificato un errore durante l'elaborazione dell'immagine. Puoi comunque registrarla manualmente con `/add TICKER QUOTE PREZZO`.")
@@ -884,7 +894,7 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         report_text = analysis.get("text", "Analisi video completata.")
-        await status_msg.edit_text("🎬 *Analisi Multimodale del Video:*")
+        await status_msg.edit_text("🎬 *Analisi Multimodale del Video:*", parse_mode="Markdown")
         await send_safe_text(update, report_text)
 
         supabase_svc.log_message(user_id, "user", f"[Video inviato] {caption}")
@@ -954,7 +964,7 @@ async def _handle_text_message_core(update: Update, context: ContextTypes.DEFAUL
                 return
 
             report_text = analysis.get("text", "Analisi video completata.")
-            await status_msg.edit_text("🎬 *Analisi Multimodale del Video Social:*")
+            await status_msg.edit_text("🎬 *Analisi Multimodale del Video Social:*", parse_mode="Markdown")
             await send_safe_text(update, report_text)
 
             supabase_svc.log_message(user_id, "user", raw_text)
@@ -1371,7 +1381,7 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
             f"• Take Profit (TP1): `{sim['tp1_eur']:.2f} €` (R:R `{sim['risk_reward_tp1']}`)\n"
             f"• Stop Loss Consigliato: `{sim['stop_loss_eur']:.2f} €`\n\n"
             f"💡 *Come inserire l'ordine su Trade Republic:*\n"
-            f"Apri l'app > Cerca `{sim['ticker']}` > Clicca su **Acquista** > In alto a destra seleziona **Ordine Limite** > Inserisci `{sim['limit_price_eur']:.2f} €` e `{sim['shares_to_buy']}` quote."
+            f"Apri l'app > Cerca `{sim['ticker']}` > Clicca su *Acquista* > In alto a destra seleziona *Ordine Limite* > Inserisci `{sim['limit_price_eur']:.2f} €` e `{sim['shares_to_buy']}` quote."
         )
         await send_safe_text(query, sim_text)
 
@@ -1399,13 +1409,14 @@ async def send_scheduled_briefing(app, slot: str, force: bool = False):
         chat_ids = supabase_svc.get_active_chat_ids()
         print(f"📡 [Scheduler] Invio a {len(chat_ids)} utenti registrati: {chat_ids}")
 
+        cleaned_briefing = clean_telegram_markdown(briefing_text)
         for chat_id in chat_ids:
             chunks = []
-            if len(briefing_text) <= 3500:
-                chunks = [briefing_text]
+            if len(cleaned_briefing) <= 3500:
+                chunks = [cleaned_briefing]
             else:
                 curr = ""
-                for p in briefing_text.split("\n\n"):
+                for p in cleaned_briefing.split("\n\n"):
                     if len(curr) + len(p) + 2 > 3500:
                         if curr:
                             chunks.append(curr)
@@ -1416,11 +1427,13 @@ async def send_scheduled_briefing(app, slot: str, force: bool = False):
                     chunks.append(curr)
 
             for chunk in chunks:
+                chunk_clean = clean_telegram_markdown(chunk)
                 try:
-                    await app.bot.send_message(chat_id=chat_id, text=chunk, parse_mode="Markdown")
-                except Exception:
+                    await app.bot.send_message(chat_id=chat_id, text=chunk_clean, parse_mode="Markdown")
+                except Exception as e_parse:
+                    print(f"[!] Warning parsing Markdown briefing Telegram ({e_parse}): fallback a strip_markdown pulito")
                     try:
-                        await app.bot.send_message(chat_id=chat_id, text=chunk)
+                        await app.bot.send_message(chat_id=chat_id, text=strip_markdown(chunk))
                     except Exception as e_plain:
                         print(f"[!] Errore invio briefing a {chat_id}: {e_plain}")
             

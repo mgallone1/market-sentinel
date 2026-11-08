@@ -7,6 +7,7 @@ analisi macro e visione artificiale per screenshot di Trade Republic.
 
 import os
 import json
+import re
 from pathlib import Path
 from typing import Dict, Any, Optional, List
 from zoneinfo import ZoneInfo
@@ -22,6 +23,84 @@ try:
     HAS_GENAI = True
 except ImportError:
     HAS_GENAI = False
+
+def clean_telegram_markdown(s: str) -> str:
+    """
+    Sanifica e normalizza qualsiasi testo o markdown LLM per Telegram Legacy Markdown:
+    - Converte heading markdown (# Titolo, ## Titolo, ### Titolo) in grassetto Telegram (*Titolo*)
+    - Rimuove tutti i cancelletti grezzi residui (#)
+    - Converte punti elenco con asterisco (* ) o trattino (- ) in bullet Unicode puliti (• )
+    - Converte grassetto standard (**testo** o ***testo***) in grassetto Telegram (*testo*)
+    - Rimuove marcatori di grassetto vuoti o frammentati
+    - Protegge gli underscore isolati all'interno di identificatori (es. EUR_USD, TNX_10Y)
+    - Garantisce il bilanciamento rigoroso di asterischi e underscore, eliminando o chiudendo entità orfane.
+    """
+    if not s:
+        return ""
+    
+    s = s.replace("\r\n", "\n").replace("\r", "\n")
+
+    # 1. Converti gli header (# Titolo, ## Titolo, ### Titolo) in grassetto Telegram (*Titolo*)
+    def _header_sub(m):
+        heading = m.group(1).strip()
+        heading = heading.strip('*')
+        return f"*{heading}*"
+    s = re.sub(r'^[ \t]*#{1,6}[ \t]+([^\n]+)$', _header_sub, s, flags=re.MULTILINE)
+    
+    # Rimuovi eventuali cancelletti isolati o inline
+    s = re.sub(r'#{1,6}\s*', '', s)
+
+    # 2. Converti elenchi puntati (* item, - item, + item) in bullet Unicode (• item) preservando l'indentazione
+    def _bullet_sub(m):
+        indent = m.group(1) or ""
+        return f"{indent}• "
+    s = re.sub(r'^([ \t]*)[\*\-\+][ \t]+', _bullet_sub, s, flags=re.MULTILINE)
+
+    # 3. Normalizza grassetto doppio e triplo
+    s = re.sub(r'\*\*\*([^\*\n]+)\*\*\*', r'*\1*', s)
+    s = re.sub(r'\*\*([^\*\n]+)\*\*', r'*\1*', s)
+    s = s.replace('**', '')
+
+    # 4. Proteggi underscore interni a ticker o identificatori (es. EUR_USD -> EUR\_USD)
+    s = re.sub(r'([a-zA-Z0-9])_([a-zA-Z0-9])', r'\1\_\2', s)
+
+    # 5. Bilanciamento asterischi: se il numero di asterischi non escapati è dispari, togli l'ultimo orfano
+    unescaped_stars = [m.start() for m in re.finditer(r'(?<!\\)\*', s)]
+    if len(unescaped_stars) % 2 != 0:
+        idx = unescaped_stars[-1]
+        s = s[:idx] + s[idx+1:]
+        
+    # 6. Bilanciamento underscore: se il numero di underscore non escapati è dispari, effettua l'escape dell'ultimo
+    unescaped_unders = [m.start() for m in re.finditer(r'(?<!\\)_', s)]
+    if len(unescaped_unders) % 2 != 0:
+        idx = unescaped_unders[-1]
+        s = s[:idx] + r'\_' + s[idx+1:]
+
+    return s.strip()
+
+def strip_markdown(s: str) -> str:
+    """
+    Rimuove completamente qualsiasi elemento di formattazione markdown per un fallback
+    testuale sicuro e pulitissimo senza asterischi o cancelletti visibili.
+    """
+    if not s:
+        return ""
+    s = clean_telegram_markdown(s)
+    s = s.replace('*', '')
+    s = s.replace('`', '')
+    s = s.replace(r'\_', '_')
+    s = re.sub(r'\[([^\]]+)\]\(([^)]+)\)', r'\1 (\2)', s)
+    s = re.sub(r'#{1,6}\s*', '', s)
+    return s.strip()
+
+TELEGRAM_FORMATTING_RULES = """
+REGOLE TASSATIVE DI FORMATTAZIONE PER TELEGRAM (ZERO ERRORI GRAFICI):
+- VIETATO CATEGORICAMENTE l'uso del cancelletto ('#', '##', '###', '####'): Telegram non supporta i titoli markdown con cancelletto e li mostrerebbe all'utente come orribili caratteri grezzi (#). Per i titoli, le intestazioni e i punti salienti, usa ESCLUSIVAMENTE il grassetto con singolo asterisco: *Titolo Sezione*.
+- VIETATO usare doppi asterischi per il grassetto ('**testo**'): in Telegram il grassetto si scrive SOLO con singolo asterisco: *testo*.
+- VIETATO usare l'asterisco ('* ') o il trattino ('- ') all'inizio riga per gli elenchi puntati: generano conflitti con il grassetto. Usa ESCLUSIVAMENTE il punto elenco Unicode ('• ') per qualsiasi lista puntata.
+- Non lasciare MAI asterischi spaiati o non chiusi.
+- Mantieni un layout visivo pulito, ordinato, con spaziature ariose ed emoji istituzionali.
+"""
 
 class LLMReasoningService:
     def __init__(self):
@@ -144,8 +223,10 @@ LINEE GUIDA RIGOROSE DI RISPOSTA:
 4. Spiega in un breve paragrafo dove ci troviamo nel ciclo attuale e se ha senso attendere o impostare un ordine limite.
 5. Tono sobrio, istituzionale, posato, privo di enfasi teatrale o formule paternalistiche.
 6. Tutte le cifre RIGOROSAMENTE in Euro (€).
+{TELEGRAM_FORMATTING_RULES}
 """
-        return self._call_gemini(prompt)
+        res = self._call_gemini(prompt)
+        return clean_telegram_markdown(res)
 
     def generate_advisor_consultation(
         self,
@@ -248,8 +329,10 @@ LINEE GUIDA RIGOROSE DI REDAZIONE:
    - 🧭 *2. La Mia Valutazione (La Tesi del CIO):* Esprimi una convinzione netta. È una reale occasione a sconto o una trappola? Se Michele ha già il titolo in portafoglio, commenta l'impatto sul suo PMC (es. 'avendo un PMC a 81,50 €, comprare qui a 75 € abbassa la media e aumenta il rendimento atteso...'). Se non lo possiede, spiega come si colloca nella sua strategia Core-Satellite.
    - ⚡ *3. Condotta Operativa su Trade Republic:* Spiega esattamente come operare (NON comprare a mercato per evitare lo spread di L&S; inserire un Ordine Limite a circa {limit_price:.2f} €; monitorare il target a {tp1:.2f} € e allerta a {stop_loss:.2f} €).
 4. Tutte le quotazioni RIGOROSAMENTE in Euro (€).
+{TELEGRAM_FORMATTING_RULES}
 """
-        return self._call_gemini(prompt)
+        res = self._call_gemini(prompt)
+        return clean_telegram_markdown(res)
 
     def generate_portfolio_strategic_diagnosis(
         self,
@@ -307,8 +390,10 @@ LINEE GUIDA RIGOROSE:
 - Inizia direttamente con la diagnosi.
 - Parla in prima persona con autorevolezza istituzionale.
 - Tutte le cifre RIGOROSAMENTE in Euro (€).
+{TELEGRAM_FORMATTING_RULES}
 """
-        return self._call_gemini(prompt)
+        res = self._call_gemini(prompt)
+        return clean_telegram_markdown(res)
 
     def generate_financial_commentary(
         self,
@@ -395,8 +480,10 @@ LINEE GUIDA DI COMPOSIZIONE (OBBLIGATORIE):
 - ANCORAGGIO TEMPORALE E FATTUALE: Siamo a {now_str}. È severamente vietato inventare o citare notizie e crolli del passato (come il rilascio di DeepSeek del gennaio 2025 o vecchi sell-off storici) attribuendoli a oggi. Se non ci sono notizie specifiche recenti nei dati forniti, spiega l'andamento basandoti rigorosamente sulla pura dinamica tecnica dei prezzi, sui flussi macro (tassi ^TNX, VIX, dollaro) e sui cicli.
 - Tono: Istituzionale, didattico, posato, lucido, autorevole ma accessibile e privo di melodrammi.
 - Tutte le cifre RIGOROSAMENTE in Euro (€).
+{TELEGRAM_FORMATTING_RULES}
 """
-        return self._call_gemini(prompt)
+        res = self._call_gemini(prompt)
+        return clean_telegram_markdown(res)
 
     def analyze_screenshot(self, image_bytes: bytes, mime_type: str = "image/png") -> Dict[str, Any]:
         """
@@ -443,7 +530,7 @@ Analizza questa immagine inviata dall'utente:
         return {
             "type": "position" if (pos_data and pos_data.get("is_position")) else "visual_analysis",
             "position_data": pos_data,
-            "text": text_resp
+            "text": clean_telegram_markdown(text_resp)
         }
 
     def analyze_video(self, video_path: str, user_prompt: str = "") -> Dict[str, Any]:
@@ -497,7 +584,7 @@ LINEE GUIDA RIGOROSE:
 - DIVIETO ASSOLUTO DI FORMULE COLLOQUIALI O PATERNALISTICHE ('Caro amico', 'Mettiamoci comodi', 'Mio caro', 'Entriamo nel vivo'). Inizia DIRETTAMENTE con il report analitico.
 - ANCORAGGIO TEMPORALE: Siamo a {now_str}. Tassativamente vietato citare anni passati (2024, 2025) per giustificare i mercati di oggi.
 - Prezzi e valutazioni RIGOROSAMENTE in Euro (€).
-- Formattazione Markdown pulita, con elenchi puntati ed emoji sobrie per una lettura perfetta su Telegram.
+{TELEGRAM_FORMATTING_RULES}
 """
         upload = None
         try:
@@ -553,7 +640,7 @@ LINEE GUIDA RIGOROSE:
                 "type": "portfolio" if is_portfolio else "social_analysis",
                 "is_portfolio": is_portfolio,
                 "positions": positions,
-                "text": text_resp
+                "text": clean_telegram_markdown(text_resp)
             }
         except Exception as e:
             print(f"[LLMReasoningService] Errore analyze_video: {e}")
@@ -632,8 +719,10 @@ LINEE GUIDA RIGOROSE DI REDAZIONE E ANCORAGGIO TEMPORALE:
    - *4. Bussola Operativa per la Seduta:* Livelli di attenzione, orario dei dati macro cruciali e disciplina su Trade Republic.
 4. Tono istituzionale, posato, lucido ed elegante.
 5. Tutte le quotazioni rigorosamente in Euro (€).
+{TELEGRAM_FORMATTING_RULES}
 """
-        return self._call_gemini(prompt)
+        res = self._call_gemini(prompt)
+        return clean_telegram_markdown(res)
 
     def answer_general_query(self, query: str, memory_context: str = "") -> str:
         """
@@ -659,8 +748,10 @@ LINEE GUIDA RIGOROSE:
    - Tono da Senior Portfolio Manager e CIO: lucido, asciutto, autorevole, analitico, rispettoso del tempo dell'interlocutore.
    - Zero enfasi melodrammatica, zero allarmismo, zero padding.
 3. Prezzi sempre in Euro (€).
+{TELEGRAM_FORMATTING_RULES}
 """
-        return self._call_gemini(prompt)
+        res = self._call_gemini(prompt)
+        return clean_telegram_markdown(res)
 
     def generate_detailed_opportunities_report(
         self,
@@ -709,5 +800,7 @@ LINEE GUIDA RIGOROSE:
 - Tutte le quotazioni RIGOROSAMENTE in Euro (€).
 - Per ciascuno dei 10 strumenti mantieni la numerazione (1, 2, 3... 10), il nome, il ticker, i prezzi in Euro e il paragrafo di approfondimento discorsivo '📝 Perché è un'occasione:'.
 - Mantieni una formattazione Markdown ordinata con elenchi puntati e grassetti per rendere la lettura chiara e piacevole su Telegram.
+{TELEGRAM_FORMATTING_RULES}
 """
-        return self._call_gemini(prompt)
+        res = self._call_gemini(prompt)
+        return clean_telegram_markdown(res)
