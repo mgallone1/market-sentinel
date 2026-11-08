@@ -106,7 +106,7 @@ class LLMReasoningService:
     def __init__(self):
         self.api_key = os.getenv("GEMINI_API_KEY", "").strip()
         self.client = None
-        self.models_to_try = ["gemini-3.8-flash", "gemini-3.5-flash", "gemini-3.1-flash-lite"]
+        self.models_to_try = ["gemini-3.1-flash-lite", "gemini-3.5-flash-lite", "gemini-3.5-flash", "gemini-3.8-flash"]
         if HAS_GENAI and self.api_key:
             try:
                 self.client = genai.Client(api_key=self.api_key)
@@ -131,8 +131,11 @@ class LLMReasoningService:
 
     def classify_intent(self, text: str, recent_history_summary: str = "") -> Dict[str, Any]:
         """
-        Classifica l'intenzione dell'utente (analisi ticker, verifica portafoglio/numeri, panoramica mercato, o chat libera)
-        tenendo conto del contesto e degli ultimi scambi della conversazione.
+        Classifica l'intenzione dell'utente con massima precisione:
+        - Distingue se chiede una spiegazione di un ribasso generale (market_explanation)
+        - Se chiede di un ticker specifico o perché scende quel ticker (ticker_analysis)
+        - Se richiede esplicitamente il bollettino/briefing periodico (market_briefing)
+        - Oppure portafoglio, occasioni o chat.
         """
         context_block = f"CONTESTO DELLA CHAT RECENTE:\n{recent_history_summary}\n" if recent_history_summary else ""
         prompt = f"""
@@ -143,21 +146,23 @@ Sei un classificatore di intenti finanziari avanzato. Analizza attentamente il m
 
 DISTINZIONE CRITICA DEGLI INTENTI:
 1. "opportunities":
-   - Se l'utente chiede le migliori occasioni, opportunità di mercato, titoli a sconto statistico, idee di trading o cosa comprare (es. "le migliori occasioni", "quali sono le occasioni", "cosa comprare oggi", "titoli a sconto", "migliori opportunità", "occasioni").
+   - Se l'utente chiede le migliori occasioni, opportunità di mercato, titoli a sconto statistico, idee di trading o cosa comprare (es. "le migliori occasioni", "cosa comprare oggi", "titoli a sconto", "migliori opportunità").
 2. "update_portfolio_ticker":
-   - Se l'utente chiede di correggere, cambiare, modificare o sostituire uno o più ticker nel portafoglio (es. "hai sbagliato i ticket dei due etf sono XDWD e XDEM", "aggiorna il portafoglio con i ticker giusti", "cambia il ticker di BYD in BY6.F", "sostituisci URTH con XDWD").
+   - Se l'utente chiede di correggere, cambiare, modificare o sostituire uno o più ticker nel portafoglio (es. "cambia il ticker di BYD in BY6.F", "sostituisci URTH con XDWD", "aggiorna con XDEM").
 3. "portfolio":
-   - Se l'utente chiede di vedere il portafoglio o chiarimenti sui calcoli/numeri/controvalore mostrati senza specificare cambi di ticker (es. "mostra portafoglio", "ricontrolla i calcoli", "non si trovano i numeri").
-4. "ticker_analysis":
-   - Solo ed esclusivamente quando l'utente chiede una NUOVA analisi tecnica/fondamentale/ciclica di un'azione o crypto (es. "cosa ne pensi di Apple", "analizza Nvidia", "Marvell", "dimmi di Bitcoin").
-5. "market_overview":
-   - Se chiede cosa è successo sul mercato in generale, news o il briefing (es. "cosa succede oggi in borsa", "briefing", "aggiornamento mercato").
-6. "general_chat":
-   - Domande generiche, concettuali o saluti.
+   - Se l'utente chiede di vedere il portafoglio o chiarimenti sui calcoli/numeri/controvalore mostrati senza chiedere le cause macro del mercato (es. "mostra portafoglio", "/portafoglio", "ricontrolla i calcoli", "situazione portafoglio").
+4. "market_briefing":
+   - SOLO ed ESCLUSIVAMENTE quando l'utente richiede espressamente il bollettino periodico o il briefing programmato (es. "/briefing", "dammi il briefing", "leggi il briefing", "briefing del mattino").
+5. "market_explanation":
+   - Quando l'utente chiede il PERCHÉ o una spiegazione di un movimento generale di mercato, ribassi, crolli, correzioni, o spiegazioni sulla giornata finanziaria senza specificare una singola azione (es. "come mai sta scendendo tutto?", "perché crolla tutto?", "perché i mercati sono tutti rossi?", "cosa sta succedendo oggi in borsa?", "perché scendono i mercati?", "c'è il panico sui mercati?", "perché sta scendendo il mercato?").
+6. "ticker_analysis":
+   - Quando l'utente chiede di un'azione o criptovaluta specifica, compreso il PERCHÉ stia salendo o scendendo (es. "come mai bitcoin sta scendendo?", "perché scende nvidia?", "cosa ne pensi di apple", "perché crolla tesla?", "dimmi di XDEM", "bitcoin", "marvell", "byd").
+7. "general_chat":
+   - Saluti, domande concettuali o filosofiche sulla finanza.
 
 Restituisci ESCLUSIVAMENTE un JSON valido:
 {{
-  "intent": "opportunities" | "update_portfolio_ticker" | "portfolio" | "ticker_analysis" | "market_overview" | "general_chat",
+  "intent": "opportunities" | "update_portfolio_ticker" | "portfolio" | "market_briefing" | "market_explanation" | "ticker_analysis" | "general_chat",
   "ticker": "SIMBOLO_TICKER" o null,
   "replacements": [
      {{"old_ticker_or_name": "...", "new_ticker": "..."}}
@@ -240,13 +245,14 @@ LINEE GUIDA RIGOROSE DI RISPOSTA:
         portfolio_summary: Optional[Dict[str, Any]] = None,
         user_profile: Optional[Dict[str, Any]] = None,
         tr_quote: Optional[Dict[str, Any]] = None,
-        memory_context: str = ""
+        memory_context: str = "",
+        user_query: str = ""
     ) -> str:
         """
         Genera una vera consulenza strategica, umana, autorevole e ad alta convinzione
         da Senior Portfolio Manager / Chief Investment Officer (CIO) personale per Michele.
-        Sostituisce gli elenchi grezzi di formule con un ragionamento economico chiaro,
-        integrato con il portafoglio esistente e con condotta tattica su Trade Republic.
+        Interpreta le parole esatte di Michele (es. se chiede perché il titolo scende),
+        spiega la dinamica causale e fornisce una guida esecutiva su Trade Republic.
         """
         if not self.client:
             return ""
@@ -302,12 +308,14 @@ LINEE GUIDA RIGOROSE DI RISPOSTA:
         tempo_cycle = cycle_data.get("tempo_battleplan", "Consolidamento")
         consiglio_cycle = cycle_data.get("consiglio_pratico", "Attesa")
 
+        user_query_block = f'\nRICHIESTA O DOMANDA ESATTA DI MICHELE:\n"{user_query}"\n' if user_query else ""
+
         prompt = f"""
 Sei il Chief Investment Officer (CIO) e Senior Wealth Advisor personale di Michele.
 DATA E ORA ATTUALE: {now_str}.
-
+{user_query_block}
 Michele ti ha chiesto un parere su: {asset_name} ({ticker}).
-Tu NON sei un bot né un motore di ricerca che elenca dati grezzi. Tu sei il suo consulente di fiducia che ragiona, analizza, si assume una responsabilità strategica e gli dà un parere chiaro, netto e umano.
+Tu NON sei un bot né un motore di ricerca che elenca dati grezzi o fa il semplice reporter. Tu sei il suo consulente di fiducia che ragiona, analizza, si assume una responsabilità strategica, interpreta le sue parole e gli dà un parere chiaro, netto ed economico.
 
 DATI TECNICI ED ECONOMICI (USALI COME TUA INTELLIGENZA INTERNA, NON COPIARE FORMULE A RAFFICA):
 - Strumento: {asset_name} ({ticker})
@@ -318,17 +326,21 @@ DATI TECNICI ED ECONOMICI (USALI COME TUA INTELLIGENZA INTERNA, NON COPIARE FORM
 {news_str}
 - Analisi Quantitativa Interna: Probabilità statistica di rimbalzo {rebound_prob}, Fase Ciclica di Migliorino: {tempo_cycle} ({consiglio_cycle}), Limite anti-spread stimato: {limit_price:.2f} €, Target rimbalzo TP1: {tp1:.2f} €, Livello allerta/SL: {stop_loss:.2f} €.
 
-LINEE GUIDA RIGOROSE DI REDAZIONE:
-1. DIVIETO ASSOLUTO DI ELENCHI MECCANICI DI INDICATORI:
+LINEE GUIDA RIGOROSE DI REDAZIONE E INTERPRETAZIONE (ZERO BOT, ZERO REPORTER):
+1. INTERPRETAZIONE DIRETTA DELLE PAROLE DI MICHELE:
+   - Rispondi prima di tutto alla domanda esatta posta da Michele.
+   - Se ti ha chiesto specificamente "come mai bitcoin sta scendendo?" (o perché un titolo scende/crolla), la primissima cosa che devi fare è SPIEGARE con profondità economica le CAUSE REALI della discesa (es. prese di beneficio dopo massimi, liquidazioni a cascata di posizioni a leva sui derivati/futures crypto, impatto del rialzo dei rendimenti obbligazionari USA ^TNX o deflussi dagli ETF spot). Non limitarti a ripetere il prezzo: spiega la meccanica finanziaria.
+   - Se esprime preoccupazione, rassicuralo con calma e dati oggettivi (volatilità fisiologica, prospettiva di lungo termine).
+2. DIVIETO ASSOLUTO DI ELENCHI MECCANICI DI INDICATORI:
    - NON inserire elenchi puntati con 'RSI: 32', 'Z-Score: -2.1', 'Monte Carlo 10.000', 'Wyckoff Phase'.
-   - Traduci queste metriche in UN DISCORSO ECONOMICO E STRATEGICO FLUENTE.
-2. DIVIETO ASSOLUTO DI APERTURE COLLOQUIALI O PATERNALISTICHE ('Caro amico', 'Mettiamoci comodi', 'Mio caro', 'Entriamo nel vivo').
+   - Traduci queste metriche in UN RAGIONAMENTO ECONOMICO E STRATEGICO FLUENTE.
+3. DIVIETO ASSOLUTO DI APERTURE COLLOQUIALI O PATERNALISTICHE ('Caro amico', 'Mettiamoci comodi', 'Mio caro', 'Entriamo nel vivo').
    - Inizia con una riga istituzionale di testata e poi parla direttamente a Michele in tono sobrio, lucido, autorevole e rassicurante.
-3. STRUTTURA DELLA CONSULENZA (3 PUNTI FOCALI):
-   - 🔍 *1. La Situazione di Mercato (Cosa muove il titolo oggi):* Spiega in poche frasi limpide qual è il vero driver delle ultime ore (macro, rotazione, trimestrali, o sentiment).
+4. STRUTTURA DELLA CONSULENZA (3 PUNTI FOCALI):
+   - 🔍 *1. Cosa Muove lo Strumento Oggi (Spiegazione Dinamica):* Spiega in modo chiaro e approfondito cosa c'è dietro il movimento odierno (macro, rotazione, trimestrali, o sentiment).
    - 🧭 *2. La Mia Valutazione (La Tesi del CIO):* Esprimi una convinzione netta. È una reale occasione a sconto o una trappola? Se Michele ha già il titolo in portafoglio, commenta l'impatto sul suo PMC (es. 'avendo un PMC a 81,50 €, comprare qui a 75 € abbassa la media e aumenta il rendimento atteso...'). Se non lo possiede, spiega come si colloca nella sua strategia Core-Satellite.
    - ⚡ *3. Condotta Operativa su Trade Republic:* Spiega esattamente come operare (NON comprare a mercato per evitare lo spread di L&S; inserire un Ordine Limite a circa {limit_price:.2f} €; monitorare il target a {tp1:.2f} € e allerta a {stop_loss:.2f} €).
-4. Tutte le quotazioni RIGOROSAMENTE in Euro (€).
+5. Tutte le quotazioni RIGOROSAMENTE in Euro (€).
 {TELEGRAM_FORMATTING_RULES}
 """
         res = self._call_gemini(prompt)
@@ -390,6 +402,84 @@ LINEE GUIDA RIGOROSE:
 - Inizia direttamente con la diagnosi.
 - Parla in prima persona con autorevolezza istituzionale.
 - Tutte le cifre RIGOROSAMENTE in Euro (€).
+{TELEGRAM_FORMATTING_RULES}
+"""
+        res = self._call_gemini(prompt)
+        return clean_telegram_markdown(res)
+
+    def explain_market_movement(
+        self,
+        user_query: str,
+        indices_data: list,
+        news_list: list,
+        user_portfolio: Optional[List[Dict[str, Any]]] = None,
+        user_profile: Optional[Dict[str, Any]] = None,
+        memory_context: str = ""
+    ) -> str:
+        """
+        Spiega in modo approfondito, economico e umano cosa muove il mercato e perché c'è un ribasso/rialzo
+        (es. 'come mai sta scendendo tutto?', 'perché scendono i mercati oggi?').
+        Interpreta le parole e lo stato d'animo di Michele senza fare il reporter o dumping di briefing preconfezionati.
+        """
+        if not self.client:
+            return ""
+
+        now_str = self._get_current_time_str()
+        user_profile = user_profile or {}
+        user_portfolio = user_portfolio or []
+
+        indices_str = "\n".join([f"• {item['label']}: {item['price_eur']} € ({item['change']:+.2f}%)" for item in indices_data])
+        news_str = "\n".join([f"• [{n.get('source', 'Top Media')}]: {n.get('title', '')} - {n.get('summary', '')[:140]}" for n in news_list[:8]])
+
+        port_items = []
+        for p in user_portfolio:
+            port_items.append(f"• {p.get('asset_name', p.get('ticker'))} ({p.get('ticker')}): {p.get('shares')} quote a PMC {p.get('average_buy_price')} €")
+        port_block = "\n".join(port_items) if port_items else "Portafoglio in fase di prima configurazione."
+
+        mem_block = f"\nCONTESTO CONVERSAZIONE RECENTE:\n{memory_context}\n" if memory_context else ""
+
+        prompt = f"""
+Sei il Chief Investment Officer (CIO) e Senior Wealth Advisor personale di Michele.
+DATA E ORA ATTUALE: {now_str}.
+{mem_block}
+DOMANDA ESATTA DI MICHELE:
+"{user_query}"
+
+QUADRO DI MERCATO LIVE (TUTTO IN EURO €):
+{indices_str}
+
+NOTIZIE E SQUAWK DI MERCATO IN TEMPO REALE (Bloomberg, CNBC, FinancialJuice, CoinDesk):
+{news_str}
+
+PORTAFOGLIO REALE DI MICHELE:
+{port_block}
+Profilo Investitore: Orizzonte {user_profile.get('horizon', '5-10 anni')} | Strategia {user_profile.get('strategy', 'Core-Satellite')} | PAC Mensile {user_profile.get('monthly_pac_eur', 500)} € | Broker: Trade Republic.
+
+COMPITO OBBLIGATORIO (ZERO REPORTER, ZERO BRIEFING PRECONFEZIONATO):
+Michele NON vuole un bollettino delle quotazioni (/briefing) e NON vuole che gli ripeti semplicemente i prezzi degli indici.
+Michele ti sta chiedendo una SPIEGAZIONE da vero consulente sul PERCHÉ si sta verificando questo movimento (es. perché vede rosso o sta scendendo tutto).
+Interpreta il suo dubbio o la sua apprensione e rispondi con un ragionamento lucido, rassicurante, logico ed economico.
+
+STRUTTURA LA CONSULENZA IN 4 PUNTI CHIAVE:
+🧭 *1. Lettura della Situazione & Risposta Diretta:*
+- Rispondi subito alla domanda di Michele senza tergiversare. Riconosci la discesa con obiettività, spiegando se si tratta di una correzione tecnica fisiologica o di una reazione a catalizzatori macro.
+
+🔍 *2. I Veri Driver Dietro la Discesa (Cosa muove il mercato oggi):*
+- Spiega in modo chiaro e comprensibile i meccanismi macroeconomici in gioco (es. rialzo dei rendimenti dei Treasury USA ^TNX, rotazione dai titoli tecnologici/growth, tassi delle banche centrali, tensioni geopolitiche o dati macro).
+- Se Michele ha crypto o menziona Bitcoin, spiega il legame con la liquidità globale e le liquidazioni a cascata sui derivati.
+
+💼 *3. Impatto sul Tuo Portafoglio & Strategia PAC:*
+- Spiega come il suo portafoglio (ETF Core World XDWD e Momentum XDEM) assorbe questa fase.
+- Ricorda il grande vantaggio matematico del PAC: le giornate di ribasso diffuso consentono alle tranche mensili di comprare quote a forte sconto (Dollar-Cost Averaging), abbassando il prezzo medio di carico.
+
+⚡ *4. Bussola Operativa del CIO (Cosa Fare e Cosa Evitare):*
+- Vietato farsi guidare dall'emotività o vendere sui ribassi.
+- Mantenere la liquidità remunerata su Trade Republic pronta per cogliere occasioni con Ordini Limite mirati.
+
+LINEE GUIDA RIGOROSE:
+- DIVIETO CATEGORICO di formule paternalistiche o teatrali ('Caro amico', 'Mettiamoci comodi', 'Mio caro', 'Entriamo nel vivo'). Inizia direttamente con la risposta.
+- Tono: Istituzionale, posato, rassicurante, analitico e autorevole.
+- Quotazioni rigorosamente in Euro (€).
 {TELEGRAM_FORMATTING_RULES}
 """
         res = self._call_gemini(prompt)

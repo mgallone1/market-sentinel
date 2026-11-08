@@ -233,18 +233,12 @@ async def build_macro_briefing(slot: str = "auto") -> str:
     m = now_rome.minute
     cur_time = now_rome.strftime("%H:%M")
 
-    if slot == "auto":
-        if 6 <= h < 12:
-            slot = "morning"
-        elif 12 <= h < 17 or (h == 17 and m < 30):
-            slot = "afternoon"
-        elif (h == 17 and m >= 30) or (18 <= h <= 22):
-            slot = "evening"
-        else:
-            slot = "night"
-
+async def fetch_macro_market_context():
+    """
+    Raccoglie in tempo reale le quotazioni degli indici chiave (convertiti in Euro)
+    e le ultime breaking news (FinancialJuice, Google Realtime, RSS verificati).
+    """
     eur_rate = MarketDataService.get_eur_usd_rate()
-    
     indices = [
         ("S&P 500 (SPY)", "SPY"),
         ("Nasdaq 100 (QQQ)", "QQQ"),
@@ -255,8 +249,63 @@ async def build_macro_briefing(slot: str = "auto") -> str:
         ("Bitcoin (BTC)", "BTC-EUR"),
         ("Oro (GLD)", "GLD")
     ]
-    
     indices_summary = []
+    for label, sym in indices:
+        try:
+            q = MarketDataService.get_realtime_quote(sym)
+            p = q.get("last_price", 0.0)
+            c = q.get("change_pct", 0.0)
+            is_already_eur = MarketDataService.is_euro_asset(sym)
+            p_eur = p if is_already_eur else (p / eur_rate if eur_rate > 0 else p)
+            indices_summary.append({
+                "label": label,
+                "price_eur": round(p_eur, 2),
+                "change": round(c, 2)
+            })
+        except Exception as e:
+            print(f"[!] Errore recupero {sym}: {e}")
+
+    from config import RSS_NEWS_FEEDS, FAST_SQUAWK_CHANNELS
+    squawk_news = NewsSentimentService.fetch_telegram_squawk_news(FAST_SQUAWK_CHANNELS, max_items_per_channel=5)
+    google_fast_news = NewsSentimentService.fetch_google_realtime_news("stock market breaking news when:4h", max_items=4)
+    institutional_news = NewsSentimentService.fetch_global_rss_news(RSS_NEWS_FEEDS, max_per_feed=2)
+    global_news = squawk_news + google_fast_news + institutional_news
+
+    for sym in ["NVDA", "SMH", "TSM"]:
+        try:
+            tk_news = MarketDataService.get_ticker_news(sym, max_items=2)
+            global_news.extend(tk_news)
+        except Exception:
+            pass
+
+    return indices_summary, global_news, eur_rate
+
+async def build_macro_briefing(slot: str = "auto") -> str:
+    """
+    Costruisce il briefing macro e geopolitico in tempo reale:
+    - Calcola la sessione di mercato in base all'ora esatta di Roma:
+      * morning: 06:00-11:59 (apertura Europa & Asia overnight)
+      * afternoon: 12:00-17:29 (metà seduta UE & sessione USA)
+      * evening: 17:30-22:30 (chiusura Europa, Wall Street closing & bilancio)
+      * night: 22:31-05:59 (overnight, crypto 24/7 & pre-Asia)
+    - Mantiene memoria del briefing precedente tramite Supabase.
+    - Prezzi espressi rigorosamente in Euro (€).
+    """
+    now_rome = datetime.now(ZoneInfo("Europe/Rome"))
+    h = now_rome.hour
+    m = now_rome.minute
+    cur_time = now_rome.strftime("%H:%M")
+
+    if slot == "auto":
+        if 6 <= h < 12:
+            slot = "morning"
+        elif 12 <= h < 17 or (h == 17 and m < 30):
+            slot = "afternoon"
+        elif (h == 17 and m >= 30) or (18 <= h <= 22):
+            slot = "evening"
+        else:
+            slot = "night"
+
     if slot == "morning":
         title_header = f"🌅 *BRIEFING MATTINO (ORE {cur_time} CET) - APERTURA BORSE EUROPEE*"
     elif slot == "afternoon":
@@ -266,50 +315,16 @@ async def build_macro_briefing(slot: str = "auto") -> str:
     else:
         title_header = f"🌌 *BRIEFING NOTTURNO (ORE {cur_time} CET) - OVERNIGHT & MERCATI GLOBALI*"
 
+    indices_summary, global_news, eur_rate = await fetch_macro_market_context()
+
     header_lines = [
         title_header + "\n",
         f"💶 *Tasso di Cambio EUR/USD:* `1.00 € = {eur_rate:.4f} $`\n",
         "📊 *Indici & Asset Chiave (in Euro):*"
     ]
-
-    for label, sym in indices:
-        try:
-            q = MarketDataService.get_realtime_quote(sym)
-            p = q.get("last_price", 0.0)
-            c = q.get("change_pct", 0.0)
-            is_already_eur = MarketDataService.is_euro_asset(sym)
-            p_eur = p if is_already_eur else (p / eur_rate if eur_rate > 0 else p)
-            icon = "🟢" if c >= 0 else "🔴"
-            header_lines.append(f"{icon} *{label}:* `{p_eur:.2f} €` (`{c:+.2f}%`)")
-            indices_summary.append({
-                "label": label,
-                "price_eur": round(p_eur, 2),
-                "change": round(c, 2)
-            })
-        except Exception as e:
-            print(f"[!] Errore recupero {sym}: {e}")
-
-    # Raccogli flussi ultra-rapidi: Squawk Telegram + Google News Realtime + Feed Istituzionali
-    from config import RSS_NEWS_FEEDS, FAST_SQUAWK_CHANNELS
-    
-    # 1. Breaking Squawk in tempo reale sub-minuto (FinancialJuice terminal stream)
-    squawk_news = NewsSentimentService.fetch_telegram_squawk_news(FAST_SQUAWK_CHANNELS, max_items_per_channel=5)
-    
-    # 2. Google News Real-Time (notizie ad altissima frequenza emerse nelle ultime 4 ore)
-    google_fast_news = NewsSentimentService.fetch_google_realtime_news("stock market breaking news when:4h", max_items=4)
-    
-    # 3. Feed RSS Istituzionali verificati (ForexLive, Bloomberg, CNBC, BBC, etc.)
-    institutional_news = NewsSentimentService.fetch_global_rss_news(RSS_NEWS_FEEDS, max_per_feed=2)
-    
-    global_news = squawk_news + google_fast_news + institutional_news
-    
-    # News mirate sui principali leader di mercato
-    for sym in ["NVDA", "SMH", "TSM"]:
-        try:
-            tk_news = MarketDataService.get_ticker_news(sym, max_items=2)
-            global_news.extend(tk_news)
-        except Exception:
-            pass
+    for item in indices_summary:
+        icon = "🟢" if item["change"] >= 0 else "🔴"
+        header_lines.append(f"{icon} *{item['label']}:* `{item['price_eur']:.2f} €` (`{item['change']:+.2f}%`)")
 
     # Recupera il contesto del briefing precedente per continuità
     prev_briefing = supabase_svc.get_latest_macro_briefing()
@@ -1034,9 +1049,41 @@ async def _handle_text_message_core(update: Update, context: ContextTypes.DEFAUL
         await occasioni_cmd(update, context)
         return
 
-    # 2. Se l'utente chiede una panoramica di mercato
-    if intent == "market_overview":
-        await briefing_cmd(update, context)
+    # 2. Se l'utente chiede espressamente il bollettino / briefing programmato
+    if intent in ["market_briefing", "market_overview"]:
+        lower_raw = raw_text.lower()
+        if any(w in lower_raw for w in ["perché", "perche", "come mai", "cosa succede", "cosa sta succedendo", "scendendo", "scende", "crolla", "rosso", "calo", "ribasso", "panico"]):
+            intent = "market_explanation"
+        else:
+            await briefing_cmd(update, context)
+            return
+
+    # 3. Se l'utente chiede SPIEGAZIONI su cosa muove il mercato o perché scende tutto (Vera Consulenza CIO, Zero Reporter)
+    if intent == "market_explanation":
+        status_msg = await update.message.reply_text("🧭 *Analizzo i driver macroeconomici, i flussi istituzionali e il tuo portafoglio...*", parse_mode="Markdown")
+        indices_summary, global_news, eur_rate = await fetch_macro_market_context()
+        user_portfolio = supabase_svc.get_portfolio(user_id)
+        user_profile = supabase_svc.get_user_profile(user_id)
+
+        explanation = llm_svc.explain_market_movement(
+            user_query=raw_text,
+            indices_data=indices_summary,
+            news_list=global_news,
+            user_portfolio=user_portfolio,
+            user_profile=user_profile,
+            memory_context=memory_context
+        )
+        if not explanation:
+            explanation = "I mercati registrano una fase di riposizionamento tattico dovuta a flussi di liquidità e tassi d'interesse. Mantieni la calma e la disciplina del piano d'accumulo."
+
+        try:
+            await status_msg.delete()
+        except Exception:
+            pass
+
+        supabase_svc.log_message(user_id, "user", raw_text)
+        supabase_svc.log_message(user_id, "assistant", explanation)
+        await send_safe_text(update, explanation)
         return
 
     # 3. Se l'utente chiede di aggiornare/sostituire i ticker del portafoglio
@@ -1269,7 +1316,8 @@ async def _handle_text_message_core(update: Update, context: ContextTypes.DEFAUL
                 existing_position=existing_pos,
                 user_profile=user_profile,
                 tr_quote=tr_quote,
-                memory_context=memory_context
+                memory_context=memory_context,
+                user_query=raw_text
             )
 
             if not advisor_note:
