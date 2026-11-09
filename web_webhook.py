@@ -94,6 +94,7 @@ async def main():
 
     bot_application.add_handler(CommandHandler("start", telegram_bot.start_cmd))
     bot_application.add_handler(CommandHandler("help", telegram_bot.start_cmd))
+    bot_application.add_handler(CommandHandler("aiuto", telegram_bot.start_cmd))
     bot_application.add_handler(CommandHandler("briefing", telegram_bot.briefing_cmd))
     bot_application.add_handler(CommandHandler("occasioni", telegram_bot.occasioni_cmd))
     bot_application.add_handler(CommandHandler("cicli", telegram_bot.cicli_cmd))

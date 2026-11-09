@@ -728,7 +728,7 @@ async def portfolio_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text_lines.append(f"📈 *Valore Attuale:* `{total_current:.2f} €`")
     text_lines.append(f"{tot_icon} *Plusvalenza / Minusvalenza Totale:* `{tot_pnl_eur:+.2f} €` (`{tot_pnl_pct:+.2f}%`)")
 
-    await update.message.reply_text("\n".join(text_lines), parse_mode="Markdown")
+    await send_safe_text(update, "\n".join(text_lines))
 
     # Diagnosi Strategica Esecutiva del Chief Investment Officer (CIO)
     status_msg = await update.message.reply_text(
@@ -1578,6 +1578,7 @@ def main():
     # Handlers dei comandi
     app.add_handler(CommandHandler("start", start_cmd))
     app.add_handler(CommandHandler("help", start_cmd))
+    app.add_handler(CommandHandler("aiuto", start_cmd))
     app.add_handler(CommandHandler("briefing", briefing_cmd))
     app.add_handler(CommandHandler("occasioni", occasioni_cmd))
     app.add_handler(CommandHandler("cicli", cicli_cmd))
