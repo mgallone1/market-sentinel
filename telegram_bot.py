@@ -1082,9 +1082,17 @@ async def _handle_text_message_core(update: Update, context: ContextTypes.DEFAUL
         except Exception:
             pass
 
+        keyboard = [
+            [
+                InlineKeyboardButton("💼 Diagnosi Portafoglio", callback_data="cmd_portfolio"),
+                InlineKeyboardButton("💎 Top Occasioni a Sconto", callback_data="cmd_occasioni")
+            ]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+
         supabase_svc.log_message(user_id, "user", raw_text)
         supabase_svc.log_message(user_id, "assistant", explanation)
-        await send_safe_text(update, explanation)
+        await send_safe_text(update, explanation, reply_markup=reply_markup)
         return
 
     # 3. Se l'utente chiede di aggiornare/sostituire i ticker del portafoglio
@@ -1328,11 +1336,15 @@ async def _handle_text_message_core(update: Update, context: ContextTypes.DEFAUL
                     f"Consiglio di operare con Ordine Limite a `{limit_price:.2f} €` per proteggersi dallo spread di Lang & Schwarz, con primo target di rimbalzo a `{tp1:.2f} €` e stop di allerta a `{stop_loss:.2f} €`."
                 )
 
-            # Tastiera Inline per Deep Dive Quantitativo o Simulazione rapida
+            # Tastiera Inline per Deep Dive Quantitativo, Simulazione rapida o Portafoglio
             keyboard = [
                 [
-                    InlineKeyboardButton("📊 Indicatori Quantitativi di Supporto", callback_data=f"quant_{resolved}"),
+                    InlineKeyboardButton("📊 Indicatori di Supporto", callback_data=f"quant_{resolved}"),
                     InlineKeyboardButton("🧮 Simula Ordine su TR", callback_data=f"sim_{resolved}")
+                ],
+                [
+                    InlineKeyboardButton("💼 Verifica nel Mio Portafoglio", callback_data="cmd_portfolio"),
+                    InlineKeyboardButton("💎 Altre Occasioni", callback_data="cmd_occasioni")
                 ]
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
@@ -1366,8 +1378,15 @@ async def _handle_text_message_core(update: Update, context: ContextTypes.DEFAUL
             pass
 
     if ai_answer:
+        keyboard = [
+            [
+                InlineKeyboardButton("💼 Diagnosi Portafoglio", callback_data="cmd_portfolio"),
+                InlineKeyboardButton("💎 Top Occasioni a Sconto", callback_data="cmd_occasioni")
+            ]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
         supabase_svc.log_message(user_id, "assistant", ai_answer)
-        await send_safe_text(update, ai_answer)
+        await send_safe_text(update, ai_answer, reply_markup=reply_markup)
     else:
         fallback = "Dimmi pure: puoi scrivermi il nome di un'azione (es. NVIDIA, TSMC, Tesla), chiedermi /occasioni, /simula o /portafoglio!"
         supabase_svc.log_message(user_id, "assistant", fallback)
@@ -1381,6 +1400,14 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
 
     if data == "briefing" or data.startswith("briefing"):
         await briefing_cmd(update, context)
+        return
+
+    if data == "cmd_portfolio":
+        await portfolio_cmd(update, context)
+        return
+
+    if data == "cmd_occasioni":
+        await occasioni_cmd(update, context)
         return
 
     if data.startswith("quant_"):
