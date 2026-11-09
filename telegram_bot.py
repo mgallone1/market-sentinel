@@ -217,22 +217,6 @@ async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     await send_safe_text(update, msg)
 
-async def build_macro_briefing(slot: str = "auto") -> str:
-    """
-    Costruisce il briefing macro e geopolitico in tempo reale:
-    - Calcola la sessione di mercato in base all'ora esatta di Roma:
-      * morning: 06:00-11:59 (apertura Europa & Asia overnight)
-      * afternoon: 12:00-17:29 (metà seduta UE & sessione USA)
-      * evening: 17:30-22:30 (chiusura Europa, Wall Street closing & bilancio)
-      * night: 22:31-05:59 (overnight, crypto 24/7 & pre-Asia)
-    - Mantiene memoria del briefing precedente tramite Supabase.
-    - Prezzi espressi rigorosamente in Euro (€).
-    """
-    now_rome = datetime.now(ZoneInfo("Europe/Rome"))
-    h = now_rome.hour
-    m = now_rome.minute
-    cur_time = now_rome.strftime("%H:%M")
-
 async def fetch_macro_market_context():
     """
     Raccoglie in tempo reale le quotazioni degli indici chiave (convertiti in Euro)
@@ -362,7 +346,7 @@ async def build_macro_briefing(slot: str = "auto") -> str:
     news_display_lines = ["\n⚡ *BREAKING NEWS IN TEMPO REALE (ULTIME ORE):*"]
     displayed_items = []
     seen_titles = set()
-    for item in (squawk_news + google_fast_news + institutional_news):
+    for item in global_news:
         raw_title = item.get("title", "").replace("|FJ", "").strip()
         clean_title = raw_title.replace("*", "").replace("`", "").replace("_", " ")
         if not clean_title or clean_title.lower() in seen_titles:
@@ -433,9 +417,26 @@ async def briefing_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         slot = "night"
         slot_label = f"notturno / overnight (ore {cur_time} CET)"
 
-    await update.message.reply_text(f"📊 *Sto elaborando l'aggiornamento attuale ({slot_label}) con quotazioni live in Euro e breaking news...*", parse_mode="Markdown")
+    msg_target = update.effective_message or update.message
+    status_msg = None
+    if msg_target:
+        try:
+            status_msg = await msg_target.reply_text(f"📊 *Sto elaborando l'aggiornamento attuale ({slot_label}) con quotazioni live in Euro e breaking news...*", parse_mode="Markdown")
+        except Exception:
+            pass
     
-    full_reply = await build_macro_briefing(slot=slot)
+    try:
+        full_reply = await build_macro_briefing(slot=slot)
+    except Exception as e:
+        print(f"[!] Errore critico generazione briefing: {e}")
+        full_reply = "⚠️ Si è verificato un errore temporaneo nel recupero dei dati macro. Riprova tra pochi istanti."
+
+    if status_msg:
+        try:
+            await status_msg.delete()
+        except Exception:
+            pass
+
     await send_safe_text(update, full_reply)
     
     # Registra nella cronologia conversazione
@@ -1377,6 +1378,10 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
     query = update.callback_query
     await query.answer()
     data = query.data or ""
+
+    if data == "briefing" or data.startswith("briefing"):
+        await briefing_cmd(update, context)
+        return
 
     if data.startswith("quant_"):
         ticker = data.replace("quant_", "")
