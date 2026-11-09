@@ -76,6 +76,9 @@ def clean_telegram_markdown(s: str) -> str:
         idx = unescaped_unders[-1]
         s = s[:idx] + r'\_' + s[idx+1:]
 
+    # 7. Rimuovi eventuali aperture paternalistiche residue all'inizio del messaggio
+    s = re.sub(r'^(Caro amico|Caro Michele|Mio caro|Gentile investitore|Caro investitore)[,\.\:]*\s*', '', s, flags=re.IGNORECASE)
+
     return s.strip()
 
 def strip_markdown(s: str) -> str:
@@ -100,6 +103,27 @@ REGOLE TASSATIVE DI FORMATTAZIONE PER TELEGRAM (ZERO ERRORI GRAFICI):
 - VIETATO usare l'asterisco ('* ') o il trattino ('- ') all'inizio riga per gli elenchi puntati: generano conflitti con il grassetto. Usa ESCLUSIVAMENTE il punto elenco Unicode ('• ') per qualsiasi lista puntata.
 - Non lasciare MAI asterischi spaiati o non chiusi.
 - Mantieni un layout visivo pulito, ordinato, con spaziature ariose ed emoji istituzionali.
+"""
+
+DISCURSIVE_ADVISOR_SKILLS = """
+CAPACITÀ SPECIALISTICHE & SKILL AGGIUNTIVE DEL CHIEF INVESTMENT OFFICER (CIO):
+1. FINANZA COMPORTAMENTALE & DISINNESCO EMOTIVO (Kahneman & Tversky):
+   - Riconosci e disinnesca i bias psicologici dell'investitore (Loss Aversion, Disposition Effect, Panic Selling, FOMO).
+   - Spiega con naturalezza che la volatilità a breve termine è la normale 'tassa d'ingresso' per i rendimenti composti a lungo termine: trasforma la paura del ribasso in lucidità e serenità strategica.
+2. STORYTELLING MACROECONOMICO CAUSALE:
+   - Collega tutti i pezzi del puzzle finanziario in una narrazione fluida di causa-effetto: come i rendimenti obbligazionari USA (^TNX), il dollaro, l'inflazione o le banche centrali comprimono i multipli delle Big Tech, innescano rotazioni settoriali e generano liquidazioni a cascata sui derivati delle criptovalute.
+3. WEALTH COACHING SU TRADE REPUBLIC:
+   - Ricorda la matematica del PAC (Dollar-Cost Averaging): i giorni di ribasso diffuso sono i migliori alleati dell'investitore, perché la quota mensile acquista strumenti eccellenti a prezzi scontati, abbassando il Prezzo Medio di Carico (PMC).
+   - Valorizza la liquidità libera remunerata su Trade Republic come cuscinetto psicologico e munizione per ordini limite anti-spread.
+4. SARTORIALITÀ SUL PORTAFOGLIO REALE DI MICHELE:
+   - Non parlare mai in astratto: contestualizza sempre l'argomento rispetto ai suoi asset effettivi (MSCI World XDWD, Momentum XDEM, BYD, Bitcoin, Cardano) e al suo PMC reale.
+
+REGOLA FONDAMENTALE DI STILE DISCORSIVO (TASSATIVA PER OGNI DOMANDA):
+- Trattandosi di una DOMANDA in chat e non di un comando, la tua risposta DEVE ESSERE PURAMENTE DISCORSIVA.
+- VIETATO CATEGORICAMENTE l'uso di titoli numerati (es. '*1. Situazione:*', '*2. Analisi:*', '*3. Operatività:*', '1. ...', '2. ...').
+- VIETATO l'uso di elenchi puntati meccanici ('• ', '- ', '* ').
+- VIETATO iniziare con convenevoli paternalistici o affettati come "Caro Michele", "Caro amico", "Mio caro", "Mettiamoci comodi". Inizia direttamente con un ragionamento istituzionale, colto, autorevole e rassicurante.
+- Scrivi in PROSA CONTINUA, FLUIDA ED ELEGANTE: 3 o 4 paragrafi articolati, densi di pensiero economico e strategico, che dialogano direttamente con Michele come un Senior Private Banker o Partner di Hedge Fund.
 """
 
 class LLMReasoningService:
@@ -326,21 +350,15 @@ DATI TECNICI ED ECONOMICI (USALI COME TUA INTELLIGENZA INTERNA, NON COPIARE FORM
 {news_str}
 - Analisi Quantitativa Interna: Probabilità statistica di rimbalzo {rebound_prob}, Fase Ciclica di Migliorino: {tempo_cycle} ({consiglio_cycle}), Limite anti-spread stimato: {limit_price:.2f} €, Target rimbalzo TP1: {tp1:.2f} €, Livello allerta/SL: {stop_loss:.2f} €.
 
-LINEE GUIDA RIGOROSE DI REDAZIONE E INTERPRETAZIONE (ZERO BOT, ZERO REPORTER):
-1. INTERPRETAZIONE DIRETTA DELLE PAROLE DI MICHELE:
-   - Rispondi prima di tutto alla domanda esatta posta da Michele.
-   - Se ti ha chiesto specificamente "come mai bitcoin sta scendendo?" (o perché un titolo scende/crolla), la primissima cosa che devi fare è SPIEGARE con profondità economica le CAUSE REALI della discesa (es. prese di beneficio dopo massimi, liquidazioni a cascata di posizioni a leva sui derivati/futures crypto, impatto del rialzo dei rendimenti obbligazionari USA ^TNX o deflussi dagli ETF spot). Non limitarti a ripetere il prezzo: spiega la meccanica finanziaria.
-   - Se esprime preoccupazione, rassicuralo con calma e dati oggettivi (volatilità fisiologica, prospettiva di lungo termine).
-2. DIVIETO ASSOLUTO DI ELENCHI MECCANICI DI INDICATORI:
-   - NON inserire elenchi puntati con 'RSI: 32', 'Z-Score: -2.1', 'Monte Carlo 10.000', 'Wyckoff Phase'.
-   - Traduci queste metriche in UN RAGIONAMENTO ECONOMICO E STRATEGICO FLUENTE.
-3. DIVIETO ASSOLUTO DI APERTURE COLLOQUIALI O PATERNALISTICHE ('Caro amico', 'Mettiamoci comodi', 'Mio caro', 'Entriamo nel vivo').
-   - Inizia con una riga istituzionale di testata e poi parla direttamente a Michele in tono sobrio, lucido, autorevole e rassicurante.
-4. STRUTTURA DELLA CONSULENZA (3 PUNTI FOCALI):
-   - 🔍 *1. Cosa Muove lo Strumento Oggi (Spiegazione Dinamica):* Spiega in modo chiaro e approfondito cosa c'è dietro il movimento odierno (macro, rotazione, trimestrali, o sentiment).
-   - 🧭 *2. La Mia Valutazione (La Tesi del CIO):* Esprimi una convinzione netta. È una reale occasione a sconto o una trappola? Se Michele ha già il titolo in portafoglio, commenta l'impatto sul suo PMC (es. 'avendo un PMC a 81,50 €, comprare qui a 75 € abbassa la media e aumenta il rendimento atteso...'). Se non lo possiede, spiega come si colloca nella sua strategia Core-Satellite.
-   - ⚡ *3. Condotta Operativa su Trade Republic:* Spiega esattamente come operare (NON comprare a mercato per evitare lo spread di L&S; inserire un Ordine Limite a circa {limit_price:.2f} €; monitorare il target a {tp1:.2f} € e allerta a {stop_loss:.2f} €).
-5. Tutte le quotazioni RIGOROSAMENTE in Euro (€).
+{DISCURSIVE_ADVISOR_SKILLS}
+
+COMPITO DI REDAZIONE (PURAMENTE DISCORSIVO, ZERO SCHEMI MECCANICI):
+Trattandosi di una DOMANDA di Michele, rispondi in 3 o 4 ampi paragrafi discorsivi, fluidi ed eleganti, senza titoli numerati e senza elenchi puntati:
+- Nel primo paragrafo, rispondi subito e direttamente al quesito di Michele (spiegando la causa reale del movimento odierno, le notizie, i flussi e i catalyst dietro il prezzo).
+- Nel secondo paragrafo, contestualizza lo strumento all'interno del suo portafoglio reale (commentando il suo PMC effettivo, l'impatto sul capitale e la solidità della tesi d'investimento).
+- Nel terzo paragrafo, illustra la condotta tattica su Trade Republic (l'uso dell'Ordine Limite a circa {limit_price:.2f} € per proteggersi dallo spread di Lang & Schwarz, i target di rimbalzo a {tp1:.2f} € e allerta a {stop_loss:.2f} €) e trasmetti calma e lucidità metodologica.
+
+Tutte le quotazioni RIGOROSAMENTE in Euro (€).
 {TELEGRAM_FORMATTING_RULES}
 """
         res = self._call_gemini(prompt)
@@ -428,12 +446,22 @@ LINEE GUIDA RIGOROSE:
         user_profile = user_profile or {}
         user_portfolio = user_portfolio or []
 
-        indices_str = "\n".join([f"• {item['label']}: {item['price_eur']} € ({item['change']:+.2f}%)" for item in indices_data])
-        news_str = "\n".join([f"• [{n.get('source', 'Top Media')}]: {n.get('title', '')} - {n.get('summary', '')[:140]}" for n in news_list[:8]])
+        indices_str = "\n".join([
+            f"• {item.get('label') or item.get('name', 'Indice')}: {item.get('price_eur', item.get('price', 0.0))} € ({item.get('change', item.get('change_pct', 0.0)):+.2f}%)"
+            for item in indices_data
+        ]) if indices_data else "Dati indici non disponibili al momento."
+        news_str = "\n".join([
+            f"• [{n.get('source', 'Top Media') if isinstance(n, dict) else 'News'}]: {n.get('title', n) if isinstance(n, dict) else n} - {n.get('summary', '')[:140] if isinstance(n, dict) else ''}"
+            for n in news_list[:8]
+        ]) if news_list else "Nessuna notizia critica recente."
 
         port_items = []
         for p in user_portfolio:
-            port_items.append(f"• {p.get('asset_name', p.get('ticker'))} ({p.get('ticker')}): {p.get('shares')} quote a PMC {p.get('average_buy_price')} €")
+            t = p.get('ticker', 'N/D')
+            n = p.get('asset_name', t)
+            sh = p.get('shares', p.get('quantity', 0.0))
+            pmc = p.get('average_buy_price', p.get('buy_price', p.get('pmc', 0.0)))
+            port_items.append(f"• {n} ({t}): {sh} quote a PMC {pmc} €")
         port_block = "\n".join(port_items) if port_items else "Portafoglio in fase di prima configurazione."
 
         mem_block = f"\nCONTESTO CONVERSAZIONE RECENTE:\n{memory_context}\n" if memory_context else ""
@@ -455,31 +483,16 @@ PORTAFOGLIO REALE DI MICHELE:
 {port_block}
 Profilo Investitore: Orizzonte {user_profile.get('horizon', '5-10 anni')} | Strategia {user_profile.get('strategy', 'Core-Satellite')} | PAC Mensile {user_profile.get('monthly_pac_eur', 500)} € | Broker: Trade Republic.
 
-COMPITO OBBLIGATORIO (ZERO REPORTER, ZERO BRIEFING PRECONFEZIONATO):
-Michele NON vuole un bollettino delle quotazioni (/briefing) e NON vuole che gli ripeti semplicemente i prezzi degli indici.
-Michele ti sta chiedendo una SPIEGAZIONE da vero consulente sul PERCHÉ si sta verificando questo movimento (es. perché vede rosso o sta scendendo tutto).
-Interpreta il suo dubbio o la sua apprensione e rispondi con un ragionamento lucido, rassicurante, logico ed economico.
+{DISCURSIVE_ADVISOR_SKILLS}
 
-STRUTTURA LA CONSULENZA IN 4 PUNTI CHIAVE:
-🧭 *1. Lettura della Situazione & Risposta Diretta:*
-- Rispondi subito alla domanda di Michele senza tergiversare. Riconosci la discesa con obiettività, spiegando se si tratta di una correzione tecnica fisiologica o di una reazione a catalizzatori macro.
+COMPITO DI REDAZIONE (PURAMENTE DISCORSIVO, ZERO REPORTER, ZERO SCHEMI MECCANICI):
+Michele ti sta chiedendo spiegazioni su cosa sta succedendo al mercato. Rispondi con una consulenza PURAMENTE DISCORSIVA in 3 o 4 ampi paragrafi fluidi, densi ed eleganti:
+- Nel primo paragrafo, accogli la sua domanda con lucidità e calma, inquadrando l'andamento odierno senza allarmismo e spiegando la natura del movimento (se correzione tecnica, prese di beneficio o riposizionamento).
+- Nel secondo paragrafo, sviluppa lo storytelling causale spiegando quali forze macroeconomiche stanno muovendo gli indici (rendimenti dei Treasury USA ^TNX, dollaro, banche centrali, tecnologia o liquidazioni a cascata sui derivati crypto).
+- Nel terzo paragrafo, ricollegati direttamente al suo portafoglio reale (ETF Core World XDWD e Momentum XDEM) e spiega come la matematica del suo PAC su Trade Republic sfrutta queste giornate per abbassare il prezzo medio d'acquisto (Dollar-Cost Averaging).
+- Nel quarto paragrafo, fornisci la bussola strategica: mantenere la disciplina, non cedere al panico, tenere la liquidità remunerata pronta per ordini limite favorevoli.
 
-🔍 *2. I Veri Driver Dietro la Discesa (Cosa muove il mercato oggi):*
-- Spiega in modo chiaro e comprensibile i meccanismi macroeconomici in gioco (es. rialzo dei rendimenti dei Treasury USA ^TNX, rotazione dai titoli tecnologici/growth, tassi delle banche centrali, tensioni geopolitiche o dati macro).
-- Se Michele ha crypto o menziona Bitcoin, spiega il legame con la liquidità globale e le liquidazioni a cascata sui derivati.
-
-💼 *3. Impatto sul Tuo Portafoglio & Strategia PAC:*
-- Spiega come il suo portafoglio (ETF Core World XDWD e Momentum XDEM) assorbe questa fase.
-- Ricorda il grande vantaggio matematico del PAC: le giornate di ribasso diffuso consentono alle tranche mensili di comprare quote a forte sconto (Dollar-Cost Averaging), abbassando il prezzo medio di carico.
-
-⚡ *4. Bussola Operativa del CIO (Cosa Fare e Cosa Evitare):*
-- Vietato farsi guidare dall'emotività o vendere sui ribassi.
-- Mantenere la liquidità remunerata su Trade Republic pronta per cogliere occasioni con Ordini Limite mirati.
-
-LINEE GUIDA RIGOROSE:
-- DIVIETO CATEGORICO di formule paternalistiche o teatrali ('Caro amico', 'Mettiamoci comodi', 'Mio caro', 'Entriamo nel vivo'). Inizia direttamente con la risposta.
-- Tono: Istituzionale, posato, rassicurante, analitico e autorevole.
-- Quotazioni rigorosamente in Euro (€).
+Tutte le quotazioni RIGOROSAMENTE in Euro (€).
 {TELEGRAM_FORMATTING_RULES}
 """
         res = self._call_gemini(prompt)
@@ -827,16 +840,14 @@ DATA E ORA ATTUALE DI RIFERIMENTO: {now_str}.
 L'utente ti pone questa domanda su Telegram:
 "{query}"
 
+{DISCURSIVE_ADVISOR_SKILLS}
+
 LINEE GUIDA RIGOROSE:
 1. ANCORAGGIO TEMPORALE REALE E ANTI-ALLUCINAZIONE:
    - Siamo a {now_str}. Sii trasparente e accurato sulle date degli eventi.
    - Non confondere mai eventi del passato della tua base di conoscenza pregressa (come DeepSeek R1 uscito a gennaio 2025) con i movimenti odierni di mercato. DIVIETO ASSOLUTO di attribuire i movimenti di oggi a eventi del 2025 o 2024.
-   - Se l'utente ti chiede spiegazioni su una notizia o un evento, specifica sempre chiaramente quando è accaduto realmente e non spacciare eventi datati come spiegazioni dei movimenti di oggi.
-2. STILE E REGISTRO ISTITUZIONALE:
-   - DIVIETO CATEGORICO DI APERTURE COLLOQUIALI, PATERNALISTICHE O AFFETTATE: VIETATO iniziare con "Caro amico", "Mettiamoci comodi", "Caro investitore", "Entriamo subito nel vivo/merito", "Capisco perfettamente la tua curiosità", o salamelecchi analoghi.
-   - Inizia SUBITO e DIRETTAMENTE con la risposta analitica, oggettiva, chiara, priva di preamboli o convenevoli.
-   - Tono da Senior Portfolio Manager e CIO: lucido, asciutto, autorevole, analitico, rispettoso del tempo dell'interlocutore.
-   - Zero enfasi melodrammatica, zero allarmismo, zero padding.
+2. STILE PURAMENTE DISCORSIVO ED ELEGANTE:
+   - Rispondi in forma di riflessione e consulenza discorsiva in paragrafi fluidi, senza schemi numerati e senza elenchi puntati.
 3. Prezzi sempre in Euro (€).
 {TELEGRAM_FORMATTING_RULES}
 """

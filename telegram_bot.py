@@ -1138,7 +1138,7 @@ async def _handle_text_message_core(update: Update, context: ContextTypes.DEFAUL
     if intent == "ticker_analysis" and ticker:
         # Risolvi ticker per crypto e alias comuni
         resolved = resolve_ticker(ticker) or ticker
-        await update.message.reply_text(f"📈 *Analizzo price action, simulazione Monte Carlo e cicli di Wyckoff per {resolved}...*", parse_mode="Markdown")
+        status_msg = await update.message.reply_text(f"🧭 *Valuto la situazione e il contesto di mercato per {resolved}...*", parse_mode="Markdown")
         df_hist = MarketDataService.get_ticker_history(resolved, period="6mo", interval="1d")
         
         # Fallback a coppia USD se la coppia diretta EUR non ha storico sufficiente
@@ -1336,16 +1336,34 @@ async def _handle_text_message_core(update: Update, context: ContextTypes.DEFAUL
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
 
+            if status_msg:
+                try:
+                    await status_msg.delete()
+                except Exception:
+                    pass
+
             supabase_svc.log_message(user_id, "assistant", advisor_note)
             await send_safe_text(update, advisor_note, reply_markup=reply_markup)
             return
         else:
+            if status_msg:
+                try:
+                    await status_msg.delete()
+                except Exception:
+                    pass
+
             await update.message.reply_text(f"⚠️ Dati storici non sufficienti per il titolo `{ticker}`.", parse_mode="Markdown")
             return
 
     # 4. Domanda conversazionale / aperta
-    await update.message.reply_text("💬 *Ci penso su un secondo...*", parse_mode="Markdown")
+    status_msg = await update.message.reply_text("💬 *Ci penso su un secondo...*", parse_mode="Markdown")
     ai_answer = llm_svc.answer_general_query(raw_text, memory_context=memory_context)
+    if status_msg:
+        try:
+            await status_msg.delete()
+        except Exception:
+            pass
+
     if ai_answer:
         supabase_svc.log_message(user_id, "assistant", ai_answer)
         await send_safe_text(update, ai_answer)
