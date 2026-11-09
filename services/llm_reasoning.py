@@ -136,11 +136,11 @@ SKILL COMUNICATIVE E RELAZIONALI DA APPLICARE IN OGNI RISPOSTA:
    - Spiega la dinamica dei mercati senza freddo gergo accademico. Usa metafore visive chiare: il rendimento dei bond decennali (^TNX) come una 'calamita' che prosciuga la liquidità dai titoli più cari, le liquidazioni sui derivati crypto come una 'pulizia degli eccessi di leva finanziaria', ecc.
 
 5. WEALTH COACHING PRATICO SU TRADE REPUBLIC:
-   - Ricorda il vantaggio matematico del PAC (Dollar-Cost Averaging): con il suo piano mensile da 500 €, le giornate di ribasso diffuso sono i suoi migliori alleati perché gli consentono di comprare quote a forte sconto, abbassando il Prezzo Medio di Carico (PMC).
+   - Valorizza la matematica degli acquisti periodici e del Dollar-Cost Averaging: quando Michele immette liquidità o accumula tramite il suo PAC effettivo, le giornate di ribasso consentono di acquistare a forte sconto, abbassando il Prezzo Medio di Carico (PMC). Fai riferimento ESCLUSIVAMENTE all'importo e agli strumenti EFFETTIVI del suo piano (o alla sua liquidità disponibile) definiti nella sua scheda profilo e nella memoria, senza MAI assumere importi o strumenti non confermati (DIVIETO ASSOLUTO di dare per scontato importi come 500 € o assegnare il PAC a Momentum se non esplicitamente registrato nel profilo).
    - Valorizza la liquidità remunerata sul conto: non è denaro fermo, ma la sua munizione tattica per inserire ordini limite a prezzi di saldo proteggendosi dallo spread di Lang & Schwarz.
 
 6. SARTORIALITÀ SUL PORTAFOGLIO REALE DI MICHELE:
-   - Non fare mai teoria astratta: cala sempre il discorso sui suoi strumenti reali (l'ancora globale MSCI World XDWD, la spinta Momentum XDEM, la scommessa industriale su BYD, e l'asimmetria speculativa di Bitcoin e Cardano), confrontando il prezzo attuale con il suo PMC effettivo.
+   - Non fare mai teoria astratta: cala sempre il discorso sui suoi strumenti reali presenti nel suo portafoglio o nelle sue preferenze esplicite registrate nella memoria, confrontando il prezzo attuale con il suo PMC effettivo, rispettando rigorosamente le sue ultime indicazioni.
 
 7. INTERAZIONE PROATTIVA & DOMANDA APERTA DI FOLLOW-UP (DIALOGO A DUE VIE):
    - Non terminare mai come un saggio chiuso o una conferenza stampa. Esprimi una presa di posizione netta e sincera ("La mossa più saggia adesso è...") e chiudi con una DOMANDA APERTA E COSTRUTTIVA che stimoli il confronto con Michele sul prossimo passo (es. "Tu come preferisci muoverti sul prossimo PAC: vuoi che rafforziamo il Core globale o ti andrebbe di sfruttare questo sconto temporaneo?", oppure "Dimmi se vuoi che calcoliamo un ordine limite preciso per sfruttare questo livello o se preferisci aspettare la chiusura di stasera").
@@ -197,28 +197,30 @@ Sei un classificatore di intenti finanziari avanzato per un Senior Private Wealt
 "{text}"
 
 DISTINZIONE DEGLI INTENTI:
-1. "technical_explanation":
+1. "update_memory_or_profile":
+   - TASSATIVO: Se l'utente chiede di modificare, correggere o aggiornare il piano di accumulo (PAC), la memoria del bot, la sua strategia, il suo profilo di rischio, o dice espressamente che qualcosa che il bot ricorda è sbagliato o deve essere cambiato (es. "modifica il piano di accumulo", "non ho un pac di 500 euro su momentum", "ti voglio dire che il mio pac non è così", "ricordati che...", "memorizza che...", "aggiorna la mia memoria", "il mio pac è di 300 euro", "ho tolto il pac", "cambia strategia", "non investo più in crypto").
+2. "technical_explanation":
    - Se l'utente chiede spiegazioni tecniche sui dati quantitativi, sulle probabilità percentuali, su Monte Carlo, FLD di Hurst, Z-Score, cicli o metodologie di calcolo (es. "cosa significa probabilità del 75%?", "spiegami le probabilità", "spiegami lo Z-Score", "come calcoli Monte Carlo?", "spiegami i numeri e i dati", "cosa vuol dire FLD?").
    - Se collegato al titolo discusso, indica come ticker quello attivo ({active_topic_ticker or 'il ticker dedotto'}).
-2. "ticker_analysis":
+3. "ticker_analysis":
    - Quando l'utente chiede di un'azione o crypto specifica, o FA UNA DOMANDA DI SEGUITO correlata all'ultimo titolo analizzato (es. "come mai bitcoin sta scendendo?", "e se entrassi adesso con 1000€?", "cosa pensi di nvidia?", "e rispetto al mio PMC?", "e se volessi comprarne altre?").
    - REGOLA DI CONTINUITÀ: se l'utente non ripete il nome del titolo ma la domanda è chiaramente riferita all'argomento precedente, estrai come ticker '{active_topic_ticker}' o il ticker desunto dalla cronologia!
-3. "opportunities":
+4. "opportunities":
    - Richiesta di migliori occasioni, titoli a sconto statistico, idee operative.
-4. "update_portfolio_ticker":
+5. "update_portfolio_ticker":
    - Modifica o correzione di ticker nel portafoglio.
-5. "portfolio":
+6. "portfolio":
    - Consultazione o chiarimenti sul portafoglio complessivo.
-6. "market_briefing":
+7. "market_briefing":
    - Richiesta esplicita del bollettino/briefing periodico (/briefing).
-7. "market_explanation":
+8. "market_explanation":
    - Richiesta di spiegazioni sul perché scende/sale tutto il mercato in generale.
-8. "general_chat":
+9. "general_chat":
    - Conversazione generale, saluti o riflessioni teoriche non ancorate a un titolo specifico.
 
 Restituisci ESCLUSIVAMENTE un JSON valido:
 {{
-  "intent": "technical_explanation" | "ticker_analysis" | "opportunities" | "update_portfolio_ticker" | "portfolio" | "market_briefing" | "market_explanation" | "general_chat",
+  "intent": "update_memory_or_profile" | "technical_explanation" | "ticker_analysis" | "opportunities" | "update_portfolio_ticker" | "portfolio" | "market_briefing" | "market_explanation" | "general_chat",
   "ticker": "SIMBOLO_TICKER" o null,
   "replacements": [
      {{"old_ticker_or_name": "...", "new_ticker": "..."}}
@@ -233,6 +235,81 @@ Restituisci ESCLUSIVAMENTE un JSON valido:
             except Exception as e:
                 print(f"[LLMReasoningService] Errore parse JSON intent: {e}")
         return {"intent": "general_chat", "ticker": None}
+
+    def parse_and_update_memory_request(
+        self,
+        user_text: str,
+        current_profile: Dict[str, Any],
+        current_memory_summary: str = ""
+    ) -> Dict[str, Any]:
+        """
+        Interpreta in linguaggio naturale qualsiasi richiesta di aggiornamento memoria o profilo:
+        - Estrae le modifiche da applicare al profilo investitore (monthly_pac_eur, pac_details, strategy, horizon, risk_profile, notes).
+        - Formula una regola permanente per la memoria di lungo termine.
+        - Genera una risposta discorsiva, umana, autorevole e rassicurante da CIO per confermare l'avvenuta memorizzazione.
+        """
+        if not self.client:
+            return {
+                "profile_updates": {},
+                "memory_fact": user_text,
+                "response_text": "Ho preso nota e memorizzato la tua indicazione."
+            }
+
+        now_str = self._get_current_time_str()
+        prompt = f"""
+Sei il Chief Investment Officer (CIO) e Wealth Advisor personale di Michele.
+DATA E ORA ATTUALE: {now_str}.
+SCHEDA PROFILO ATTUALE DI MICHELE:
+{json.dumps(current_profile, indent=2, ensure_ascii=False)}
+
+MEMORIA DI LUNGO TERMINE ATTUALE:
+"{current_memory_summary}"
+
+MESSAGGIO ESATTO DI MICHELE (dove chiede di modificare il PAC, correggere la memoria, aggiornare la strategia o fissare una regola):
+"{user_text}"
+
+COMPITO:
+1. Analizza attentamente le parole di Michele e individua cosa deve cambiare (es. se precisa che NON ha un PAC da 500€ o che NON ha un PAC su Momentum, se indica un nuovo importo o strumento, o se aggiorna la sua strategia).
+2. Estrai gli aggiornamenti del profilo in formato strutturato:
+   - "monthly_pac_eur": valore numerico float del nuovo PAC (oppure 0.0 o null se ha rimosso il PAC o non ha specificato la cifra).
+   - "pac_details": descrizione testuale accurata del suo PAC (es. "Nessun PAC su Momentum; solo acquisti periodici su XDWD" oppure "PAC attivo di 300 € su MSCI World").
+   - "strategy": se ha modificato la strategia o i pesi.
+   - "notes": eventuali note permanenti sul suo stile di investimento.
+3. Formula un "memory_fact": una frase chiara e inequivocabile da conservare permanentemente nella memoria di lungo termine (es. "Michele ha precisato che non ha un PAC da 500€ su Momentum; le analisi future devono considerare esclusivamente il suo piano effettivo...").
+4. Formula una "response_text": la tua risposta diretta a Michele (in prima persona 'io', dandogli del 'tu'), discorsiva, empatica, rassicurante e chiara in 2 o 3 paragrafi senza elenchi puntati o numerati:
+   - Ringrazialo per la precisazione fondamentale e conferma esplicitamente di aver rimosso la vecchia convinzione errata (es. il PAC su Momentum da 500 €).
+   - Riassumi esattamente la nuova configurazione registrata che guiderà da oggi ogni futura diagnosi e simulazione.
+   - Chiedigli se ci sono altri dettagli o regole personali che desidera vengano memorizzati per calibrare al meglio la strategia.
+
+Restituisci ESCLUSIVAMENTE un JSON valido:
+```json
+{{
+  "profile_updates": {{
+     "monthly_pac_eur": 300.0,
+     "pac_details": "...",
+     "strategy": "..."
+  }},
+  "memory_fact": "...",
+  "response_text": "..."
+}}
+```
+"""
+        res = self._call_gemini(prompt)
+        if res:
+            try:
+                clean_json = res.replace("```json", "").replace("```", "").strip()
+                parsed = json.loads(clean_json)
+                if "response_text" in parsed:
+                    parsed["response_text"] = clean_telegram_markdown(parsed["response_text"])
+                return parsed
+            except Exception as e:
+                print(f"[LLMReasoningService] Errore parse memory request JSON: {e}")
+
+        return {
+            "profile_updates": {},
+            "memory_fact": user_text,
+            "response_text": clean_telegram_markdown(res or "Ho preso nota e aggiornato la tua memoria permanente.")
+        }
 
     def generate_executive_market_brief(
         self,
@@ -348,11 +425,16 @@ LINEE GUIDA RIGOROSE DI RISPOSTA:
                 news_details.append(f"• {t_str}: {s_str}")
         news_str = "\n".join(news_details) if news_details else "Nessuna notizia rilevante nelle ultime ore."
 
-        # Profilo Investitore
+        # Profilo Investitore Dinamico
+        pac_val = user_profile.get('monthly_pac_eur')
+        pac_str = f"{pac_val:.2f} €/mese" if pac_val else "Non impostato / Gestione manuale liquidità"
+        if user_profile.get('pac_details'):
+            pac_str += f" ({user_profile.get('pac_details')})"
+
         profile_str = (
             f"Orizzonte: {user_profile.get('horizon', 'Lungo termine')} | "
-            f"Strategia: {user_profile.get('strategy', 'Core-Satellite')} | "
-            f"PAC Mensile stimato: {user_profile.get('monthly_pac_eur', 500)} € | "
+            f"Strategia: {user_profile.get('strategy', 'Personalizzata')} | "
+            f"PAC Mensile: {pac_str} | "
             f"Profilo Rischio: {user_profile.get('risk_profile', 'Dinamico')} | "
             f"Broker: {user_profile.get('broker', 'Trade Republic')}"
         )
@@ -425,6 +507,11 @@ Tutte le quotazioni RIGOROSAMENTE in Euro (€).
         tot_pnl_eur = total_current - total_invested
         tot_pnl_pct = ((total_current - total_invested) / total_invested) * 100 if total_invested > 0 else 0.0
 
+        pac_diag_val = user_profile.get('monthly_pac_eur')
+        pac_diag_str = f"{pac_diag_val:.2f} €/mese" if pac_diag_val else "Non impostato / Gestione manuale liquidità"
+        if user_profile.get('pac_details'):
+            pac_diag_str += f" ({user_profile.get('pac_details')})"
+
         prompt = f"""
 Sei il Chief Investment Officer (CIO) e Private Wealth Advisor di Michele.
 DATA E ORA ATTUALE: {now_str}.
@@ -434,18 +521,18 @@ COMPOSIZIONE REALE DEL PORTAFOGLIO ATTUALE DI MICHELE:
 - Capitale Totale Investito: {total_invested:.2f} €
 - Controvalore Totale Attuale: {total_current:.2f} €
 - Risultato Complessivo: {tot_pnl_eur:+.2f} € ({tot_pnl_pct:+.2f}%)
-- Profilo e Obiettivi dell'investitore: Orizzonte {user_profile.get('horizon', '5-10 anni')} | PAC Mensile {user_profile.get('monthly_pac_eur', 500)} € | Strategia: {user_profile.get('strategy', 'Core-Satellite')} | Broker: {user_profile.get('broker', 'Trade Republic')}.
+- Profilo e Obiettivi dell'investitore: Orizzonte {user_profile.get('horizon', 'Lungo termine')} | PAC Mensile: {pac_diag_str} | Strategia: {user_profile.get('strategy', 'Personalizzata')} | Broker: {user_profile.get('broker', 'Trade Republic')}.
 
 COMPITO OBBLIGATORIO:
 Redigi la *Diagnosi Strategica del Portafoglio* con il tono di un Senior Portfolio Manager in carne ed ossa (lucido, analitico, propositivo, che ragiona con lui).
 
 STRUTTURA LA CONSULENZA IN 2 SEZIONI CHIARE:
 🧭 *1. Diagnosi di Asset Allocation & Rischio:*
-- Analizza come è distribuito il capitale: qual è la quota dell'azionario globale Core (XDWD), quanto pesa il fattore Momentum (XDEM), quanto pesa la componente speculativa/satellitare (crypto Bitcoin/Cardano, single stock BYD).
+- Analizza come è distribuito il capitale reale presente: quanto pesa l'azionario globale, quanto pesano eventuali posizioni satellite (singoli titoli, crypto, ETF tematici) e la liquidità. Fai riferimento ESCLUSIVAMENTE agli asset che vedi nella composizione sopra!
 - Esprimi un giudizio schietto: il portafoglio è ben difeso o è troppo esposto alla volatilità? Sta lavorando bene per l'orizzonte di lungo termine?
 
 ⚖️ *2. Ribilanciamento & Prossima Mossa Esecutiva:*
-- Dai un consiglio chiaro sulla prossima mossa: con la prossima tranche di liquidità o il prossimo PAC mensile, dove conviene incrementare? (Es. conviene abbassare il PMC sul titolo che ha corretto di più, oppure rafforzare il Core?).
+- Dai un consiglio chiaro sulla prossima mossa: con la prossima tranche di liquidità o il prossimo PAC mensile (se attivo), dove conviene incrementare? (Es. conviene abbassare il PMC sul titolo che ha corretto di più, oppure rafforzare il Core azionario?).
 - Ricorda brevemente la gestione della liquidità su Trade Republic (mantenere una percentuale di liquidità remunerata al tasso del broker in attesa di cali di mercato).
 
 LINEE GUIDA RIGOROSE:
@@ -499,6 +586,11 @@ LINEE GUIDA RIGOROSE:
 
         mem_block = f"\nCONTESTO CONVERSAZIONE RECENTE:\n{memory_context}\n" if memory_context else ""
 
+        pac_exp_val = user_profile.get('monthly_pac_eur')
+        pac_exp_str = f"{pac_exp_val:.2f} €/mese" if pac_exp_val else "Non impostato / Gestione manuale liquidità"
+        if user_profile.get('pac_details'):
+            pac_exp_str += f" ({user_profile.get('pac_details')})"
+
         prompt = f"""
 [CONTESTO DI SISTEMA INTERNO: Anno e data attuale {now_str}. Usalo SOLO come ancoraggio temporale contro allucinazioni sul passato. VIETATO ASSOLUTO iniziare recitando la data, il giorno o il meteo di mercato!]
 Sei il Chief Investment Officer (CIO) e Wealth Advisor personale di Michele.
@@ -515,7 +607,7 @@ NOTIZIE E SQUAWK DI MERCATO IN TEMPO REALE (Bloomberg, CNBC, FinancialJuice, Coi
 
 PORTAFOGLIO REALE DI MICHELE:
 {port_block}
-Profilo Investitore: Orizzonte {user_profile.get('horizon', '5-10 anni')} | Strategia {user_profile.get('strategy', 'Core-Satellite')} | PAC Mensile {user_profile.get('monthly_pac_eur', 500)} € | Broker: Trade Republic.
+Profilo Investitore: Orizzonte {user_profile.get('horizon', 'Lungo termine')} | Strategia {user_profile.get('strategy', 'Personalizzata')} | PAC: {pac_exp_str} | Broker: Trade Republic.
 
 {HUMAN_ADVISOR_COMMUNICATION_SKILLS}
 
@@ -524,7 +616,7 @@ Michele ti sta chiedendo spiegazioni su cosa sta succedendo al mercato o perché
 Rispondi con una vera consulenza dialogica persona-a-persona in 3 o 4 ampi paragrafi fluidi ed eleganti, parlando in prima persona ('io') e rivolgendoti a lui ('tu'):
 - Inizia SUBITO nel vivo, senza convenevoli: spiegagli con chiarezza e tranquillità la vera dinamica odierna (se si tratta di una correzione tecnica, prese di beneficio o un riposizionamento dei grandi operatori).
 - Sviluppa lo storytelling causale spiegando in modo semplice e visivo le forze macroeconomiche dietro le quinte (rendimenti obbligazionari USA ^TNX, dollaro, tassi Fed o liquidazioni a cascata sui derivati).
-- Ricollegati direttamente al suo portafoglio reale (i suoi ETF Core World XDWD e Momentum XDEM) e spiegagli come la matematica del suo PAC su Trade Republic sfrutta queste giornate per abbassare il prezzo medio d'acquisto (Dollar-Cost Averaging).
+- Ricollegati direttamente al suo portafoglio reale ({port_block}) e alla sua gestione della liquidità o del PAC su Trade Republic, spiegando come sfruttare queste giornate abbassando il prezzo medio d'acquisto (Dollar-Cost Averaging).
 - Concludi con la bussola strategica: mantenere la disciplina, valorizzare la liquidità remunerata per ordini limite favorevoli e restare concentrati sui risultati a lungo termine.
 
 Tutte le quotazioni RIGOROSAMENTE in Euro (€).

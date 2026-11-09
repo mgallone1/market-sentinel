@@ -624,22 +624,31 @@ async def profile_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
     profile = supabase_svc.get_user_profile(user_id)
+    long_mem = supabase_svc.get_long_term_summary(user_id)
+    pac_val = profile.get("monthly_pac_eur")
+    pac_str = f"`{pac_val:.2f} €/mese`" if pac_val else "_Non impostato fisso / Gestione manuale liquidità_"
+    if profile.get("pac_details"):
+        pac_str += f" ({profile.get('pac_details')})"
+
+    mem_block = f"\n🧠 *Regole e Memoria Permanente Registrata:*\n_{long_mem}_\n" if long_mem else ""
+
     msg = (
         "👤 *SCHEDA INVESTITORE & OBIETTIVI PATRIMONIALI*\n\n"
         f"• *Investitore:* {profile.get('investor_name', 'Michele')}\n"
-        f"• *Orizzonte Temporale:* {profile.get('horizon')}\n"
-        f"• *Strategia:* {profile.get('strategy')}\n"
-        f"• *Budget PAC Mensile:* `{profile.get('monthly_pac_eur', 500.0):.2f} €/mese`\n"
-        f"• *Profilo di Rischio:* {profile.get('risk_profile')}\n"
-        f"• *Broker Operativo:* {profile.get('broker')}\n"
-        f"• *Disciplina di Esecuzione:* {profile.get('discipline')}\n\n"
+        f"• *Orizzonte Temporale:* {profile.get('horizon', 'Lungo termine')}\n"
+        f"• *Strategia:* {profile.get('strategy', 'Personalizzata')}\n"
+        f"• *Budget PAC Mensile:* {pac_str}\n"
+        f"• *Profilo di Rischio:* {profile.get('risk_profile', 'Dinamico')}\n"
+        f"• *Broker Operativo:* {profile.get('broker', 'Trade Republic')}\n"
+        f"{mem_block}\n"
         "───────────────────────\n"
-        "💡 *Come aggiornare i tuoi parametri:*\n"
-        "• Digita `/profilo pac 600` per modificare il budget mensile\n"
-        "• Digita `/profilo orizzonte 15 anni` per l'orizzonte temporale\n"
-        "• Oppure dimmi liberamente in chat: *'imposta il pac a 400€'* o *'voglio un approccio più prudente'*."
+        "💡 *Come modificare la memoria e il profilo:*\n"
+        "Scrivimi direttamente in chat ciò che vuoi cambiare con parole tue! Ad esempio:\n"
+        "• *'Non ho un PAC da 500€ su Momentum, il mio PAC è di 300€ su MSCI World'*\n"
+        "• *'Ricordati che ho cambiato orizzonte temporale a 3 anni'*\n"
+        "• *'Memorizza che la mia liquidità disponibile è di 4.000€'*"
     )
-    await update.message.reply_text(msg, parse_mode="Markdown")
+    await send_safe_text(update, msg)
 
 async def portfolio_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -1030,8 +1039,7 @@ async def _handle_text_message_core(update: Update, context: ContextTypes.DEFAUL
         await memoria_cmd(update, context)
         return
 
-    if upper_text in ["PROFILO", "/PROFILO"] or ("PAC" in upper_text and any(k in upper_text for k in ["MESE", "EURO", "€", "IMPOSTA", "BUDGET"])):
-        context.args = raw_text.split()[1:] if " " in raw_text else []
+    if upper_text in ["PROFILO", "/PROFILO"]:
         await profile_cmd(update, context)
         return
 
@@ -1048,6 +1056,55 @@ async def _handle_text_message_core(update: Update, context: ContextTypes.DEFAUL
     classification = llm_svc.classify_intent(raw_text, recent_history_summary=recent_context_str, active_topic_ticker=active_ticker)
     intent = classification.get("intent", "general_chat")
     ticker = classification.get("ticker") or active_ticker
+
+    # Controllo euristico per richieste di modifica memoria / PAC / preferenze personali
+    lower_raw = raw_text.lower()
+    is_memory_update_keyword = any(k in lower_raw for k in [
+        "ricordati", "memorizza", "piano di accumulo", "il mio pac", "modifica il pac",
+        "modifica il piano", "non ho un pac", "non è così", "fartelo ricordare",
+        "cambia il profilo", "aggiorna la memoria", "aggiorna il profilo", "ho cambiato strategia",
+        "non investo", "non considero"
+    ])
+
+    # 1. Se l'utente chiede di modificare il PAC, correggere la memoria o aggiornare il profilo da testo
+    if intent == "update_memory_or_profile" or is_memory_update_keyword:
+        status_msg = await update.message.reply_text("🧠 *Aggiorno la mia memoria permanente e la tua scheda investitore...*", parse_mode="Markdown")
+        user_profile = supabase_svc.get_user_profile(user_id)
+        current_long_term = supabase_svc.get_long_term_summary(user_id)
+
+        parsed_update = llm_svc.parse_and_update_memory_request(
+            user_text=raw_text,
+            current_profile=user_profile,
+            current_memory_summary=current_long_term
+        )
+
+        profile_mods = parsed_update.get("profile_updates") or {}
+        if profile_mods:
+            supabase_svc.save_user_profile(user_id, profile_mods)
+
+        mem_fact = parsed_update.get("memory_fact") or ""
+        if mem_fact:
+            supabase_svc.append_to_long_term_memory(user_id, mem_fact)
+
+        resp_text = parsed_update.get("response_text") or "Ho registrato e memorizzato le tue nuove preferenze operative."
+
+        if status_msg:
+            try:
+                await status_msg.delete()
+            except Exception:
+                pass
+
+        keyboard = [
+            [
+                InlineKeyboardButton("👤 Visualizza Scheda Profilo", callback_data="cmd_profile"),
+                InlineKeyboardButton("💼 Il Mio Portafoglio", callback_data="cmd_portfolio")
+            ]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+
+        supabase_svc.log_message(user_id, "assistant", resp_text)
+        await send_safe_text(update, resp_text, reply_markup=reply_markup)
+        return
 
     # 1. Se l'utente chiede le migliori occasioni o idee di trading
     if intent == "opportunities":
@@ -1431,6 +1488,10 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
 
     if data == "cmd_portfolio":
         await portfolio_cmd(update, context)
+        return
+
+    if data == "cmd_profile":
+        await profile_cmd(update, context)
         return
 
     if data == "cmd_occasioni":

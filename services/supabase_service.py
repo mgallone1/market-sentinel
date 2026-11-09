@@ -314,6 +314,17 @@ class SupabaseService:
             """, (user_id, summary_text))
             conn.commit()
 
+    def append_to_long_term_memory(self, user_id: int, new_fact: str) -> str:
+        """Aggiunge una regola o fatto permanente alla memoria di lungo termine dell'utente."""
+        old_mem = self.get_long_term_summary(user_id) or ""
+        lines = [line.strip() for line in old_mem.split("\n") if line.strip()]
+        clean_fact = f"• {new_fact.lstrip('•- ')}"
+        if clean_fact not in lines:
+            lines.append(clean_fact)
+        updated_summary = "\n".join(lines[-15:])
+        self.save_long_term_summary(user_id, updated_summary)
+        return updated_summary
+
     def get_active_chat_ids(self) -> set:
         """Restituisce l'insieme di tutti i chat ID attivi registrati nel DB."""
         chat_ids = set()
