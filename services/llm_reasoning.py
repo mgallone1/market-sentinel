@@ -180,40 +180,45 @@ class LLMReasoningService:
                 print(f"[LLMReasoningService] Modello {model} non disponibile: {e}")
         return ""
 
-    def classify_intent(self, text: str, recent_history_summary: str = "") -> Dict[str, Any]:
+    def classify_intent(self, text: str, recent_history_summary: str = "", active_topic_ticker: str = "") -> Dict[str, Any]:
         """
         Classifica l'intenzione dell'utente con massima precisione:
-        - Distingue se chiede una spiegazione di un ribasso generale (market_explanation)
-        - Se chiede di un ticker specifico o perché scende quel ticker (ticker_analysis)
-        - Se richiede esplicitamente il bollettino/briefing periodico (market_briefing)
-        - Oppure portafoglio, occasioni o chat.
+        - Mantiene il filo logico correlato (es. se la richiesta fa seguito all'analisi precedente).
+        - Distingue se chiede spiegazioni tecniche su probabilità o indicatori (technical_explanation).
+        - Distingue se chiede una spiegazione di un ribasso generale (market_explanation).
+        - Se chiede di un ticker specifico o correlate (ticker_analysis).
         """
+        active_block = f"TITOLO/ARGOMENTO ATTUALMENTE DISCUSSO: {active_topic_ticker}\n" if active_topic_ticker else ""
         context_block = f"CONTESTO DELLA CHAT RECENTE:\n{recent_history_summary}\n" if recent_history_summary else ""
         prompt = f"""
-Sei un classificatore di intenti finanziari avanzato. Analizza attentamente il messaggio dell'utente considerando il contesto recente.
+Sei un classificatore di intenti finanziari avanzato per un Senior Private Wealth Advisor. Analizza attentamente il messaggio dell'utente considerando il contesto recente e l'argomento discusso.
 
-{context_block}MESSAGGIO UTENTE:
+{active_block}{context_block}MESSAGGIO UTENTE:
 "{text}"
 
-DISTINZIONE CRITICA DEGLI INTENTI:
-1. "opportunities":
-   - Se l'utente chiede le migliori occasioni, opportunità di mercato, titoli a sconto statistico, idee di trading o cosa comprare (es. "le migliori occasioni", "cosa comprare oggi", "titoli a sconto", "migliori opportunità").
-2. "update_portfolio_ticker":
-   - Se l'utente chiede di correggere, cambiare, modificare o sostituire uno o più ticker nel portafoglio (es. "cambia il ticker di BYD in BY6.F", "sostituisci URTH con XDWD", "aggiorna con XDEM").
-3. "portfolio":
-   - Se l'utente chiede di vedere il portafoglio o chiarimenti sui calcoli/numeri/controvalore mostrati senza chiedere le cause macro del mercato (es. "mostra portafoglio", "/portafoglio", "ricontrolla i calcoli", "situazione portafoglio").
-4. "market_briefing":
-   - SOLO ed ESCLUSIVAMENTE quando l'utente richiede espressamente il bollettino periodico o il briefing programmato (es. "/briefing", "dammi il briefing", "leggi il briefing", "briefing del mattino").
-5. "market_explanation":
-   - Quando l'utente chiede il PERCHÉ o una spiegazione di un movimento generale di mercato, ribassi, crolli, correzioni, o spiegazioni sulla giornata finanziaria senza specificare una singola azione (es. "come mai sta scendendo tutto?", "perché crolla tutto?", "perché i mercati sono tutti rossi?", "cosa sta succedendo oggi in borsa?", "perché scendono i mercati?", "c'è il panico sui mercati?", "perché sta scendendo il mercato?").
-6. "ticker_analysis":
-   - Quando l'utente chiede di un'azione o criptovaluta specifica, compreso il PERCHÉ stia salendo o scendendo (es. "come mai bitcoin sta scendendo?", "perché scende nvidia?", "cosa ne pensi di apple", "perché crolla tesla?", "dimmi di XDEM", "bitcoin", "marvell", "byd").
-7. "general_chat":
-   - Saluti, domande concettuali o filosofiche sulla finanza.
+DISTINZIONE DEGLI INTENTI:
+1. "technical_explanation":
+   - Se l'utente chiede spiegazioni tecniche sui dati quantitativi, sulle probabilità percentuali, su Monte Carlo, FLD di Hurst, Z-Score, cicli o metodologie di calcolo (es. "cosa significa probabilità del 75%?", "spiegami le probabilità", "spiegami lo Z-Score", "come calcoli Monte Carlo?", "spiegami i numeri e i dati", "cosa vuol dire FLD?").
+   - Se collegato al titolo discusso, indica come ticker quello attivo ({active_topic_ticker or 'il ticker dedotto'}).
+2. "ticker_analysis":
+   - Quando l'utente chiede di un'azione o crypto specifica, o FA UNA DOMANDA DI SEGUITO correlata all'ultimo titolo analizzato (es. "come mai bitcoin sta scendendo?", "e se entrassi adesso con 1000€?", "cosa pensi di nvidia?", "e rispetto al mio PMC?", "e se volessi comprarne altre?").
+   - REGOLA DI CONTINUITÀ: se l'utente non ripete il nome del titolo ma la domanda è chiaramente riferita all'argomento precedente, estrai come ticker '{active_topic_ticker}' o il ticker desunto dalla cronologia!
+3. "opportunities":
+   - Richiesta di migliori occasioni, titoli a sconto statistico, idee operative.
+4. "update_portfolio_ticker":
+   - Modifica o correzione di ticker nel portafoglio.
+5. "portfolio":
+   - Consultazione o chiarimenti sul portafoglio complessivo.
+6. "market_briefing":
+   - Richiesta esplicita del bollettino/briefing periodico (/briefing).
+7. "market_explanation":
+   - Richiesta di spiegazioni sul perché scende/sale tutto il mercato in generale.
+8. "general_chat":
+   - Conversazione generale, saluti o riflessioni teoriche non ancorate a un titolo specifico.
 
 Restituisci ESCLUSIVAMENTE un JSON valido:
 {{
-  "intent": "opportunities" | "update_portfolio_ticker" | "portfolio" | "market_briefing" | "market_explanation" | "ticker_analysis" | "general_chat",
+  "intent": "technical_explanation" | "ticker_analysis" | "opportunities" | "update_portfolio_ticker" | "portfolio" | "market_briefing" | "market_explanation" | "general_chat",
   "ticker": "SIMBOLO_TICKER" o null,
   "replacements": [
      {{"old_ticker_or_name": "...", "new_ticker": "..."}}
@@ -879,6 +884,62 @@ Rispondi direttamente a Michele in 2 o 3 ampi paragrafi discorsivi e fluidi, par
 - Offri un ragionamento approfondito, colto, autorevole ma accessibile e privo di nozionismi astratti o fuffa enciclopedica.
 - Collega il ragionamento a implicazioni pratiche sul suo modo di gestire il patrimonio e la psicologia degli investimenti.
 - Concludi con un consiglio chiaro e un tono vicino e collaborativo.
+
+Tutte le quotazioni RIGOROSAMENTE in Euro (€).
+{TELEGRAM_FORMATTING_RULES}
+"""
+        res = self._call_gemini(prompt)
+        return clean_telegram_markdown(res)
+
+    def explain_technical_metrics(
+        self,
+        user_query: str,
+        topic_info: Dict[str, Any],
+        user_portfolio: Optional[List[Dict[str, Any]]] = None,
+        user_profile: Optional[Dict[str, Any]] = None,
+        memory_context: str = ""
+    ) -> str:
+        """
+        Spiega in modo approfondito, scientifico ma estremamente chiaro e umano
+        il significato esatto delle probabilità, degli indicatori tecnici e dei modelli
+        quantitativi (Monte Carlo, FLD di Hurst, Z-Score, Wyckoff, Elliott, Rischio/Rendimento).
+        Risponde alle richieste di chiarimento sui numeri e sui dati del CIO.
+        """
+        if not self.client:
+            return ""
+
+        now_str = self._get_current_time_str()
+        user_profile = user_profile or {}
+        user_portfolio = user_portfolio or []
+        mem_block = f"\nCONTESTO PRECEDENTE:\n{memory_context}\n" if memory_context else ""
+
+        ticker = topic_info.get("ticker", "Generale")
+        asset_name = topic_info.get("asset_name", ticker)
+        price_eur = topic_info.get("price_eur", 0.0)
+        quant_data = topic_info.get("quant_data", {})
+
+        prompt = f"""
+[CONTESTO DI SISTEMA INTERNO: Anno e data attuale {now_str}. Usalo SOLO come ancoraggio temporale contro allucinazioni sul passato. VIETATO ASSOLUTO iniziare recitando la data o convenevoli!]
+Sei il Chief Investment Officer (CIO) e Quantitative Wealth Advisor personale di Michele.
+NON sei un bot né un manuale accademico. Sei il suo consulente di fiducia che gli spiega i numeri e la matematica dietro le decisioni di investimento, parlandogli direttamente dandogli del 'tu' con chiarezza disarmante, autorevolezza e precisione scientifica.
+{mem_block}
+DOMANDA ESATTA DI MICHELE:
+"{user_query}"
+
+DATI QUANTITATIVI E PROBABILISTICI DEL TITOLO ({asset_name} - {ticker}):
+- Prezzo Live di Riferimento: {price_eur:.2f} €
+- Metriche Quantitative Registrate:
+{json.dumps(quant_data, indent=2, ensure_ascii=False) if quant_data else "Dati di modello quantitativo generale"}
+
+{HUMAN_ADVISOR_COMMUNICATION_SKILLS}
+
+COMPITO DI REDAZIONE (SPIEGAZIONE TECNICA APPROFONDITA MA UMANA):
+Michele ti sta chiedendo delucidazioni tecniche sui numeri, sulle probabilità percentuali o sugli indicatori del nostro modello.
+Rispondi in 3 o 4 ampi paragrafi discorsivi e fluidi, parlando in prima persona ('io') e rivolgendoti a lui ('tu'):
+- Inizia SUBITO nel vivo, accogliendo il suo interesse per i numeri: spiegagli con precisione matematica e parole vive COSA significa esattamente quella probabilità o metrica (es. come calcoliamo la probabilità di rimbalzo combinando Z-Score su SMA20, divergenza RSI e ciclo di Hurst, oppure cosa significano le 10.000 iterazioni geometriche browniane di Monte Carlo con gli intervalli 1-Sigma 68% e 2-Sigma 95%).
+- Spiega PERCHÉ usiamo questo metodo: non per indovinare il futuro con la sfera di cristallo, ma per misurare l'asimmetria statistica del rischio (trasformare un gioco d'azzardo in una strategia con aspettativa matematica positiva).
+- Mostra come questo dato matematico si traduce nella pratica operativa del suo conto su Trade Republic (come impostare l'ordine limite anti-spread e come proteggere il suo PMC).
+- Concludi con un consiglio chiaro e chiedigli se preferisce approfondire un altro dettaglio o passare alla simulazione dell'ordine.
 
 Tutte le quotazioni RIGOROSAMENTE in Euro (€).
 {TELEGRAM_FORMATTING_RULES}

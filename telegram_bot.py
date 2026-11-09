@@ -996,18 +996,22 @@ async def _handle_text_message_core(update: Update, context: ContextTypes.DEFAUL
     # Salva il messaggio dell'utente nella memoria di breve termine
     supabase_svc.log_message(user_id, "user", raw_text)
 
-    # Recupera memoria di breve termine (scambi recenti entro 7 giorni) e lungo termine (30 giorni)
-    recent_history = supabase_svc.get_recent_chat_history(user_id, limit=6)
+    # Recupera memoria di breve termine (ultimi 8 scambi completi) e lungo termine (30 giorni)
+    recent_history = supabase_svc.get_recent_chat_history(user_id, limit=8)
     long_term_mem = supabase_svc.get_long_term_summary(user_id)
     
     memory_context_parts = []
     if long_term_mem:
         memory_context_parts.append(f"Decisioni e tesi dell'ultimo mese: {long_term_mem}")
     if recent_history:
-        recent_snippets = [f"{m['role']}: {m['content'][:120]}" for m in recent_history[-4:]]
-        memory_context_parts.append(f"Scambi recenti di questa settimana:\n" + "\n".join(recent_snippets))
+        recent_snippets = [f"{'Michele' if m['role'] == 'user' else 'Consulente'}: {m['content'][:800]}" for m in recent_history[-6:]]
+        memory_context_parts.append(f"Scambi recenti della conversazione:\n" + "\n".join(recent_snippets))
     
     memory_context = "\n".join(memory_context_parts)
+
+    # Recupera il topic/ticker attivo nella sessione dell'utente
+    active_topic = context.user_data.get("current_topic") or {}
+    active_ticker = active_topic.get("ticker", "")
 
     # Comandi rapidi testuali diretti
     if upper_text in ["PORTAFOGLIO", "/PORTAFOGLIO"]:
@@ -1035,15 +1039,15 @@ async def _handle_text_message_core(update: Update, context: ContextTypes.DEFAUL
         await cicli_cmd(update, context)
         return
 
-    # Prepara un breve sommario degli ultimi 3 scambi per dare contesto alla classificazione dell'intento
+    # Prepara il contesto completo degli ultimi scambi per dare continuità logica alla classificazione dell'intento
     recent_context_str = ""
     if recent_history:
-        recent_context_str = "\n".join([f"{m['role']}: {m['content'][:100]}" for m in recent_history[-3:]])
+        recent_context_str = "\n".join([f"{'Michele' if m['role'] == 'user' else 'Consulente'}: {m['content'][:400]}" for m in recent_history[-4:]])
 
-    # Classificazione intelligente dell'intento tramite Gemini con memoria contestuale
-    classification = llm_svc.classify_intent(raw_text, recent_history_summary=recent_context_str)
+    # Classificazione intelligente dell'intento tramite Gemini con memoria contestuale e topic attivo
+    classification = llm_svc.classify_intent(raw_text, recent_history_summary=recent_context_str, active_topic_ticker=active_ticker)
     intent = classification.get("intent", "general_chat")
-    ticker = classification.get("ticker")
+    ticker = classification.get("ticker") or active_ticker
 
     # 1. Se l'utente chiede le migliori occasioni o idee di trading
     if intent == "opportunities":
@@ -1143,7 +1147,48 @@ async def _handle_text_message_core(update: Update, context: ContextTypes.DEFAUL
         await portfolio_cmd(update, context)
         return
 
-    # 4. Se l'intento è analizzare uno specifico titolo o crypto
+    # 4. Se l'utente chiede spiegazioni tecniche approfondite su probabilità, indicatori, Z-Score o Monte Carlo
+    if intent == "technical_explanation":
+        active_topic = context.user_data.get("current_topic") or {}
+        if not active_topic and ticker:
+            resolved_t = resolve_ticker(ticker) or ticker
+            active_topic = {"ticker": resolved_t, "asset_name": resolved_t}
+
+        status_msg = await update.message.reply_text("🔬 *Elaboro l'approfondimento tecnico e quantitativo sul modello...*", parse_mode="Markdown")
+        user_portfolio = supabase_svc.get_portfolio(user_id)
+        user_profile = supabase_svc.get_user_profile(user_id)
+
+        tech_explanation = llm_svc.explain_technical_metrics(
+            user_query=raw_text,
+            topic_info=active_topic,
+            user_portfolio=user_portfolio,
+            user_profile=user_profile,
+            memory_context=memory_context
+        )
+        if not tech_explanation:
+            tech_explanation = "Il nostro modello calcola la probabilità di rimbalzo combinando la deviazione standard (Z-Score) dalla media mobile a 20 sedute, l'oscillatore RSI e il timing ciclico per stimare l'asimmetria statistica favorevole."
+
+        if status_msg:
+            try:
+                await status_msg.delete()
+            except Exception:
+                pass
+
+        current_t = active_topic.get("ticker", "XDWD.DE")
+        keyboard = [
+            [
+                InlineKeyboardButton(f"🧮 Simula Ordine per {current_t}", callback_data=f"sim_{current_t}"),
+                InlineKeyboardButton("💼 Il Mio Portafoglio", callback_data="cmd_portfolio")
+            ]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+
+        supabase_svc.log_message(user_id, "user", raw_text)
+        supabase_svc.log_message(user_id, "assistant", tech_explanation)
+        await send_safe_text(update, tech_explanation, reply_markup=reply_markup)
+        return
+
+    # 5. Se l'intento è analizzare uno specifico titolo o crypto
     if intent == "ticker_analysis" and ticker:
         # Risolvi ticker per crypto e alias comuni
         resolved = resolve_ticker(ticker) or ticker
@@ -1225,44 +1270,6 @@ async def _handle_text_message_core(update: Update, context: ContextTypes.DEFAUL
                 "hurst_fld_value": hurst_migl_data.get("hurst_fld_value", "N/D"),
                 "hurst_fld_signal": hurst_migl_data.get("hurst_fld_signal", "")
             }
-
-            # Commento ragionato del Senior Chartist tramite Gemini con memoria e quant data
-            gemini_comment = llm_svc.generate_financial_commentary(
-                ticker,
-                pred,
-                fund,
-                news,
-                cycle_data=cycle_context,
-                advanced_data=advanced_context,
-                memory_context=memory_context
-            )
-            if not gemini_comment:
-                gemini_comment = (
-                    f"Fase ciclica: {cycle_context['wyckoff_phase']}.\n"
-                    f"Battleplan Migliorino: {cycle_context['tempo_battleplan']}.\n"
-                    f"Divergenza: {cycle_context['divergence']}.\n"
-                    f"Supporto aureo di Fibonacci: {cycle_context['fib_618_eur']} €."
-                )
-
-            news_block = ""
-            if news:
-                news_block = "\n📰 *Catalyst & News di Mercato:*\n"
-                for n in news[:2]:
-                    news_block += f"• {n['title']}\n"
-
-            # Sintesi Monte Carlo ed Elliott Wave
-            mc_summary_block = ""
-            if mc_data:
-                mc_summary_block = (
-                    f"🎲 *Simulazione Monte Carlo (10.000 iterazioni a 20 sedute):*\n"
-                    f"• Valore Mediano Atteso: `{mc_data.get('median_price_eur')} €`\n"
-                    f"• Range Confidenza 68% (1σ): `{mc_data.get('ci_68_range_eur')}`\n"
-                    f"• Range Confidenza 95% (2σ): `{mc_data.get('ci_95_range_eur')}`\n"
-                    f"• Probabilità Trend Positivo: *{mc_data.get('probability_positive_trend')}* | VaR 95%: `{mc_data.get('var_95_eur')} €`\n\n"
-                    f"🌐 *Macro Context & Elliott:*\n"
-                    f"• VIX: `{macro_data.get('vix_value')}` ({macro_data.get('vix_regime')})\n"
-                    f"• Onde di Elliott: *{elliott_data.get('wave_label')}*\n\n"
-                )
 
             # Calcolo Prezzo Limite Consigliato (Supporto 1-Sigma Monte Carlo o sconto statistico)
             current_p = pred['current_price_eur']
@@ -1354,6 +1361,26 @@ async def _handle_text_message_core(update: Update, context: ContextTypes.DEFAUL
                     await status_msg.delete()
                 except Exception:
                     pass
+
+            context.user_data["current_topic"] = {
+                "ticker": resolved,
+                "asset_name": fund.get("short_name", resolved),
+                "price_eur": current_p,
+                "quant_data": {
+                    "rebound_probability": pred.get("mean_reversion_probability", "75%"),
+                    "z_score": pred.get("z_score"),
+                    "rsi": pred.get("rsi"),
+                    "limit_price_eur": limit_price,
+                    "tp1_eur": tp1,
+                    "stop_loss_eur": stop_loss,
+                    "monte_carlo_median": mc_data.get("median_price_eur"),
+                    "monte_carlo_ci_68": mc_data.get("ci_68_range_eur"),
+                    "monte_carlo_var_95": mc_data.get("var_95_eur"),
+                    "hurst_tempo_battleplan": hurst_migl_data.get("tempo_battleplan"),
+                    "bars_to_minimum": hurst_migl_data.get("candele_al_minimo"),
+                    "wyckoff_phase": wyck_data.get("phase")
+                }
+            }
 
             supabase_svc.log_message(user_id, "assistant", advisor_note)
             await send_safe_text(update, advisor_note, reply_markup=reply_markup)
