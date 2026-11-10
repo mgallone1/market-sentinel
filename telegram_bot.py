@@ -48,10 +48,13 @@ from services.cycle_radar import CycleRadarService
 from services.advanced_predictive_system import AdvancedPredictiveSystem
 from services.video_downloader import VideoDownloaderService
 from services.day_trader_service import DayTraderService
+from services.ensemble_predictor import EnsemblePredictorEngine
+from services.proactive_sentinel import ProactiveSentinelService
 
 supabase_svc = SupabaseService()
 llm_svc = LLMReasoningService()
 day_trader_svc = DayTraderService()
+sentinel_svc = ProactiveSentinelService()
 ACTIVE_CHAT_IDS: Set[int] = set()
 
 # Mappa alias titoli comuni
@@ -213,6 +216,8 @@ async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "💼 *Diagnosi Globale di Portafoglio:* Digita `/portafoglio` o inviami uno screenshot per visualizzare la diagnosi patrimoniale, i pesi di allocazione e il consiglio di ribilanciamento.\n"
         "👤 *Profilo Investitore & PAC:* Digita `/profilo` per vedere o aggiornare i tuoi obiettivi, il budget mensile e l'orizzonte temporale.\n"
         "💎 *Opportunity Hunter:* Digita `/occasioni` per scansionare all'istante l'intero mercato e trovare i titoli a forte sconto statistico con approfondimento discorsivo del CIO.\n"
+        "🔮 *Previsioni Quantitative d'Insieme:* Digita `/previsione TICKER` (es. `/previsione NVDA`, `/previsione BTC`) per il modello predittivo a 10.000 iterazioni Monte Carlo, Cicli Hurst ed Elliott.\n"
+        "🛡️ *Sentinella Proattiva & Radar:* Digita `/sentinel` (o `/radar`) per verificare la sorveglianza autonoma 24/7 su anomalie, breakout e disclosure.\n"
         "⚡ *Day Trader Chart Scanner:* Digita `/scanner` (o `/daytrade`) per individuare breakout a 20 giorni, bull flags e rimbalzi tecnici da ipervenduto.\n"
         "🏛️ *Capitol Hill & Pelosi Tracker:* Digita `/pelosi` (o `/congresso`) per consultare gli ultimi disclosure ufficiali (PTR) depositati al Congresso USA.\n"
         "🧮 *Simulatore Ordini Trade Republic:* Digita `/simula TICKER BUDGET` (es. `/simula XDEM 500`) per calcolare quote esatte e prezzo limite anti-spread.\n"
@@ -651,6 +656,105 @@ async def scanner_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await status_msg.delete()
             except Exception:
                 pass
+
+async def previsione_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    ACTIVE_CHAT_IDS.add(user_id)
+    args = context.args or []
+
+    raw_ticker = args[0].upper() if args else ""
+    if not raw_ticker:
+        last_inter = supabase_svc.get_last_user_interaction(user_id)
+        raw_ticker = (last_inter.get("active_ticker") if last_inter else None) or "BTC"
+
+    ticker = resolve_ticker(raw_ticker) or raw_ticker
+    status_msg = await update.message.reply_text(f"🔮 *Elaboro la Previsione Quantitativa d'Insieme per {ticker} (Monte Carlo, Hurst & Z-Score)...*", parse_mode="Markdown")
+
+    try:
+        user_portfolio = supabase_svc.get_portfolio(user_id)
+        user_profile = supabase_svc.get_user_profile(user_id)
+        current_long_term = supabase_svc.get_long_term_summary(user_id)
+
+        forecast = EnsemblePredictorEngine.generate_ensemble_forecast(ticker)
+        if forecast.get("error"):
+            await send_safe_text(update, f"⚠️ Impossibile calcolare la previsione per `{ticker}`: {forecast['error']}")
+            return
+
+        user_query = f"Qual è la previsione quantitativa dettagliata e la traiettoria più probabile per {ticker}?"
+        explanation = llm_svc.explain_ensemble_prediction(
+            user_query=user_query,
+            forecast_data=forecast,
+            user_portfolio=user_portfolio,
+            user_profile=user_profile,
+            memory_context=current_long_term
+        )
+
+        keyboard = [
+            [
+                InlineKeyboardButton(f"🧮 Simula Ordine {ticker}", callback_data=f"sim_{ticker}"),
+                InlineKeyboardButton(f"🔬 Deep Dive Cicli", callback_data=f"quant_{ticker}")
+            ],
+            [
+                InlineKeyboardButton("🛡️ Radar Sentinella", callback_data="cmd_sentinel"),
+                InlineKeyboardButton("💼 Portafoglio", callback_data="cmd_portfolio")
+            ]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+
+        if status_msg:
+            try:
+                await status_msg.delete()
+            except Exception:
+                pass
+
+        supabase_svc.log_message(user_id, "assistant", explanation)
+        await send_safe_text(update, explanation, reply_markup=reply_markup)
+
+    except Exception as e:
+        print(f"[!] Errore in previsione_cmd: {e}")
+        await send_safe_text(update, f"Si è verificato un errore durante l'elaborazione della previsione: {e}")
+    finally:
+        if status_msg:
+            try:
+                await status_msg.delete()
+            except Exception:
+                pass
+
+async def sentinel_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    ACTIVE_CHAT_IDS.add(user_id)
+
+    dash = sentinel_svc.get_sentinel_dashboard()
+    assets_str = "\n".join([f"• `{a}`" for a in dash["monitored_assets"]])
+    triggers_str = "\n".join([f"• {t}" for t in dash["active_triggers"]])
+
+    msg = (
+        "🛡️ *SENTINELLA PROATTIVA & RADAR DI MERCATO*\n"
+        "───────────────────────\n"
+        f"• *Stato Sorveglianza:* {dash['status']}\n"
+        f"• *Finestra Operativa:* {dash['active_hours']}\n"
+        f"• *Orario Attuale (CET):* `{dash['current_time_cet']}`\n"
+        f"• *Alert Inviati Oggi:* `{dash['alerts_sent_today']}`\n\n"
+        "📡 *Asset Sottoposti a Sorveglianza Continua:*\n"
+        f"{assets_str}\n\n"
+        "⚡ *Trigger di Allerta Proattiva:*\n"
+        f"{triggers_str}\n"
+        "───────────────────────\n"
+        "💡 *Come funziona la proattività:* Se uno dei tuoi titoli subisce uno shock di volatilità (>= 3.8%), tocca un minimo ciclico o una rottura dei massimi, oppure se Nancy Pelosi deposita una nuova operazione al Congresso, riceverai una notifica proattiva del CIO senza dover chiedere nulla!"
+    )
+
+    keyboard = [
+        [
+            InlineKeyboardButton("⚡ Day Trader Scanner", callback_data="cmd_scanner"),
+            InlineKeyboardButton("🏛️ Pelosi Tracker", callback_data="cmd_pelosi")
+        ],
+        [
+            InlineKeyboardButton("💼 Il Mio Portafoglio", callback_data="cmd_portfolio"),
+            InlineKeyboardButton("🌅 Briefing Mercati", callback_data="cmd_briefing")
+        ]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await send_safe_text(update, msg, reply_markup=reply_markup)
 
 async def simula_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     args = context.args
@@ -1151,6 +1255,15 @@ async def _handle_text_message_core(update: Update, context: ContextTypes.DEFAUL
         await scanner_cmd(update, context)
         return
 
+    if any(w in upper_text for w in ["SENTINEL", "/SENTINEL", "RADAR", "/RADAR"]):
+        await sentinel_cmd(update, context)
+        return
+
+    if any(w in upper_text for w in ["PREVISIONE", "/PREVISIONE", "PREVISIONI", "/PREVISIONI", "FORECAST", "/FORECAST"]):
+        context.args = raw_text.split()[1:] if " " in raw_text else []
+        await previsione_cmd(update, context)
+        return
+
     if upper_text in ["BRIEFING", "/BRIEFING"]:
         await briefing_cmd(update, context)
         return
@@ -1239,6 +1352,17 @@ async def _handle_text_message_core(update: Update, context: ContextTypes.DEFAUL
     # Se l'utente chiede lo scanner dei grafici o setup di day trading
     if intent == "market_scanner":
         await scanner_cmd(update, context)
+        return
+
+    # Se l'utente chiede lo stato della sentinella o del radar
+    if intent == "sentinel_status":
+        await sentinel_cmd(update, context)
+        return
+
+    # Se l'utente chiede esplicitamente previsioni o target su un titolo
+    if intent == "forecast_prediction":
+        context.args = [ticker] if ticker else []
+        await previsione_cmd(update, context)
         return
 
     # 2. Se l'utente chiede espressamente il bollettino / briefing programmato
@@ -1636,6 +1760,10 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         await scanner_cmd(update, context)
         return
 
+    if data == "cmd_sentinel":
+        await sentinel_cmd(update, context)
+        return
+
     if data.startswith("quant_"):
         ticker = data.replace("quant_", "")
         await query.message.reply_text(f"🔬 *Elaboro il Deep Dive Quantitativo per {ticker} (Monte Carlo, FLD & Elliott)...*", parse_mode="Markdown")
@@ -1771,10 +1899,23 @@ async def send_scheduled_briefing(app, slot: str, force: bool = False):
     except Exception as e:
         print(f"[!] Errore critico generazione scheduled briefing: {e}")
 
+async def sentinel_watchdog_job(application):
+    """Esegue il controllo proattivo periodico della sentinella."""
+    try:
+        res = await sentinel_svc.run_sentinel_watchdog(application)
+        if res and res != "no_triggers":
+            print(f"🛡️ [Sentinel] Risultato watchdog: {res}")
+    except Exception as e:
+        print(f"[!] Errore sentinel_watchdog_job: {e}")
+
 async def post_init(application):
-    """Configura il menu dei comandi nativo di Telegram e avvia lo scheduler dei briefing alle 07:00 e 15:00 CET."""
+    """Configura il menu dei comandi nativo di Telegram e avvia lo scheduler dei briefing e della sentinella proattiva."""
     bot_commands = [
         BotCommand("portafoglio", "💼 Diagnosi del portafoglio e asset allocation"),
+        BotCommand("previsione", "🔮 Previsione ensemble (Monte Carlo, Hurst & Z-Score)"),
+        BotCommand("sentinel", "🛡️ Stato radar sentinella proattiva 24/7"),
+        BotCommand("scanner", "⚡ Day trader chart scanner (breakout & ipervenduto)"),
+        BotCommand("pelosi", "🏛️ Congressional trades & Pelosi tracker"),
         BotCommand("profilo", "👤 Profilo investitore, PAC e orizzonte temporale"),
         BotCommand("briefing", "🌅 Quadro di mercato, Wall Street ed Europa"),
         BotCommand("occasioni", "💎 Top 10 occasioni a sconto con tesi del CIO"),
@@ -1790,7 +1931,7 @@ async def post_init(application):
     except Exception as e:
         print(f"[!] Errore registrazione comandi Telegram: {e}")
 
-    # Avvio Scheduler Asincrono per briefing alle 07:00 e alle 15:00 fuso orario di Roma
+    # Avvio Scheduler Asincrono per briefing e sentinella proattiva
     try:
         scheduler = AsyncIOScheduler(timezone="Europe/Rome")
         scheduler.add_job(
@@ -1814,9 +1955,17 @@ async def post_init(application):
             id="evening_briefing_2130",
             replace_existing=True
         )
+        # Watchdog proattivo ogni 20 minuti
+        scheduler.add_job(
+            sentinel_watchdog_job,
+            CronTrigger(minute="*/20", timezone="Europe/Rome"),
+            args=[application],
+            id="sentinel_watchdog_20min",
+            replace_existing=True
+        )
         scheduler.start()
         application.bot_data["briefing_scheduler"] = scheduler
-        print("⏰ [Scheduler] Programmato: Briefing Mattino ore 07:00 CET | Briefing Pomeriggio ore 15:00 CET!")
+        print("⏰ [Scheduler] Programmato: Briefing 07:00 / 15:00 CET | Watchdog Sentinella ogni 20 minuti!")
     except Exception as e:
         print(f"[!] Errore configurazione scheduler in post_init: {e}")
 
@@ -1838,6 +1987,10 @@ def main():
     app.add_handler(CommandHandler("congresso", pelosi_cmd))
     app.add_handler(CommandHandler("scanner", scanner_cmd))
     app.add_handler(CommandHandler("daytrade", scanner_cmd))
+    app.add_handler(CommandHandler("previsione", previsione_cmd))
+    app.add_handler(CommandHandler("forecast", previsione_cmd))
+    app.add_handler(CommandHandler("sentinel", sentinel_cmd))
+    app.add_handler(CommandHandler("radar", sentinel_cmd))
     app.add_handler(CommandHandler("cicli", cicli_cmd))
     app.add_handler(CommandHandler("simula", simula_cmd))
     app.add_handler(CommandHandler("portafoglio", portfolio_cmd))

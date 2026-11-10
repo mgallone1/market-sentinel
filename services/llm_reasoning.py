@@ -219,12 +219,16 @@ DISTINZIONE DEGLI INTENTI:
    - Se l'utente chiede cosa ha comprato o venduto Nancy Pelosi, i membri del congresso USA, trade dei politici americani, disclosure PTR, o insider trading a Capitol Hill (es. "cosa ha comprato la pelosi?", "quali sono gli ultimi trade del congresso?", "pelosi", "congress trades", "cosa vendono i politici?", "disclosures congresso").
 10. "market_scanner":
    - Se l'utente chiede uno screening o scanner tecnico di mercato, breakout a 20 giorni, bull flag, titoli in ipervenduto o setup di day trading (es. "fai uno scanner dei mercati", "ci sono titoli in breakout?", "cerca bull flags", "titoli in ipervenduto", "scanner day trade").
-11. "general_chat":
+11. "forecast_prediction":
+   - Se l'utente chiede esplicitamente previsioni, stime probabilistiche future, target price o scenari prospettici su un titolo (es. "che previsioni hai su bitcoin?", "previsione nvidia", "dove vedi apple nei prossimi giorni?", "qual è il target di xdem?", "fai una previsione", "cosa prevedi?").
+12. "sentinel_status":
+   - Se l'utente chiede lo stato del radar di sorveglianza proattiva, i titoli monitorati o gli alert sentinella attivi (es. "stato sentinella", "radar", "cosa stai monitorando?", "alert attivi", "/sentinel").
+13. "general_chat":
    - Conversazione generale, saluti o riflessioni teoriche non ancorate a un titolo specifico.
 
 Restituisci ESCLUSIVAMENTE un JSON valido:
 {{
-  "intent": "update_memory_or_profile" | "technical_explanation" | "ticker_analysis" | "opportunities" | "update_portfolio_ticker" | "portfolio" | "market_briefing" | "market_explanation" | "congress_trades" | "market_scanner" | "general_chat",
+  "intent": "update_memory_or_profile" | "technical_explanation" | "ticker_analysis" | "opportunities" | "update_portfolio_ticker" | "portfolio" | "market_briefing" | "market_explanation" | "congress_trades" | "market_scanner" | "forecast_prediction" | "sentinel_status" | "general_chat",
   "ticker": "SIMBOLO_TICKER" o null,
   "replacements": [
      {{"old_ticker_or_name": "...", "new_ticker": "..."}}
@@ -1136,6 +1140,65 @@ COMPITO DI REDAZIONE:
 3. Spiega la condotta consigliata: la differenza tra un setup di continuazione (breakout/flag con stop stretto) e un'opportunità di accumulo/rimbalzo su ipervenduto.
 4. Chiedi a Michele se desidera approfondire uno di questi titoli o effettuare la simulazione di gestione del rischio / Time Machine (con 10.000 iterazioni) su uno strumento specifico.
 
+{TELEGRAM_FORMATTING_RULES}
+"""
+        res = self._call_gemini(prompt)
+        return clean_telegram_markdown(res)
+
+    def explain_ensemble_prediction(
+        self,
+        user_query: str,
+        forecast_data: Dict[str, Any],
+        user_portfolio: Optional[List[Dict[str, Any]]] = None,
+        user_profile: Optional[Dict[str, Any]] = None,
+        memory_context: str = ""
+    ) -> str:
+        """
+        Produce una vera consulenza strategica e previsionale avanzata d'insieme
+        combinando Monte Carlo 10.000 iterazioni, cicli di Hurst, Z-score ed Elliott Waves.
+        Tutto rigorosamente in Euro (€), con tono umano, autorevole e forward-looking.
+        """
+        if not self.client:
+            return ""
+
+        now_str = self._get_current_time_str()
+        user_profile = user_profile or {}
+        user_portfolio = user_portfolio or []
+        mem_block = f"\nCONTESTO E MEMORIA:\n{memory_context}\n" if memory_context else ""
+
+        ticker = forecast_data.get("symbol", "Asset")
+        asset_name = forecast_data.get("asset_name", ticker)
+        price_eur = forecast_data.get("current_price_eur", 0.0)
+
+        prompt = f"""
+[CONTESTO DI SISTEMA INTERNO: Anno e data attuale {now_str}. Usalo SOLO come ancoraggio temporale contro allucinazioni sul passato. VIETATO ASSOLUTO iniziare recitando la data o convenevoli!]
+Sei il Chief Investment Officer (CIO) e Quantitative Wealth Advisor personale di Michele.
+Michele ti sta chiedendo una vera previsione prospettica e quantitativa per {asset_name} ({ticker}).
+NON sei un bot, né un foglio di calcolo, né un distributore di disclaimer impersonali. Sei il suo stratega finanziario che gli spiega esattamente dove punta la probabilità matematica, quali sono i target calcolati e come muoversi con intelligenza su Trade Republic.
+{mem_block}
+DOMANDA DI MICHELE:
+"{user_query}"
+
+DATI MOTORE PREVISIONALE D'INSIEME (ENSEMBLE QUANTITATIVO):
+{json.dumps(forecast_data, indent=2, ensure_ascii=False)}
+
+{HUMAN_ADVISOR_COMMUNICATION_SKILLS}
+
+COMPITO DI REDAZIONE:
+1. Inizia dritto al punto formulando la tua TESI PREVISIONALE CHIARA: esprimi subito il verdetto direzionale (Rialzista, Fase di accumulo per rimbalzo, o Rischio correzione) e il livello di convinzione statistica ({forecast_data.get('conviction_score')}).
+2. Spiega la traiettoria più probabile unendo i modelli:
+   - Cosa indicano le 10.000 simulazioni di Monte Carlo (mediana a 20 sedute: {forecast_data.get('monte_carlo', {}).get('median_price_20d_eur')} € e range di confidenza 68% 1-Sigma: {forecast_data.get('monte_carlo', {}).get('ci_68_range_eur')}).
+   - La posizione ciclica di Hurst (fase del battleplan e livello spartiacque FLD).
+   - L'anomalia di Z-Score e la deviazione dalla media.
+3. Fornisci i livelli tattici operativi chiari espressi in Euro (€):
+   - Prezzo attuale: {price_eur:.2f} €
+   - Target Primario (TP1): {forecast_data.get('target_tp1_eur')} € | Target Esteso (TP2): {forecast_data.get('target_tp2_eur')} €
+   - Stop Loss Strutturale di invalidazione: {forecast_data.get('stop_loss_eur')} €
+   - Orizzonte temporale atteso ({forecast_data.get('time_horizon')}).
+4. Connettiti al portafoglio reale o alla liquidità di Michele: se possiede quote, confronta con il suo PMC; altrimenti spiega come inserire un ordine limite anti-spread su Trade Republic.
+5. Concludi sempre con una domanda aperta e propositiva sul prossimo passo.
+
+Tutte le quotazioni RIGOROSAMENTE in Euro (€).
 {TELEGRAM_FORMATTING_RULES}
 """
         res = self._call_gemini(prompt)
