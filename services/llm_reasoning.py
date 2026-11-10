@@ -215,12 +215,16 @@ DISTINZIONE DEGLI INTENTI:
    - Richiesta esplicita del bollettino/briefing periodico (/briefing).
 8. "market_explanation":
    - Richiesta di spiegazioni sul perché scende/sale tutto il mercato in generale.
-9. "general_chat":
+9. "congress_trades":
+   - Se l'utente chiede cosa ha comprato o venduto Nancy Pelosi, i membri del congresso USA, trade dei politici americani, disclosure PTR, o insider trading a Capitol Hill (es. "cosa ha comprato la pelosi?", "quali sono gli ultimi trade del congresso?", "pelosi", "congress trades", "cosa vendono i politici?", "disclosures congresso").
+10. "market_scanner":
+   - Se l'utente chiede uno screening o scanner tecnico di mercato, breakout a 20 giorni, bull flag, titoli in ipervenduto o setup di day trading (es. "fai uno scanner dei mercati", "ci sono titoli in breakout?", "cerca bull flags", "titoli in ipervenduto", "scanner day trade").
+11. "general_chat":
    - Conversazione generale, saluti o riflessioni teoriche non ancorate a un titolo specifico.
 
 Restituisci ESCLUSIVAMENTE un JSON valido:
 {{
-  "intent": "update_memory_or_profile" | "technical_explanation" | "ticker_analysis" | "opportunities" | "update_portfolio_ticker" | "portfolio" | "market_briefing" | "market_explanation" | "general_chat",
+  "intent": "update_memory_or_profile" | "technical_explanation" | "ticker_analysis" | "opportunities" | "update_portfolio_ticker" | "portfolio" | "market_briefing" | "market_explanation" | "congress_trades" | "market_scanner" | "general_chat",
   "ticker": "SIMBOLO_TICKER" o null,
   "replacements": [
      {{"old_ticker_or_name": "...", "new_ticker": "..."}}
@@ -1034,6 +1038,104 @@ Rispondi in 3 o 4 ampi paragrafi discorsivi e fluidi, parlando in prima persona 
 - Concludi con un consiglio chiaro e chiedigli se preferisce approfondire un altro dettaglio o passare alla simulazione dell'ordine.
 
 Tutte le quotazioni RIGOROSAMENTE in Euro (€).
+{TELEGRAM_FORMATTING_RULES}
+"""
+        res = self._call_gemini(prompt)
+        return clean_telegram_markdown(res)
+
+    def explain_congress_trades(
+        self,
+        user_query: str,
+        filings: List[Dict[str, Any]],
+        user_profile: Optional[Dict[str, Any]] = None,
+        memory_context: str = ""
+    ) -> str:
+        """
+        Analizza e racconta a Michele in modo discorsivo, autorevole e dettagliato
+        gli ultimi disclosure PTR (Periodic Transaction Reports) depositati al Congresso USA
+        (es. Nancy Pelosi e altri deputati/senatori).
+        """
+        if not self.client:
+            return ""
+
+        now_str = self._get_current_time_str()
+        user_profile = user_profile or {}
+        mem_block = f"\nCONTESTO E MEMORIA:\n{memory_context}\n" if memory_context else ""
+
+        filings_json = json.dumps(filings, indent=2, ensure_ascii=False) if filings else "Nessuna disclosure recente trovata."
+
+        prompt = f"""
+[CONTESTO DI SISTEMA INTERNO: Anno e data attuale {now_str}. Usalo SOLO come ancoraggio temporale contro allucinazioni sul passato. VIETATO ASSOLUTO iniziare recitando la data o convenevoli!]
+Sei il Chief Investment Officer (CIO) e Private Wealth Advisor personale di Michele.
+NON sei un bot né un lettore di feed. Sei il suo consulente di fiducia che gli spiega con occhio critico, precisione finanziaria e tono umano le mosse di insider trading istituzionale e le dichiarazioni ufficiali dei membri del Congresso USA (sotto lo STOCK Act).
+{mem_block}
+DOMANDA DI MICHELE:
+"{user_query}"
+
+DATI DISCLOSURE CONGRESSO USA ESTRATTI DAL DAY TRADER SKILL:
+{filings_json}
+
+{HUMAN_ADVISOR_COMMUNICATION_SKILLS}
+
+COMPITO DI REDAZIONE:
+1. Spiega con immediatezza e tono confidenziale quali sono i documenti ufficiali più recenti depositati (specificando deputato/membro es. Hon. Nancy Pelosi o altri, data di deposito ufficiale, e link al documento PDF originale).
+2. Dettaglia le operazioni effettive:
+   - Se ci sono opzioni call/put a lunga scadenza (LEAPS), acquisti diretti di azioni, vendite per fusioni (come Paramount/WBD o altri) o investimenti immobiliari.
+   - Indica l'importo stimato (i range previsti per legge es. 1M$-5M$ o 500k$-1M$), la data dell'operazione e il ritardo temporale (lo STOCK Act concede fino a 30-45 giorni di ritardo dalla data dell'ordine, quindi spiegagli che non è un segnale per inseguire alla cieca il prezzo).
+3. Contestualizza strategicamente: cosa significa questa mossa rispetto al sentiment di mercato, alla rotazione settoriale o all'influenza legislativa di Capitol Hill.
+4. Concludi con la tua valutazione sincera per il portafoglio di Michele e una domanda aperta su come intende monitorare questi titoli.
+
+{TELEGRAM_FORMATTING_RULES}
+"""
+        res = self._call_gemini(prompt)
+        return clean_telegram_markdown(res)
+
+    def explain_market_scan(
+        self,
+        user_query: str,
+        scan_results: Dict[str, Any],
+        user_profile: Optional[Dict[str, Any]] = None,
+        memory_context: str = ""
+    ) -> str:
+        """
+        Presenta i risultati dello scanner intraday e swing (breakout a 20 giorni,
+        bull flag, reclaim MA20, oversold bounce) in un briefing discorsivo e strategico.
+        """
+        if not self.client:
+            return ""
+
+        now_str = self._get_current_time_str()
+        user_profile = user_profile or {}
+        mem_block = f"\nCONTESTO E MEMORIA:\n{memory_context}\n" if memory_context else ""
+
+        hits = scan_results.get("hits", [])
+        hits_json = json.dumps(hits, indent=2, ensure_ascii=False) if hits else "Nessun titolo ha triggerato i setup oggi."
+
+        prompt = f"""
+[CONTESTO DI SISTEMA INTERNO: Anno e data attuale {now_str}. Usalo SOLO come ancoraggio temporale contro allucinazioni sul passato. VIETATO ASSOLUTO iniziare recitando la data o convenevoli!]
+Sei il Chief Investment Officer (CIO) e Quantitative Advisor di Michele.
+Hai appena eseguito il modulo Chart Scanner del Day Trader Skill per individuare setup ad alta probabilità statistica:
+- Breakout sui massimi a 20 giorni
+- Bull Flag (consolidamento stretto post rally)
+- Reclaim della media mobile a 20 periodi
+- Titoli in ipervenduto estremo (RSI Wilder < 30) o Oversold Bounce
+{mem_block}
+DOMANDA DI MICHELE:
+"{user_query}"
+
+RISULTATI SCANNER:
+Titoli scansionati: {", ".join(scan_results.get("symbols_scanned", []))}
+Setup individuati:
+{hits_json}
+
+{HUMAN_ADVISOR_COMMUNICATION_SKILLS}
+
+COMPITO DI REDAZIONE:
+1. Vai dritto al punto spiegando la fotografia del mercato che emerge dallo scanner: quali titoli stanno mostrando forza relativa e rottura dei massimi e quali invece sono finiti in ipervenduto statistico.
+2. Analizza in modo discorsivo i titoli più rilevanti emersi dal filtro (prezzo, RSI, setup attivo e dinamica dei volumi).
+3. Spiega la condotta consigliata: la differenza tra un setup di continuazione (breakout/flag con stop stretto) e un'opportunità di accumulo/rimbalzo su ipervenduto.
+4. Chiedi a Michele se desidera approfondire uno di questi titoli o effettuare la simulazione di gestione del rischio / Time Machine (con 10.000 iterazioni) su uno strumento specifico.
+
 {TELEGRAM_FORMATTING_RULES}
 """
         res = self._call_gemini(prompt)

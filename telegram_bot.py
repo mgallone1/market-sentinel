@@ -47,9 +47,11 @@ from services.hurst_migliorino_cycles import HurstMigliorinoCycleService
 from services.cycle_radar import CycleRadarService
 from services.advanced_predictive_system import AdvancedPredictiveSystem
 from services.video_downloader import VideoDownloaderService
+from services.day_trader_service import DayTraderService
 
 supabase_svc = SupabaseService()
 llm_svc = LLMReasoningService()
+day_trader_svc = DayTraderService()
 ACTIVE_CHAT_IDS: Set[int] = set()
 
 # Mappa alias titoli comuni
@@ -211,6 +213,8 @@ async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "💼 *Diagnosi Globale di Portafoglio:* Digita `/portafoglio` o inviami uno screenshot per visualizzare la diagnosi patrimoniale, i pesi di allocazione e il consiglio di ribilanciamento.\n"
         "👤 *Profilo Investitore & PAC:* Digita `/profilo` per vedere o aggiornare i tuoi obiettivi, il budget mensile e l'orizzonte temporale.\n"
         "💎 *Opportunity Hunter:* Digita `/occasioni` per scansionare all'istante l'intero mercato e trovare i titoli a forte sconto statistico con approfondimento discorsivo del CIO.\n"
+        "⚡ *Day Trader Chart Scanner:* Digita `/scanner` (o `/daytrade`) per individuare breakout a 20 giorni, bull flags e rimbalzi tecnici da ipervenduto.\n"
+        "🏛️ *Capitol Hill & Pelosi Tracker:* Digita `/pelosi` (o `/congresso`) per consultare gli ultimi disclosure ufficiali (PTR) depositati al Congresso USA.\n"
         "🧮 *Simulatore Ordini Trade Republic:* Digita `/simula TICKER BUDGET` (es. `/simula XDEM 500`) per calcolare quote esatte e prezzo limite anti-spread.\n"
         "🌅 *Briefing di Mercato:* Digita `/briefing` per il resoconto completo su Wall Street, Europa e geopolitica (erogato in automatico alle *07:00* e *15:00 CET*).\n"
         "🎬 *Visione Video & Social:* Mandami un video o incolla un link da YouTube Shorts, TikTok, Instagram Reel o X per una decodifica approfondita di parlato e grafici con fact-checking del CIO."
@@ -539,6 +543,114 @@ async def occasioni_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await send_safe_text(update, detailed_report)
     supabase_svc.log_message(user_id, "user", "/occasioni")
     supabase_svc.log_message(user_id, "assistant", detailed_report)
+
+async def pelosi_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    ACTIVE_CHAT_IDS.add(user_id)
+    status_msg = await update.message.reply_text("🏛️ *Consulto i registri del Congresso USA e i report PTR ufficiali (Day Trader Suite)...*", parse_mode="Markdown")
+
+    try:
+        user_profile = supabase_svc.get_user_profile(user_id)
+        current_long_term = supabase_svc.get_long_term_summary(user_id)
+
+        filings = day_trader_svc.get_congress_trades(member="pelosi", max_reports=3)
+
+        if not filings:
+            await send_safe_text(update, "Non sono riuscito a reperire i disclosure recenti del Congresso in questo momento. Riprova più tardi.")
+            return
+
+        user_query = "Quali sono gli ultimi disclosure e trade ufficiali depositati da Nancy Pelosi e membri del Congresso USA?"
+        explanation = llm_svc.explain_congress_trades(
+            user_query=user_query,
+            filings=filings,
+            user_profile=user_profile,
+            memory_context=current_long_term
+        )
+
+        keyboard = [
+            [
+                InlineKeyboardButton("🔄 Aggiorna Congress Trades", callback_data="cmd_pelosi"),
+                InlineKeyboardButton("⚡ Day Trader Scanner", callback_data="cmd_scanner")
+            ],
+            [
+                InlineKeyboardButton("💼 Il Mio Portafoglio", callback_data="cmd_portfolio"),
+                InlineKeyboardButton("🌅 Briefing Mercati", callback_data="cmd_briefing")
+            ]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+
+        if status_msg:
+            try:
+                await status_msg.delete()
+            except Exception:
+                pass
+
+        supabase_svc.log_message(user_id, "assistant", explanation)
+        await send_safe_text(update, explanation, reply_markup=reply_markup)
+
+    except Exception as e:
+        print(f"[!] Errore in pelosi_cmd: {e}")
+        await send_safe_text(update, f"Si è verificato un errore durante l'interrogazione dei registri congressuali: {e}")
+    finally:
+        if status_msg:
+            try:
+                await status_msg.delete()
+            except Exception:
+                pass
+
+async def scanner_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    ACTIVE_CHAT_IDS.add(user_id)
+    status_msg = await update.message.reply_text("⚡ *Scansione dei grafici in corso: cerco breakout a 20 giorni, bull flags e titoli in ipervenduto...*", parse_mode="Markdown")
+
+    try:
+        user_profile = supabase_svc.get_user_profile(user_id)
+        current_long_term = supabase_svc.get_long_term_summary(user_id)
+
+        target_symbols = [
+            "NVDA", "AAPL", "MSFT", "TSLA", "AMD", "AMZN", "META", "GOOGL",
+            "PLTR", "COIN", "MSTR", "SMCI", "AVGO", "INTC", "ASML", "ARM"
+        ]
+        scan_results = day_trader_svc.scan_market_setups(symbols=target_symbols)
+
+        user_query = "Quali setup tecnici e pattern di day trading (breakout 20d, bull flag, ipervenduto) emergono dallo scanner di oggi?"
+        explanation = llm_svc.explain_market_scan(
+            user_query=user_query,
+            scan_results=scan_results,
+            user_profile=user_profile,
+            memory_context=current_long_term
+        )
+
+        keyboard = [
+            [
+                InlineKeyboardButton("🔄 Ripeti Scanner", callback_data="cmd_scanner"),
+                InlineKeyboardButton("🏛️ Pelosi Tracker", callback_data="cmd_pelosi")
+            ],
+            [
+                InlineKeyboardButton("💎 Top Occasioni", callback_data="cmd_occasioni"),
+                InlineKeyboardButton("💼 Portafoglio", callback_data="cmd_portfolio")
+            ]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+
+        if status_msg:
+            try:
+                await status_msg.delete()
+            except Exception:
+                pass
+
+        supabase_svc.log_message(user_id, "assistant", explanation)
+        await send_safe_text(update, explanation, reply_markup=reply_markup)
+
+    except Exception as e:
+        print(f"[!] Errore in scanner_cmd: {e}")
+        await send_safe_text(update, f"Si è verificato un errore durante la scansione di mercato: {e}")
+    finally:
+        if status_msg:
+            try:
+                await status_msg.delete()
+            except Exception:
+                pass
 
 async def simula_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     args = context.args
@@ -1031,6 +1143,14 @@ async def _handle_text_message_core(update: Update, context: ContextTypes.DEFAUL
         await occasioni_cmd(update, context)
         return
 
+    if any(w in upper_text for w in ["PELOSI", "/PELOSI", "CONGRESSO", "/CONGRESSO", "CAPITOL HILL"]):
+        await pelosi_cmd(update, context)
+        return
+
+    if any(w in upper_text for w in ["SCANNER", "/SCANNER", "DAYTRADE", "/DAYTRADE", "DAY TRADING"]):
+        await scanner_cmd(update, context)
+        return
+
     if upper_text in ["BRIEFING", "/BRIEFING"]:
         await briefing_cmd(update, context)
         return
@@ -1109,6 +1229,16 @@ async def _handle_text_message_core(update: Update, context: ContextTypes.DEFAUL
     # 1. Se l'utente chiede le migliori occasioni o idee di trading
     if intent == "opportunities":
         await occasioni_cmd(update, context)
+        return
+
+    # Se l'utente chiede i trade del congresso o di Nancy Pelosi
+    if intent == "congress_trades":
+        await pelosi_cmd(update, context)
+        return
+
+    # Se l'utente chiede lo scanner dei grafici o setup di day trading
+    if intent == "market_scanner":
+        await scanner_cmd(update, context)
         return
 
     # 2. Se l'utente chiede espressamente il bollettino / briefing programmato
@@ -1498,6 +1628,14 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         await occasioni_cmd(update, context)
         return
 
+    if data == "cmd_pelosi":
+        await pelosi_cmd(update, context)
+        return
+
+    if data == "cmd_scanner":
+        await scanner_cmd(update, context)
+        return
+
     if data.startswith("quant_"):
         ticker = data.replace("quant_", "")
         await query.message.reply_text(f"🔬 *Elaboro il Deep Dive Quantitativo per {ticker} (Monte Carlo, FLD & Elliott)...*", parse_mode="Markdown")
@@ -1696,6 +1834,10 @@ def main():
     app.add_handler(CommandHandler("aiuto", start_cmd))
     app.add_handler(CommandHandler("briefing", briefing_cmd))
     app.add_handler(CommandHandler("occasioni", occasioni_cmd))
+    app.add_handler(CommandHandler("pelosi", pelosi_cmd))
+    app.add_handler(CommandHandler("congresso", pelosi_cmd))
+    app.add_handler(CommandHandler("scanner", scanner_cmd))
+    app.add_handler(CommandHandler("daytrade", scanner_cmd))
     app.add_handler(CommandHandler("cicli", cicli_cmd))
     app.add_handler(CommandHandler("simula", simula_cmd))
     app.add_handler(CommandHandler("portafoglio", portfolio_cmd))

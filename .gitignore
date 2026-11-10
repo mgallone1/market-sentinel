@@ -1,0 +1,8 @@
+.env
+__pycache__/
+*.pyc
+*/__pycache__/
+data/
+trader/state/
+trader/*.json
+trader/universe.txt
