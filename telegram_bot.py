@@ -1415,11 +1415,18 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
             except Exception as pe:
                 print(f"[!] Errore estrazione testo pypdf: {pe}")
 
+            user_portfolio = supabase_svc.get_portfolio(user_id)
+            user_profile = supabase_svc.get_user_profile(user_id)
+            long_term_mem = supabase_svc.get_long_term_summary(user_id)
+
             analysis = llm_svc.analyze_pdf_document(
                 pdf_bytes=raw_pdf_bytes,
                 raw_text=extracted_text,
                 filename=file_name,
-                user_notes=caption
+                user_notes=caption,
+                user_portfolio=user_portfolio,
+                user_profile=user_profile,
+                memory_context=long_term_mem
             )
 
             if analysis.get("type") == "error":

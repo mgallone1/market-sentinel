@@ -857,13 +857,16 @@ Analizza questa immagine inviata dall'utente:
         pdf_bytes: bytes,
         raw_text: str = "",
         filename: str = "",
-        user_notes: str = ""
+        user_notes: str = "",
+        user_portfolio: Optional[List[Dict[str, Any]]] = None,
+        user_profile: Optional[Dict[str, Any]] = None,
+        memory_context: str = ""
     ) -> Dict[str, Any]:
         """
-        Analizza un documento PDF inviato su Telegram (estratti conto broker, 
-        schede portafoglio, trimestrali, bilanci, report di ricerca).
+        Analizza un documento PDF inviato su Telegram (estratti conto broker, proposte d'investimento,
+        fondi comuni, schede prodotto/KIID, trimestrali, bilanci, report di ricerca).
         Rileva ed estrae posizioni di portafoglio (Trade Republic, Degiro, ecc.) per l'importazione automatica,
-        oppure fornisce una consulenza strategica approfondita del CIO sul documento.
+        oppure fornisce una consulenza strategica approfondita del CIO valutando oggettivamente la bontà dello strumento.
         """
         if not self.client:
             return {"type": "error", "text": "Modulo AI Gemini non attivo o client non configurato."}
@@ -872,11 +875,33 @@ Analizza questa immagine inviata dall'utente:
         user_note_block = f"\nNOTA/RICHIESTA DELL'UTENTE ALLEGATA:\n\"{user_notes}\"\n" if user_notes else ""
         raw_text_snippet = f"\nTESTO ESTRATTO DAL DOCUMENTO PDF:\n\"\"\"\n{raw_text[:14000]}\n\"\"\"\n" if raw_text else ""
 
+        # Contesto portafoglio reale di Michele
+        port_lines = []
+        if user_portfolio:
+            for p in user_portfolio:
+                port_lines.append(f"• {p.get('asset_name', 'Titolo')} ({p.get('ticker')}): {p.get('shares')} quote a PMC {p.get('average_buy_price', 0.0):.2f} €")
+        port_str = "\n".join(port_lines) if port_lines else "Nessuna posizione archiviata ancora."
+
+        user_prof = user_profile or {}
+        pac_val = user_prof.get('monthly_pac_eur')
+        pac_str = f"{pac_val:.2f} €/mese" if pac_val else "Gestione manuale liquidità"
+        if user_prof.get('pac_details'):
+            pac_str += f" ({user_prof.get('pac_details')})"
+
+        mem_block = f"\nMEMORIA STRATEGICA E TESI PRECEDENTI DI MICHELE:\n{memory_context}\n" if memory_context else ""
+
         prompt = f"""
 [CONTESTO DI SISTEMA INTERNO: Anno e data attuale {now_str}. Usalo SOLO come ancoraggio temporale contro allucinazioni sul passato. VIETATO ASSOLUTO iniziare recitando la data o convenevoli!]
 Sei il Chief Investment Officer (CIO), Senior Quantitative Strategist e Private Wealth Advisor personale di Michele.
 Michele ti ha appena inviato un documento PDF: "{filename}".
-{user_note_block}{raw_text_snippet}
+
+PROFILO E SITUAZIONE REALE DI MICHELE:
+- Portafoglio attuale:
+{port_str}
+- Profilo di rischio: {user_prof.get('risk_profile', 'Bilanciato')} | Orizzonte temporale: {user_prof.get('horizon', 'Lungo termine')}
+- Broker: {user_prof.get('broker', 'Trade Republic')} (focus su efficienza, commissioni zero/ridotte e strumenti in Euro)
+- Gestione PAC: {pac_str}
+{mem_block}{user_note_block}{raw_text_snippet}
 Analizza a fondo il contenuto di questo documento PDF.
 
 COMPITI DI ANALISI:
@@ -900,13 +925,16 @@ COMPITI DI ANALISI:
    ```
    Accompagnalo con una sintesi esecutiva in italiano di quanto rilevato e dei titoli estratti.
 
-2. SE IL PDF È UN REPORT TRIMESTRALE (10-Q, 8-K), REPORT DI RICERCA, ANALISI AZIONARIA, SCHEDA ETF (Factsheet/KIID) O DOCUMENTO ECONOMICO/FINANZIARIO:
+2. SE IL PDF È UNA PROPOSTA D'INVESTIMENTO, FONDO COMUNE BANCARIO, CERTIFICATO, SCHEDA PRODOTTO (KIID/Factsheet), REPORT TRIMESTRALE (10-Q/8-K) O REPORT DI RICERCA:
    - Fornisci una diagnosi esecutiva del CIO ad altissima densità informativa e valore aggiunto.
-   - Struttura l'analisi con eleganza:
-     📄 *Sintesi Esecutiva & Oggetto del Documento:* Cosa rappresenta il file, chi è l'emittente/azienda e quale tesi o dati propone.
-     📊 *Dati Chiave, Metriche & Fondamentali (in Euro):* Multipli, tassi di crescita, margini, flussi di cassa o composizione del fondo.
-     ⚠️ *Punti Critici, Rischi & Pressioni di Mercato:* Valutazione oggettiva dei rischi o delle anomalie riscontrate.
-     🧭 *Verdetto Operativo del CIO:* Indicazione strategica pratica, ragionale e orientata all'azione per il portafoglio di Michele.
+   - VALUTAZIONE CRITICA DELLA BONTÀ (Valutazione oggettiva da Senior Private Wealth Advisor indipendente):
+     📄 *Sintesi Esecutiva & Oggetto del Documento:* Cosa propone il documento, chi è l'emittente/gestore e qual è la promessa dichiarata.
+     💎 *Bontà & Solidità della Tesi:* La strategia ha un reale edge statistico/economico o si basa su assunzioni fragili/commerciali?
+     💸 *Struttura Costi, Commissioni & Trasparenza (KID/TER):* Metti a nudo i costi occulti (costi di gestione annui, commissioni di performance, costi di ingresso/uscita). Fai un confronto spietato e numerico con l'efficienza degli ETF passivi su Trade Republic.
+     🧩 *Fit con il Portafoglio di Michele:* È complementare ai suoi investimenti o crea sovrapposizioni inutili e duplicazione di rischi?
+     ⚠️ *Rischi Occulti & Scenari di Stress:* Cosa succede se il mercato corregge o la volatilità esplode?
+     🧭 *Verdetto Diretto del CIO:* Giudizio chiaro e motivato: ha senso investire in questa proposta o è preferibile scartarla a favore di un'alternativa più efficiente in Euro?
+   - Concludi con considerazioni e domande aperte per avviare una discussione costruttiva con Michele sui dettagli che desidera approfondire.
 
 LINEE GUIDA RIGOROSE:
 - DIVIETO ASSOLUTO DI FORMULE PATERNALISTICHE O VUOTE. Rispondi in prima persona con autorevolezza istituzionale e precisione analitica.
