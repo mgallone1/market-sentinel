@@ -1233,12 +1233,38 @@ DATI QUANTITATIVI E PROBABILISTICI DEL TITOLO ({asset_name} - {ticker}):
 {HUMAN_ADVISOR_COMMUNICATION_SKILLS}
 
 COMPITO DI REDAZIONE (SPIEGAZIONE TECNICA APPROFONDITA MA UMANA):
-Michele ti sta chiedendo delucidazioni tecniche sui numeri, sulle probabilità percentuali o sugli indicatori del nostro modello.
-Rispondi in 3 o 4 ampi paragrafi discorsivi e fluidi, parlando in prima persona ('io') e rivolgendoti a lui ('tu'):
-- Inizia SUBITO nel vivo, accogliendo il suo interesse per i numeri: spiegagli con precisione matematica e parole vive COSA significa esattamente quella probabilità o metrica (es. come calcoliamo la probabilità di rimbalzo combinando Z-Score su SMA20, divergenza RSI e ciclo di Hurst, oppure cosa significano le 10.000 iterazioni geometriche browniane di Monte Carlo con gli intervalli 1-Sigma 68% e 2-Sigma 95%).
-- Spiega PERCHÉ usiamo questo metodo: non per indovinare il futuro con la sfera di cristallo, ma per misurare l'asimmetria statistica del rischio (trasformare un gioco d'azzardo in una strategia con aspettativa matematica positiva).
-- Mostra come questo dato matematico si traduce nella pratica operativa del suo conto su Trade Republic (come impostare l'ordine limite anti-spread e come proteggere il suo PMC).
-- Concludi con un consiglio chiaro e chiedigli se preferisce approfondire un altro dettaglio o passare alla simulazione dell'ordine.
+Michele ti sta chiedendo delucidazioni tecniche sui numeri, sulle probabilità percentuali, sui cicli o sulle onde del nostro modello.
+ISTRUZIONE FONDAMENTALE: SPIEGA TUTTO CON CHIAREZZA CRISTALLINA SENZA DARE NULLA PER SCONTATO.
+NON usare gergo esoterico senza averlo prima decodificato con un'analogia intuitiva e pratica.
+
+SE LA DOMANDA RIGUARDA L'ANALISI CICLICA DI GIUSEPPE MIGLIORINO, I CICLI DI HURST O LE ONDE DI ELLIOTT:
+Devi strutturare la risposta con profondità pedagogica impeccabile, seguendo questo percorso logico:
+
+1. IL CONCETTO FONDAMENTALE (COS'È UN CICLO):
+   - I mercati non si muovono casualmente né in linea retta, ma "respirano" secondo flussi regolari di liquidità che le Mani Forti (investitori istituzionali) immettono e ritirano.
+   - I cicli nominali: Ciclo Settimanale (T, ~6-8 sedute), Quindicinale (T+1, ~14-16 sedute), Mensile (T+2, ~30-34 sedute), Intermedio (T+3, ~64-72 sedute), Semestrale (T+4, ~130-140 sedute). Ogni ciclo maggiore racchiude armoniosamente i sottocicli minori (Principio di Armonicità di Hurst).
+
+2. IL BATTLEPLAN A 4 TEMPI DI GIUSEPPE MIGLIORINO:
+   - Spiega cosa sono i 4 Tempi (come le quattro stagioni di un ciclo):
+     • 1° Tempo (Nascita & Spinta): Il ciclo tocca il pavimento e riparte; gli istituzionali accumulano quote a sconto. I minimi sono alle spalle.
+     • 2° Tempo (Ricerca del Massimo): La spinta prosegue e si forma il picco della sinusoide ciclica. Il pubblico entra tardi attratto dall'entusiasmo.
+     • 3° Tempo (Inizio Correzione & Cedimento): Le mani forti iniziano a distribuire; il prezzo perde slancio e comincia la fase discendente.
+     • 4° Tempo (Chiusura del Ciclo & Pavimento Finale): La discesa cerca il pavimento dove il ciclo morirà per far nascere quello successivo. Spiega cosa significa "mancano N candele al minimo": è il conto alla rovescia statistico prima della finestra ideale di acquisto.
+
+3. IL "VINCOLO CICLICO" (LA REGOLA D'ORO DI MIGLIORINO):
+   - Spiega la regola fondamentale: "Se durante la vita di un ciclo il prezzo scende sotto il livello del minimo da cui quel ciclo era nato, scatta tassativamente il VINCOLO RIBASSISTA".
+   - Spiega perché è l'ancora di salvezza dell'investitore: impone che tutti i rimbalzi successivi siano solo rimbalzi-trappola (dead-cat bounce) e che il ciclo sia matematicamente obbligato a chiudere sotto i minimi prima di poter ripartire. Impedisce di comprare in anticipo durante una discesa.
+
+4. LE ONDE DI ELLIOTT (LA FORMA DEL PREZZO):
+   - Spiega la struttura frattale: 5 Onde Motrici (1-2-3-4-5) che creano il trend primario e 3 Onde Correttive (A-B-C) che scaricano gli eccessi.
+   - Carattere delle onde: l'Onda 3 è la più potente e direzionale; l'Onda B è la classica trappola per rialzisti; l'Onda C è la discesa finale e più temuta, ma è proprio dove si concentrano le vere occasioni a sconto.
+   - Sinergia Cicli-Onde: Elliott spiega "CHE FORMA" ha il movimento del prezzo, mentre Migliorino e Hurst calcolano "QUANDO" nel tempo si verificherà l'inversione.
+
+5. LA FLD DI HURST (FUTURE LINE OF DEMARCATION):
+   - Spiega cos'è in parole povere: è una linea dei prezzi traslata in avanti di metà periodo del ciclo. Quando il prezzo è SOPRA la FLD, la forza gravitazionale del ciclo spinge al rialzo; quando è SOTTO, agisce da calamita verso il minimo.
+
+6. APPLICAZIONE PRATICA PER MICHELE SU TRADE REPUBLIC (IN EURO):
+   - Traduci tutto in operatività reale: come usare queste metriche per non farsi prendere dal panico né dalla fretta, posizionando ordini limite anti-spread nel momento di convergenza perfetta (fine del 4° Tempo e completamento dell'Onda C), proteggendo il proprio Prezzo Medio di Carico (PMC).
 
 Tutte le quotazioni RIGOROSAMENTE in Euro (€).
 {TELEGRAM_FORMATTING_RULES}

@@ -545,8 +545,20 @@ async def cicli_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         lines.append("───────────────────────")
         lines.append("💡 *Come Usare Questi Dati:* Quando il conteggio delle barre sul ciclo settimanale e semestrale arriva a zero in concomitanza con un'alta probabilità di rimbalzo (>80%), scatta la finestra di acquisto ideale.")
 
+        keyboard = [
+            [
+                InlineKeyboardButton("📖 Spiegazione 4 Tempi & Onde", callback_data="explain_cycles"),
+                InlineKeyboardButton("💎 Top Occasioni", callback_data="cmd_occasioni")
+            ],
+            [
+                InlineKeyboardButton("💼 Il Mio Portafoglio", callback_data="cmd_portfolio"),
+                InlineKeyboardButton("🛡️ Radar Sentinella", callback_data="cmd_sentinel")
+            ]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+
         full_text = "\n".join(lines)
-        await send_safe_text(update, full_text)
+        await send_safe_text(update, full_text, reply_markup=reply_markup)
 
         context.user_data["last_interaction"] = {
             "command": "/cicli",
@@ -1956,12 +1968,27 @@ async def _handle_text_message_core(update: Update, context: ContextTypes.DEFAUL
         await send_safe_text(update, consultation, reply_markup=reply_markup)
         return
 
-    # 4. Se l'utente chiede spiegazioni tecniche approfondite su probabilità, indicatori, Z-Score o Monte Carlo
+    # 4. Se l'utente chiede spiegazioni tecniche approfondite su probabilità, indicatori, Z-Score, cicli o onde
     if intent == "technical_explanation":
         active_topic = context.user_data.get("current_topic") or {}
         if not active_topic and ticker:
             resolved_t = resolve_ticker(ticker) or ticker
             active_topic = {"ticker": resolved_t, "asset_name": resolved_t}
+        if not active_topic:
+            active_topic = {"ticker": "XDEM.DE", "asset_name": "MSCI World Momentum UCITS ETF"}
+
+        target_sym = active_topic.get("ticker", "XDEM.DE")
+        df_hist = MarketDataService.get_ticker_history(target_sym, period="6mo", interval="1d")
+        if not df_hist.empty and len(df_hist) >= 20:
+            hurst_metrics = HurstMigliorinoCycleService.calculate_cycle_metrics(df_hist)
+            elliott_metrics = AdvancedPredictiveSystem.detect_elliott_wave_phase(df_hist)
+            quote = MarketDataService.get_realtime_quote(target_sym)
+            active_topic["quant_data"] = {
+                "hurst_migliorino": hurst_metrics,
+                "elliott_wave": elliott_metrics,
+                "quote": quote
+            }
+            active_topic["price_eur"] = quote.get("last_price", 0.0)
 
         status_msg = await update.message.reply_text("🔬 *Elaboro l'approfondimento tecnico e quantitativo sul modello...*", parse_mode="Markdown")
         user_portfolio = supabase_svc.get_portfolio(user_id)
@@ -2260,6 +2287,43 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
 
     if data == "cmd_sentinel":
         await sentinel_cmd(update, context)
+        return
+
+    if data == "explain_cycles":
+        user_id = update.effective_user.id
+        msg_target = query.message
+        status_msg = await msg_target.reply_text("🔬 *Elaboro la Guida Completa all'Analisi Ciclica di Migliorino e alle Onde di Elliott...*", parse_mode="Markdown")
+        user_portfolio = supabase_svc.get_portfolio(user_id)
+        user_profile = supabase_svc.get_user_profile(user_id)
+        long_term_mem = supabase_svc.get_long_term_summary(user_id)
+        active_topic = context.user_data.get("current_topic") or {"ticker": "XDEM.DE", "asset_name": "MSCI World Momentum UCITS ETF"}
+
+        target_sym = active_topic.get("ticker", "XDEM.DE")
+        df_hist = MarketDataService.get_ticker_history(target_sym, period="6mo", interval="1d")
+        if not df_hist.empty and len(df_hist) >= 20:
+            hurst_metrics = HurstMigliorinoCycleService.calculate_cycle_metrics(df_hist)
+            elliott_metrics = AdvancedPredictiveSystem.detect_elliott_wave_phase(df_hist)
+            quote = MarketDataService.get_realtime_quote(target_sym)
+            active_topic["quant_data"] = {
+                "hurst_migliorino": hurst_metrics,
+                "elliott_wave": elliott_metrics,
+                "quote": quote
+            }
+            active_topic["price_eur"] = quote.get("last_price", 0.0)
+
+        explanation = llm_svc.explain_technical_metrics(
+            user_query="Spiegami in modo dettagliato e senza dare nulla per scontato l'analisi ciclica di Giuseppe Migliorino (i 4 tempi del Battleplan e i vincoli ciclici), la FLD di Hurst e le Onde di Elliott, spiegando il significato pratico per la mia operatività su Trade Republic.",
+            topic_info=active_topic,
+            user_portfolio=user_portfolio,
+            user_profile=user_profile,
+            memory_context=long_term_mem
+        )
+        if status_msg:
+            try:
+                await status_msg.delete()
+            except Exception:
+                pass
+        await send_safe_text(update, explanation)
         return
 
     if data.startswith("quant_"):
