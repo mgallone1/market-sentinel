@@ -284,18 +284,33 @@ async def fetch_macro_market_context():
         ("Bitcoin (BTC)", "BTC-EUR"),
         ("Oro (GLD)", "GLD")
     ]
+    import math
+    def is_valid_num(v) -> bool:
+        if v is None:
+            return False
+        try:
+            f = float(v)
+            return not (math.isnan(f) or math.isinf(f)) and f > 0
+        except Exception:
+            return False
+
     indices_summary = []
     for label, sym in indices:
         try:
             q = MarketDataService.get_realtime_quote(sym)
             p = q.get("last_price", 0.0)
+            if not is_valid_num(p):
+                p = q.get("previous_close", 0.0)
             c = q.get("change_pct", 0.0)
+            if c is None or (isinstance(c, float) and math.isnan(c)):
+                c = 0.0
+
             is_already_eur = MarketDataService.is_euro_asset(sym)
             p_eur = p if is_already_eur else (p / eur_rate if eur_rate > 0 else p)
             indices_summary.append({
                 "label": label,
-                "price_eur": round(p_eur, 2),
-                "change": round(c, 2)
+                "price_eur": round(float(p_eur), 2),
+                "change": round(float(c), 2)
             })
         except Exception as e:
             print(f"[!] Errore recupero {sym}: {e}")
@@ -1058,24 +1073,43 @@ async def profile_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await send_safe_text(update, msg)
 
 def compute_portfolio_metrics(positions: list) -> tuple:
-    """Calcola in modo deterministico controvalori, P&L e pesi percentuali del portafoglio in Euro."""
+    """Calcola in modo deterministico controvalori, P&L e pesi percentuali del portafoglio in Euro, immunizzato da NaN."""
+    import math
     calc_items = []
     total_invested = 0.0
     total_current = 0.0
     eur_rate = MarketDataService.get_eur_usd_rate()
+    if not eur_rate or math.isnan(eur_rate) or eur_rate <= 0:
+        eur_rate = 1.08
+
+    def is_valid_float(v) -> bool:
+        if v is None:
+            return False
+        try:
+            f = float(v)
+            return not (math.isnan(f) or math.isinf(f)) and f > 0
+        except Exception:
+            return False
 
     for pos in positions:
         ticker = pos["ticker"]
-        shares = float(pos["shares"])
-        pmc = float(pos["average_buy_price"])
+        shares = float(pos["shares"]) if is_valid_float(pos.get("shares")) else 0.0
+        pmc = float(pos["average_buy_price"]) if is_valid_float(pos.get("average_buy_price")) else 0.0
 
         quote = MarketDataService.get_realtime_quote(ticker)
-        raw_price = quote.get("last_price") or pmc
+        raw_price = quote.get("last_price")
+        if not is_valid_float(raw_price):
+            raw_price = quote.get("tr_mid") or quote.get("tr_bid")
+        if not is_valid_float(raw_price):
+            raw_price = quote.get("previous_close")
+        if not is_valid_float(raw_price):
+            raw_price = pmc if pmc > 0 else 100.0
+
         fund = MarketDataService.get_ticker_fundamentals(ticker)
         is_already_eur = MarketDataService.is_euro_asset(ticker, fund)
         is_usd = not is_already_eur
         current_price_eur = raw_price / eur_rate if is_usd else raw_price
-        
+
         invested_val = shares * pmc
         current_val = shares * current_price_eur
         pnl_eur = current_val - invested_val
@@ -1086,7 +1120,7 @@ def compute_portfolio_metrics(positions: list) -> tuple:
 
         calc_items.append({
             "ticker": ticker,
-            "asset_name": pos["asset_name"],
+            "asset_name": pos.get("asset_name") or ticker,
             "shares": shares,
             "pmc": pmc,
             "current_price_eur": current_price_eur,

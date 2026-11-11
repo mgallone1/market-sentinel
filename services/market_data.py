@@ -93,41 +93,81 @@ class MarketDataService:
     def get_realtime_quote(cls, ticker: str) -> Dict[str, Any]:
         """
         Recupera il prezzo esatto in tempo reale tramite fast_info e arricchisce con dati Trade Republic (L&S).
+        Garantisce numeri finiti e validi, senza alcun NaN o None.
         """
+        import math
+        def safe_float(val, fallback=0.0):
+            if val is None:
+                return fallback
+            try:
+                f = float(val)
+                if math.isnan(f) or math.isinf(f):
+                    return fallback
+                return f
+            except Exception:
+                return fallback
+
         try:
             sym = ticker.strip().upper()
             t = yf.Ticker(sym)
             fi = t.fast_info
-            last_price = float(fi.last_price) if fi.last_price is not None else 0.0
-            prev_close = float(fi.previous_close) if fi.previous_close is not None else last_price
-            change_pct = ((last_price - prev_close) / prev_close) * 100 if prev_close else 0.0
             
+            raw_last = getattr(fi, "last_price", None)
+            raw_prev = getattr(fi, "previous_close", None)
+            last_price = safe_float(raw_last, 0.0)
+            prev_close = safe_float(raw_prev, last_price)
+
+            # Se last_price o prev_close sono <= 0 (pre-market o prime ore del mattino),
+            # recupera l'ultimo prezzo valido dallo storico recente
+            if last_price <= 0:
+                try:
+                    df_fallback = t.history(period="5d", interval="1d")
+                    if not df_fallback.empty and "Close" in df_fallback:
+                        valid_closes = df_fallback["Close"].dropna()
+                        if not valid_closes.empty:
+                            last_price = safe_float(valid_closes.iloc[-1], 0.0)
+                            if len(valid_closes) > 1:
+                                prev_close = safe_float(valid_closes.iloc[-2], last_price)
+                            else:
+                                prev_close = last_price
+                except Exception:
+                    pass
+
+            change_pct = ((last_price - prev_close) / prev_close) * 100 if prev_close > 0 else 0.0
+
             res = {
                 "last_price": round(last_price, 2),
                 "previous_close": round(prev_close, 2),
                 "change_pct": round(change_pct, 2),
-                "currency": fi.currency or "USD",
-                "day_high": round(float(fi.day_high), 2) if fi.day_high else None,
-                "day_low": round(float(fi.day_low), 2) if fi.day_low else None,
-                "market_cap": fi.market_cap
+                "currency": getattr(fi, "currency", "USD") or "USD",
+                "day_high": round(safe_float(getattr(fi, "day_high", None)), 2) if getattr(fi, "day_high", None) is not None else None,
+                "day_low": round(safe_float(getattr(fi, "day_low", None)), 2) if getattr(fi, "day_low", None) is not None else None,
+                "market_cap": getattr(fi, "market_cap", None)
             }
 
             # Se disponibile quotazione Lang & Schwarz (Trade Republic), arricchisce con bid/ask reali
             ls_quote = cls.get_trade_republic_ls_quote(sym)
             if ls_quote and "bid" in ls_quote and "ask" in ls_quote:
-                res["tr_bid"] = round(ls_quote["bid"], 2)
-                res["tr_ask"] = round(ls_quote["ask"], 2)
-                res["tr_mid"] = round(ls_quote.get("mid", (ls_quote["bid"] + ls_quote["ask"]) / 2), 2)
+                bid_f = safe_float(ls_quote["bid"], 0.0)
+                ask_f = safe_float(ls_quote["ask"], 0.0)
+                if bid_f > 0:
+                    res["tr_bid"] = round(bid_f, 2)
+                    res["tr_ask"] = round(ask_f if ask_f > 0 else bid_f, 2)
+                    res["tr_mid"] = round((bid_f + (ask_f if ask_f > 0 else bid_f)) / 2, 2)
+                    # Se last_price era 0, usiamo il prezzo L&S reale di Trade Republic
+                    if last_price <= 0:
+                        res["last_price"] = res["tr_mid"]
 
             return res
         except Exception as e:
             print(f"[MarketDataService] Errore realtime quote {ticker}: {e}")
-            return {"last_price": 0.0, "change_pct": 0.0, "currency": "USD"}
+            return {"last_price": 0.0, "previous_close": 0.0, "change_pct": 0.0, "currency": "USD"}
 
     @staticmethod
     def get_ticker_history(ticker: str, period: str = "1d", interval: str = "5m") -> pd.DataFrame:
         """
         Recupera serie storica OHLCV per un ticker, sia intraday (1m, 5m, 15m) sia multiday.
+        Rimuove righe con Close nullo o NaN per evitare propagazione di errori numerici.
         """
         try:
             t = yf.Ticker(ticker.strip().upper())
@@ -135,6 +175,7 @@ class MarketDataService:
             if df.empty:
                 return pd.DataFrame()
             df.index = pd.to_datetime(df.index)
+            df = df.dropna(subset=["Close"])
             return df
         except Exception as e:
             print(f"[MarketDataService] Errore recupero storico per {ticker}: {e}")

@@ -27,24 +27,34 @@ class PredictiveTradingEngine:
         """
         Genera previsioni statistiche a 1-5 giorni e piano di trade completo interamente convertito in EURO (€).
         """
-        if df.empty or len(df) < 20:
+        import math
+        def safe_f(v, d=0.0):
+            try:
+                f = float(v)
+                return d if (math.isnan(f) or math.isinf(f)) else f
+            except Exception:
+                return d
+
+        data = df.dropna(subset=["Close"]).copy()
+        if data.empty or len(data) < 20:
             return {"error": "Dati insufficienti per il modello predittivo"}
 
-        data = df.copy()
-        raw_price = float(data["Close"].iloc[-1])
+        raw_price = safe_f(data["Close"].iloc[-1], 100.0)
         
         # Tasso di conversione in Euro: solo se lo strumento è in USD e NON è già in Euro
         is_eur = (currency.upper() == "EUR") or MarketDataService.is_euro_asset(ticker)
         eur_rate = 1.0 if is_eur else MarketDataService.get_eur_usd_rate()
+        if eur_rate <= 0 or math.isnan(eur_rate):
+            eur_rate = 1.08
         
         # Prezzo convertito in Euro (€)
         current_price_eur = raw_price / eur_rate if eur_rate > 0 else raw_price
         
         # 1. Calcolo ATR e Volatilità Giornaliera (convertito in Euro)
         atr_series = cls.calculate_atr(data, 14)
-        raw_atr = float(atr_series.iloc[-1])
+        raw_atr = safe_f(atr_series.iloc[-1] if not atr_series.empty else 1.0, 1.0)
         daily_atr_eur = raw_atr / eur_rate
-        daily_vol_pct = (raw_atr / raw_price) * 100
+        daily_vol_pct = (raw_atr / raw_price) * 100 if raw_price > 0 else 1.0
 
         # Cono di volatilità stimato (Expected Move a 5 giorni: ATR * sqrt(5))
         expected_move_5d_eur = daily_atr_eur * np.sqrt(5)
@@ -52,9 +62,12 @@ class PredictiveTradingEngine:
         low_projection_5d_eur = round(max(current_price_eur - expected_move_5d_eur, 0.01), 2)
 
         # 2. Z-Score (Distanza statistica dalla media a 20 periodi)
-        sma20 = float(data["Close"].rolling(20).mean().iloc[-1])
-        std20 = float(data["Close"].rolling(20).std().iloc[-1])
+        sma20_series = data["Close"].rolling(20).mean()
+        std20_series = data["Close"].rolling(20).std()
+        sma20 = safe_f(sma20_series.iloc[-1] if not sma20_series.empty else raw_price, raw_price)
+        std20 = safe_f(std20_series.iloc[-1] if not std20_series.empty else 1.0, 1.0)
         z_score = (raw_price - sma20) / std20 if std20 > 0 else 0.0
+        z_score = safe_f(z_score, 0.0)
 
         # 3. Momentum & Trend
         sma50 = float(data["Close"].rolling(50).mean().iloc[-1]) if len(data) >= 50 else sma20

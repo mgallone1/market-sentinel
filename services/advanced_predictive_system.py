@@ -21,17 +21,25 @@ class AdvancedPredictiveSystem:
         Esegue 10.000 scenari stocastici di Monte Carlo (Geometric Brownian Motion)
         per estrarre la distribuzione di probabilità dei prezzi futuri in Euro (€).
         """
-        if df.empty or len(df) < 30:
+        clean_df = df.dropna(subset=["Close"]).copy()
+        if clean_df.empty or len(clean_df) < 30:
             return {}
 
-        prices = df["Close"].values
+        rate = eur_rate if (eur_rate and eur_rate > 0 and not np.isnan(eur_rate)) else 1.08
+        prices = clean_df["Close"].values
         current_price = float(prices[-1])
-        current_price_eur = current_price / eur_rate
+        current_price_eur = current_price / rate
 
-        # Rendimenti logaritmici giornalieri
+        # Rendimenti logaritmici giornalieri privi di nan
         log_returns = np.diff(np.log(prices))
-        mu = np.mean(log_returns)
-        sigma = np.std(log_returns)
+        log_returns = log_returns[~np.isnan(log_returns)]
+        if len(log_returns) < 10:
+            return {}
+
+        mu = float(np.mean(log_returns))
+        sigma = float(np.std(log_returns))
+        if sigma <= 0 or np.isnan(sigma):
+            sigma = 0.01
 
         # Generazione matrice casuale normale (10.000 x days_ahead)
         random_shocks = np.random.normal(loc=0, scale=1, size=(num_simulations, days_ahead))
@@ -42,7 +50,7 @@ class AdvancedPredictiveSystem:
         cumulative_returns = np.exp(np.cumsum(daily_log_returns, axis=1))
         
         # Prezzi finali simulati al giorno 'days_ahead'
-        final_prices_eur = (current_price * cumulative_returns[:, -1]) / eur_rate
+        final_prices_eur = (current_price * cumulative_returns[:, -1]) / rate
 
         # Percentili statistici
         p05 = float(np.percentile(final_prices_eur, 5))

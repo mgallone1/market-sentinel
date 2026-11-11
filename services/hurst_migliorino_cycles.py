@@ -18,10 +18,10 @@ class HurstMigliorinoCycleService:
         """
         Calcola la centratura ciclica, il conteggio barre e i vincoli secondo Hurst e Migliorino.
         """
-        if df.empty or len(df) < 65:
+        data = df.dropna(subset=["Close"]).copy()
+        if data.empty or len(data) < 65:
             return {}
 
-        data = df.copy()
         prices = data["Close"].values
         n_bars = len(prices)
 
