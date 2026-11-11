@@ -6,6 +6,7 @@ Delivers timely, forward-looking wealth-coaching alerts to Michele via Telegram
 with early-detection thresholds (catch moves in time without noise).
 """
 
+from __future__ import annotations
 import os
 import time
 import logging

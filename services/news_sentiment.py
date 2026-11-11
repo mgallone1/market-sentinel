@@ -4,6 +4,7 @@ Aggregazione notizie finanziarie e calcolo del sentiment basato su un lessico
 finanziario specialistico (Earnings, Guidance, Upgrades, Downgrades, etc.).
 """
 
+from __future__ import annotations
 import feedparser
 import re
 import time
@@ -13,7 +14,7 @@ import urllib.request
 import urllib.parse
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
 # Lessico finanziario ponderato
 BULLISH_KEYWORDS = {
