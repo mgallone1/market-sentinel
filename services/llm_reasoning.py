@@ -852,6 +852,96 @@ Analizza questa immagine inviata dall'utente:
             "text": clean_telegram_markdown(text_resp)
         }
 
+    def analyze_pdf_document(
+        self,
+        pdf_bytes: bytes,
+        raw_text: str = "",
+        filename: str = "",
+        user_notes: str = ""
+    ) -> Dict[str, Any]:
+        """
+        Analizza un documento PDF inviato su Telegram (estratti conto broker, 
+        schede portafoglio, trimestrali, bilanci, report di ricerca).
+        Rileva ed estrae posizioni di portafoglio (Trade Republic, Degiro, ecc.) per l'importazione automatica,
+        oppure fornisce una consulenza strategica approfondita del CIO sul documento.
+        """
+        if not self.client:
+            return {"type": "error", "text": "Modulo AI Gemini non attivo o client non configurato."}
+
+        now_str = self._get_current_time_str()
+        user_note_block = f"\nNOTA/RICHIESTA DELL'UTENTE ALLEGATA:\n\"{user_notes}\"\n" if user_notes else ""
+        raw_text_snippet = f"\nTESTO ESTRATTO DAL DOCUMENTO PDF:\n\"\"\"\n{raw_text[:14000]}\n\"\"\"\n" if raw_text else ""
+
+        prompt = f"""
+[CONTESTO DI SISTEMA INTERNO: Anno e data attuale {now_str}. Usalo SOLO come ancoraggio temporale contro allucinazioni sul passato. VIETATO ASSOLUTO iniziare recitando la data o convenevoli!]
+Sei il Chief Investment Officer (CIO), Senior Quantitative Strategist e Private Wealth Advisor personale di Michele.
+Michele ti ha appena inviato un documento PDF: "{filename}".
+{user_note_block}{raw_text_snippet}
+Analizza a fondo il contenuto di questo documento PDF.
+
+COMPITI DI ANALISI:
+1. SE IL PDF È UN ESTRATTO CONTO, CONFERMA D'ORDINE, RENDICONTO PERIODICO O SCHERMATA DI PORTAFOGLIO (es. Trade Republic, Degiro, Scalable, Fineco, banca):
+   Estrai tutte le posizioni finanziarie visibili in un blocco JSON formattato così:
+   ```json
+   {{
+      "is_portfolio": true,
+      "document_type": "portfolio_statement",
+      "positions": [
+         {{
+            "asset_name": "Nome strumento es. Xtrackers MSCI World UCITS ETF",
+            "ticker_candidate": "XDWD.DE",
+            "shares": 30.054,
+            "average_buy_price": 131.89,
+            "total_value": 3963.82,
+            "currency": "EUR"
+         }}
+      ]
+   }}
+   ```
+   Accompagnalo con una sintesi esecutiva in italiano di quanto rilevato e dei titoli estratti.
+
+2. SE IL PDF È UN REPORT TRIMESTRALE (10-Q, 8-K), REPORT DI RICERCA, ANALISI AZIONARIA, SCHEDA ETF (Factsheet/KIID) O DOCUMENTO ECONOMICO/FINANZIARIO:
+   - Fornisci una diagnosi esecutiva del CIO ad altissima densità informativa e valore aggiunto.
+   - Struttura l'analisi con eleganza:
+     📄 *Sintesi Esecutiva & Oggetto del Documento:* Cosa rappresenta il file, chi è l'emittente/azienda e quale tesi o dati propone.
+     📊 *Dati Chiave, Metriche & Fondamentali (in Euro):* Multipli, tassi di crescita, margini, flussi di cassa o composizione del fondo.
+     ⚠️ *Punti Critici, Rischi & Pressioni di Mercato:* Valutazione oggettiva dei rischi o delle anomalie riscontrate.
+     🧭 *Verdetto Operativo del CIO:* Indicazione strategica pratica, ragionale e orientata all'azione per il portafoglio di Michele.
+
+LINEE GUIDA RIGOROSE:
+- DIVIETO ASSOLUTO DI FORMULE PATERNALISTICHE O VUOTE. Rispondi in prima persona con autorevolezza istituzionale e precisione analitica.
+- Tutte le cifre, prezzi e stime monetarie RIGOROSAMENTE in Euro (€).
+{TELEGRAM_FORMATTING_RULES}
+"""
+        try:
+            part = types.Part.from_bytes(data=pdf_bytes, mime_type="application/pdf")
+            text_resp = self._call_gemini([part, prompt])
+        except Exception as e:
+            print(f"[LLMReasoningService] Errore chiamata multimodale PDF con Part, fallback a solo prompt testuale: {e}")
+            text_resp = self._call_gemini(prompt)
+
+        if not text_resp:
+            return {"type": "error", "text": "Non è stato possibile elaborare il documento PDF in questo momento."}
+
+        is_portfolio = False
+        positions = []
+        if "```json" in text_resp:
+            try:
+                json_str = text_resp.split("```json")[1].split("```")[0].strip()
+                parsed = json.loads(json_str)
+                if parsed.get("is_portfolio") and parsed.get("positions"):
+                    is_portfolio = True
+                    positions = parsed["positions"]
+            except Exception as pe:
+                print(f"[LLMReasoningService] Errore parsing JSON da PDF: {pe}")
+
+        return {
+            "type": "portfolio" if is_portfolio else "document_analysis",
+            "is_portfolio": is_portfolio,
+            "positions": positions,
+            "text": clean_telegram_markdown(text_resp)
+        }
+
     def analyze_video(self, video_path: str, user_prompt: str = "") -> Dict[str, Any]:
         """
         Analizza un video multimodale (audio, parlato, grafica e fotogrammi) caricato su Telegram

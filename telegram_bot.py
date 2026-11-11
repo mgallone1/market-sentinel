@@ -13,6 +13,7 @@ import os
 import re
 import io
 import asyncio
+import pypdf
 from pathlib import Path
 from typing import Dict, Any, Optional, Set
 from dotenv import load_dotenv
@@ -1367,6 +1368,128 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
     finally:
         VideoDownloaderService.cleanup(local_file_path)
 
+async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Riceve ed elabora documenti PDF inviati dall'utente (estratti conto broker come Trade Republic, 
+    schede portafoglio, trimestrali, bilanci, report di ricerca).
+    """
+    user_id = update.effective_user.id
+    ACTIVE_CHAT_IDS.add(user_id)
+    doc = update.message.document
+    if not doc:
+        return
+
+    async with get_user_lock(user_id):
+        file_name = doc.file_name or "documento.pdf"
+        caption = update.message.caption or ""
+
+        # Controllo dimensione (limite download Bot API standard 20MB)
+        file_size_mb = (doc.file_size or 0) / (1024 * 1024)
+        if file_size_mb > 20:
+            await update.message.reply_text(
+                f"⚠️ *Documento troppo grande per il download diretto di Telegram* (limite: 20MB, questo file è `{file_size_mb:.1f} MB`).",
+                parse_mode="Markdown"
+            )
+            return
+
+        status_msg = await update.message.reply_text(
+            f"📄 *Documento PDF ricevuto:* `{file_name}`\n"
+            "Scarico ed esamino il contenuto (tabelle di portafoglio, rendiconti e report) con Gemini...",
+            parse_mode="Markdown"
+        )
+
+        try:
+            tg_file = await context.bot.get_file(doc.file_id)
+            pdf_bytes = await tg_file.download_as_bytearray()
+            raw_pdf_bytes = bytes(pdf_bytes)
+
+            extracted_text = ""
+            try:
+                reader = pypdf.PdfReader(io.BytesIO(raw_pdf_bytes))
+                pages_text = []
+                for i, page in enumerate(reader.pages[:30]):
+                    t = page.extract_text()
+                    if t:
+                        pages_text.append(f"--- Pagina {i+1} ---\n{t.strip()}")
+                extracted_text = "\n\n".join(pages_text)
+            except Exception as pe:
+                print(f"[!] Errore estrazione testo pypdf: {pe}")
+
+            analysis = llm_svc.analyze_pdf_document(
+                pdf_bytes=raw_pdf_bytes,
+                raw_text=extracted_text,
+                filename=file_name,
+                user_notes=caption
+            )
+
+            if analysis.get("type") == "error":
+                err_text = analysis.get("text") or "Errore durante l'analisi del documento."
+                await status_msg.edit_text(f"⚠️ {err_text}")
+                return
+
+            # Se il PDF contiene posizioni di portafoglio (estratto conto Trade Republic, posizioni broker)
+            if analysis.get("is_portfolio") and analysis.get("positions"):
+                positions = analysis["positions"]
+                saved_lines = []
+                for p in positions:
+                    asset_name = p.get("asset_name", "Strumento")
+                    shares = float(p.get("shares", 0.0))
+                    pmc = float(p.get("average_buy_price", 0.0))
+                    cand_ticker = p.get("ticker_candidate", "")
+                    resolved_ticker = resolve_ticker(cand_ticker or asset_name) or cand_ticker or "ASSET"
+                    if shares > 0 and pmc > 0:
+                        supabase_svc.upsert_position(user_id, resolved_ticker, asset_name, shares, pmc, currency="EUR")
+                        saved_lines.append(f"• *{asset_name}* (`{resolved_ticker}`): `{shares:.4f}` quote a `{pmc:.2f} €`")
+
+                header = "✅ *POSIZIONI ESTRATTE DAL DOCUMENTO E SALVATE SU SUPABASE!*\n\n"
+                pos_summary = "\n".join(saved_lines) if saved_lines else "Nessuna nuova posizione con parametri validi individuata."
+                reply = f"{header}{pos_summary}\n\nUsa `/portafoglio` per visualizzare la situazione ricalcolata in tempo reale con i prezzi live!"
+
+                if status_msg:
+                    try:
+                        await status_msg.delete()
+                    except Exception:
+                        pass
+
+                await send_safe_text(update, reply)
+                context.user_data["last_interaction"] = {
+                    "command": "/document",
+                    "topic": f"Import Portafoglio da PDF: {file_name}",
+                    "active_ticker": None,
+                    "summary": reply[:800],
+                    "timestamp": time.time()
+                }
+                supabase_svc.log_message(user_id, "user", f"[Documento PDF inviato: {file_name}] {caption}".strip())
+                supabase_svc.log_message(user_id, "assistant", reply)
+                return
+
+            # Caso report / bilancio / analisi finanziaria
+            report_text = analysis.get("text", "Analisi del documento completata.")
+            if status_msg:
+                try:
+                    await status_msg.delete()
+                except Exception:
+                    pass
+
+            await send_safe_text(update, report_text)
+            context.user_data["last_interaction"] = {
+                "command": "/document",
+                "topic": f"Analisi Documento PDF: {file_name}",
+                "active_ticker": None,
+                "summary": report_text[:800],
+                "timestamp": time.time()
+            }
+            supabase_svc.log_message(user_id, "user", f"[Documento PDF inviato: {file_name}] {caption}".strip())
+            supabase_svc.log_message(user_id, "assistant", report_text)
+
+        except Exception as e:
+            print(f"[!] Errore critico handle_document: {e}")
+            if status_msg:
+                try:
+                    await status_msg.edit_text(f"⚠️ Si è verificato un errore durante l'elaborazione del file PDF: {e}")
+                except Exception:
+                    pass
+
 async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id if update.effective_user else 0
     try:
@@ -2334,6 +2457,7 @@ def main():
     app.add_handler(CallbackQueryHandler(handle_callback_query))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app.add_handler(MessageHandler(filters.VIDEO | filters.VIDEO_NOTE | filters.ANIMATION, handle_video))
+    app.add_handler(MessageHandler(filters.Document.ALL, handle_document))
     app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_text_message))
 
     print("🤖 Bot Telegram Market Sentinel (Senior Edition - Full Italian & EUR) avviato...")
