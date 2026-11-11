@@ -180,20 +180,21 @@ class LLMReasoningService:
                 print(f"[LLMReasoningService] Modello {model} non disponibile: {e}")
         return ""
 
-    def classify_intent(self, text: str, recent_history_summary: str = "", active_topic_ticker: str = "") -> Dict[str, Any]:
+    def classify_intent(self, text: str, recent_history_summary: str = "", active_topic_ticker: str = "", last_command_context: str = "") -> Dict[str, Any]:
         """
         Classifica l'intenzione dell'utente con massima precisione:
-        - Mantiene il filo logico correlato (es. se la richiesta fa seguito all'analisi precedente).
+        - Mantiene il filo logico correlato (es. se la richiesta fa seguito all'analisi precedente o a un comando appena lanciato).
         - Distingue se chiede spiegazioni tecniche su probabilità o indicatori (technical_explanation).
-        - Distingue se chiede una spiegazione di un ribasso generale (market_explanation).
+        - Distingue se fa una domanda di follow-up sul portafoglio appena mostrato o su una previsione.
         - Se chiede di un ticker specifico o correlate (ticker_analysis).
         """
         active_block = f"TITOLO/ARGOMENTO ATTUALMENTE DISCUSSO: {active_topic_ticker}\n" if active_topic_ticker else ""
+        last_cmd_block = f"ULTIMA AZIONE / COMANDO ESEGUITO POCHI ISTANTI FA DALL'UTENTE:\n{last_command_context}\n" if last_command_context else ""
         context_block = f"CONTESTO DELLA CHAT RECENTE:\n{recent_history_summary}\n" if recent_history_summary else ""
         prompt = f"""
-Sei un classificatore di intenti finanziari avanzato per un Senior Private Wealth Advisor. Analizza attentamente il messaggio dell'utente considerando il contesto recente e l'argomento discusso.
+Sei un classificatore di intenti finanziari avanzato per un Senior Private Wealth Advisor. Analizza attentamente il messaggio dell'utente considerando il contesto recente, l'ultimo comando eseguito e l'argomento discusso.
 
-{active_block}{context_block}MESSAGGIO UTENTE:
+{last_cmd_block}{active_block}{context_block}MESSAGGIO UTENTE:
 "{text}"
 
 DISTINZIONE DEGLI INTENTI:
@@ -210,17 +211,17 @@ DISTINZIONE DEGLI INTENTI:
 5. "update_portfolio_ticker":
    - Modifica o correzione di ticker nel portafoglio.
 6. "portfolio":
-   - Consultazione o chiarimenti sul portafoglio complessivo.
+   - Consultazione o DOMANDE DI FOLLOW-UP / RIFLESSIONI sul portafoglio complessivo o sui titoli detenuti (es. "mostrami il portafoglio", oppure "cosa ne pensi se vendo BYD?", "ha senso alleggerire?", "come ribilanciare?", "e rispetto alla mia allocazione?").
 7. "market_briefing":
    - Richiesta esplicita del bollettino/briefing periodico (/briefing).
 8. "market_explanation":
-   - Richiesta di spiegazioni sul perché scende/sale tutto il mercato in generale.
+   - Richiesta di spiegazioni sul perché scende/sale tutto il mercato in generale o follow-up sul macro briefing.
 9. "congress_trades":
    - Se l'utente chiede cosa ha comprato o venduto Nancy Pelosi, i membri del congresso USA, trade dei politici americani, disclosure PTR, o insider trading a Capitol Hill (es. "cosa ha comprato la pelosi?", "quali sono gli ultimi trade del congresso?", "pelosi", "congress trades", "cosa vendono i politici?", "disclosures congresso").
 10. "market_scanner":
    - Se l'utente chiede uno screening o scanner tecnico di mercato, breakout a 20 giorni, bull flag, titoli in ipervenduto o setup di day trading (es. "fai uno scanner dei mercati", "ci sono titoli in breakout?", "cerca bull flags", "titoli in ipervenduto", "scanner day trade").
 11. "forecast_prediction":
-   - Se l'utente chiede esplicitamente previsioni, stime probabilistiche future, target price o scenari prospettici su un titolo (es. "che previsioni hai su bitcoin?", "previsione nvidia", "dove vedi apple nei prossimi giorni?", "qual è il target di xdem?", "fai una previsione", "cosa prevedi?").
+   - Se l'utente chiede esplicitamente previsioni, stime probabilistiche future, target price o fa una domanda di follow-up su una previsione precedente con nuovi parametri/budget (es. "che previsioni hai su bitcoin?", "previsione nvidia", "dove vedi apple nei prossimi giorni?", "qual è il target di xdem?", "e se invece volessi entrare con 2000€?", "e con orizzonte breve?").
 12. "sentinel_status":
    - Se l'utente chiede lo stato del radar di sorveglianza proattiva, i titoli monitorati o gli alert sentinella attivi (es. "stato sentinella", "radar", "cosa stai monitorando?", "alert attivi", "/sentinel").
 13. "general_chat":
@@ -492,13 +493,16 @@ Tutte le quotazioni RIGOROSAMENTE in Euro (€).
         portfolio_items: List[Dict[str, Any]],
         total_invested: float,
         total_current: float,
-        user_profile: Dict[str, Any]
+        user_profile: Dict[str, Any],
+        user_query_or_notes: str = "",
+        memory_context: str = ""
     ) -> str:
         """
         Genera la diagnosi complessiva di portafoglio da Senior Wealth Manager / CIO:
         - Asset Allocation & Ripartizione del rischio (ETF Core vs Factor vs Crypto vs Single Stock)
         - Analisi di correlazione e drawdown
         - Prossima mossa esecutiva di ribilanciamento con il PAC o con la liquidità libera su Trade Republic.
+        - Se Michele ha allegato una nota o domanda specifica, risponde direttamente al suo quesito.
         """
         if not self.client:
             return ""
@@ -520,10 +524,21 @@ Tutte le quotazioni RIGOROSAMENTE in Euro (€).
         if user_profile.get('pac_details'):
             pac_diag_str += f" ({user_profile.get('pac_details')})"
 
+        user_note_block = f"""
+DOMANDA O NOTA SPECIFICA DI MICHELE:
+"{user_query_or_notes}"
+
+ISTRUZIONE PRIORITARIA:
+Michele ti ha posto questa specifica domanda o sta valutando una mossa precisa (es. vendere o comprare quote, cambiare pesi, o un dubbio operativo).
+Rispondi in modo prioritario, chiaro ed esaustivo a questa sua richiesta, integrandola organicamente nella diagnosi complessiva del portafoglio!
+""" if user_query_or_notes else ""
+
+        mem_block = f"\nCONTESTO PRECEDENTE E MEMORIA:\n{memory_context}\n" if memory_context else ""
+
         prompt = f"""
 Sei il Chief Investment Officer (CIO) e Private Wealth Advisor di Michele.
 DATA E ORA ATTUALE: {now_str}.
-
+{mem_block}{user_note_block}
 COMPOSIZIONE REALE DEL PORTAFOGLIO ATTUALE DI MICHELE:
 {holdings_str}
 - Capitale Totale Investito: {total_invested:.2f} €
@@ -548,6 +563,72 @@ LINEE GUIDA RIGOROSE:
 - Inizia direttamente con la diagnosi.
 - Parla in prima persona con autorevolezza istituzionale.
 - Tutte le cifre RIGOROSAMENTE in Euro (€).
+{TELEGRAM_FORMATTING_RULES}
+"""
+        res = self._call_gemini(prompt)
+        return clean_telegram_markdown(res)
+
+    def generate_portfolio_followup_consultation(
+        self,
+        user_query: str,
+        portfolio_items: List[Dict[str, Any]],
+        total_invested: float,
+        total_current: float,
+        user_profile: Dict[str, Any],
+        last_diagnosis_summary: str = "",
+        memory_context: str = ""
+    ) -> str:
+        """
+        Risponde in modo discorsivo, autorevole e sartoriale a una domanda o riflessione di follow-up
+        posta da Michele subito dopo aver visto la situazione del portafoglio (es. 'e se vendessi BYD?',
+        'come posso ribilanciare adesso?', 'ha senso alleggerire su Bitcoin?').
+        """
+        if not self.client:
+            return ""
+
+        now_str = self._get_current_time_str()
+        items_summary = []
+        for p in portfolio_items:
+            items_summary.append(
+                f"• {p['asset_name']} ({p['ticker']}): Peso {p.get('weight_pct', 0.0):.1f}% | "
+                f"Controvalore {p.get('current_val', 0.0):.2f} € | PMC {p.get('pmc', 0.0):.2f} € | "
+                f"Prezzo Attuale {p.get('current_price_eur', 0.0):.2f} € | P&L {p.get('pnl_eur', 0.0):+.2f} € ({p.get('pnl_pct', 0.0):+.2f}%)"
+            )
+        holdings_str = "\n".join(items_summary)
+        tot_pnl_eur = total_current - total_invested
+        tot_pnl_pct = ((total_current - total_invested) / total_invested) * 100 if total_invested > 0 else 0.0
+
+        pac_val = user_profile.get('monthly_pac_eur')
+        pac_str = f"{pac_val:.2f} €/mese" if pac_val else "Gestione manuale liquidità"
+        if user_profile.get('pac_details'):
+            pac_str += f" ({user_profile.get('pac_details')})"
+
+        prompt = f"""
+[CONTESTO DI SISTEMA INTERNO: Anno e data attuale {now_str}. Usalo SOLO come ancoraggio temporale contro allucinazioni sul passato. VIETATO ASSOLUTO iniziare recitando la data o convenevoli!]
+Sei il Chief Investment Officer (CIO) e Private Wealth Advisor personale di Michele.
+Michele ha appena consultato la diagnosi del suo portafoglio e ti sta facendo una domanda o riflessione specifica di follow-up sul da farsi.
+NON sei un bot impersonale, né devi re-inviare la tabella riassuntiva. Rispondigli direttamente in modo discorsivo, ragionato e sartoriale sui suoi numeri reali.
+
+COMPOSIZIONE ATTUALE DEL PORTAFOGLIO DI MICHELE:
+{holdings_str}
+- Capitale Investito: {total_invested:.2f} € | Valore Attuale: {total_current:.2f} € | P&L Totale: {tot_pnl_eur:+.2f} € ({tot_pnl_pct:+.2f}%)
+- Profilo: PAC {pac_str} | Orizzonte {user_profile.get('horizon', 'Lungo termine')} | Broker: {user_profile.get('broker', 'Trade Republic')}
+
+DIAGNOSI APPENA FORNITA:
+{last_diagnosis_summary or "Diagnosi generale asset allocation"}
+
+DOMANDA ESATTA DI SEGUITO DI MICHELE:
+"{user_query}"
+
+{HUMAN_ADVISOR_COMMUNICATION_SKILLS}
+
+COMPITO DI REDAZIONE:
+1. Rispondi subito ed esplicitamente alla sua domanda o proposta (es. se chiede se vendere BYD o alleggerire un titolo, esprimi chiaramente il tuo giudizio professionale e le motivazioni di rischio/rendimento).
+2. Spiega l'impatto concreto sulla sua allocazione (se liquida una posizione, come cambia la concentrazione azionaria o la volatilità, e dove conviene riallocare il ricavato).
+3. Fornisci la condotta esecutiva su Trade Republic (ordini limite anti-spread, momento opportuno per l'esecuzione).
+4. Chiudi con una domanda aperta di confronto sul prossimo passo.
+
+Tutte le quotazioni RIGOROSAMENTE in Euro (€).
 {TELEGRAM_FORMATTING_RULES}
 """
         res = self._call_gemini(prompt)

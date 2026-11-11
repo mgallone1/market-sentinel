@@ -57,6 +57,47 @@ day_trader_svc = DayTraderService()
 sentinel_svc = ProactiveSentinelService()
 ACTIVE_CHAT_IDS: Set[int] = set()
 
+class AsyncReentrantLock:
+    """Lock asincrono rientrante per garantire l'elaborazione ordinata per singolo utente senza deadlock."""
+    def __init__(self):
+        self._lock = asyncio.Lock()
+        self._owner_task = None
+        self._depth = 0
+
+    async def acquire(self):
+        curr = asyncio.current_task()
+        if self._owner_task == curr:
+            self._depth += 1
+            return True
+        await self._lock.acquire()
+        self._owner_task = curr
+        self._depth = 1
+        return True
+
+    def release(self):
+        curr = asyncio.current_task()
+        if self._owner_task != curr:
+            raise RuntimeError("Cannot release lock owned by another task")
+        self._depth -= 1
+        if self._depth == 0:
+            self._owner_task = None
+            self._lock.release()
+
+    async def __aenter__(self):
+        await self.acquire()
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        self.release()
+
+USER_LOCKS: Dict[int, AsyncReentrantLock] = {}
+
+def get_user_lock(user_id: int) -> AsyncReentrantLock:
+    """Restituisce il Lock asincrono per l'utente, garantendo che comandi e testi in rapida successione non collidano."""
+    if user_id not in USER_LOCKS:
+        USER_LOCKS[user_id] = AsyncReentrantLock()
+    return USER_LOCKS[user_id]
+
 # Mappa alias titoli comuni
 TICKER_MAP = {
     # ETF World e Momentum negoziati su Trade Republic (Xetra/Francoforte in Euro)
@@ -406,207 +447,311 @@ async def build_macro_briefing(slot: str = "auto") -> str:
 async def briefing_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     ACTIVE_CHAT_IDS.add(user_id)
-    
-    # Determina automaticamente la fase di mercato e l'orario attuale esatto
-    now_rome = datetime.now(ZoneInfo("Europe/Rome"))
-    h = now_rome.hour
-    m = now_rome.minute
-    cur_time = now_rome.strftime("%H:%M")
 
-    if 6 <= h < 12:
-        slot = "morning"
-        slot_label = f"del mattino (ore {cur_time} CET)"
-    elif 12 <= h < 17 or (h == 17 and m < 30):
-        slot = "afternoon"
-        slot_label = f"del pomeriggio (ore {cur_time} CET)"
-    elif (h == 17 and m >= 30) or (18 <= h <= 22):
-        slot = "evening"
-        slot_label = f"serale di chiusura (ore {cur_time} CET)"
-    else:
-        slot = "night"
-        slot_label = f"notturno / overnight (ore {cur_time} CET)"
+    async with get_user_lock(user_id):
+        # Determina automaticamente la fase di mercato e l'orario attuale esatto
+        now_rome = datetime.now(ZoneInfo("Europe/Rome"))
+        h = now_rome.hour
+        m = now_rome.minute
+        cur_time = now_rome.strftime("%H:%M")
 
-    msg_target = update.effective_message or update.message
-    status_msg = None
-    if msg_target:
+        if 6 <= h < 12:
+            slot = "morning"
+            slot_label = f"del mattino (ore {cur_time} CET)"
+        elif 12 <= h < 17 or (h == 17 and m < 30):
+            slot = "afternoon"
+            slot_label = f"del pomeriggio (ore {cur_time} CET)"
+        elif (h == 17 and m >= 30) or (18 <= h <= 22):
+            slot = "evening"
+            slot_label = f"serale di chiusura (ore {cur_time} CET)"
+        else:
+            slot = "night"
+            slot_label = f"notturno / overnight (ore {cur_time} CET)"
+
+        msg_target = update.effective_message or update.message
+        status_msg = None
+        if msg_target:
+            try:
+                status_msg = await msg_target.reply_text(f"📊 *Sto elaborando l'aggiornamento attuale ({slot_label}) con quotazioni live in Euro e breaking news...*", parse_mode="Markdown")
+            except Exception:
+                pass
+        
         try:
-            status_msg = await msg_target.reply_text(f"📊 *Sto elaborando l'aggiornamento attuale ({slot_label}) con quotazioni live in Euro e breaking news...*", parse_mode="Markdown")
-        except Exception:
-            pass
-    
-    try:
-        full_reply = await build_macro_briefing(slot=slot)
-    except Exception as e:
-        print(f"[!] Errore critico generazione briefing: {e}")
-        full_reply = "⚠️ Si è verificato un errore temporaneo nel recupero dei dati macro. Riprova tra pochi istanti."
+            full_reply = await build_macro_briefing(slot=slot)
+        except Exception as e:
+            print(f"[!] Errore critico generazione briefing: {e}")
+            full_reply = "⚠️ Si è verificato un errore temporaneo nel recupero dei dati macro. Riprova tra pochi istanti."
 
-    if status_msg:
-        try:
-            await status_msg.delete()
-        except Exception:
-            pass
+        if status_msg:
+            try:
+                await status_msg.delete()
+            except Exception:
+                pass
 
-    await send_safe_text(update, full_reply)
-    
-    # Registra nella cronologia conversazione
-    supabase_svc.log_message(user_id, "user", "/briefing")
-    supabase_svc.log_message(user_id, "assistant", full_reply)
+        await send_safe_text(update, full_reply)
+        
+        # Registra nella cronologia conversazione e nello stato della sessione
+        context.user_data["last_interaction"] = {
+            "command": "/briefing",
+            "topic": "Macro Briefing Mercati",
+            "active_ticker": None,
+            "summary": full_reply[:800],
+            "timestamp": time.time()
+        }
+        supabase_svc.log_message(user_id, "user", "/briefing")
+        supabase_svc.log_message(user_id, "assistant", full_reply)
 
 async def cicli_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     ACTIVE_CHAT_IDS.add(user_id)
-    await update.message.reply_text("📡 *Scansione Multi-Ciclica & Previsionale in corso (Hurst & Migliorino)...*", parse_mode="Markdown")
 
-    radar_items = CycleRadarService.scan_active_cycles()
-    if not radar_items:
-        await update.message.reply_text("Nessun ciclo attivo calcolabile.")
-        return
+    async with get_user_lock(user_id):
+        await update.message.reply_text("📡 *Scansione Multi-Ciclica & Previsionale in corso (Hurst & Migliorino)...*", parse_mode="Markdown")
 
-    lines = [
-        "🔄 *RADAR DEI CICLI & CONFLUENZE PREVISIONALI*\n",
-        "Monitoraggio combinato: Ciclo Settimanale (T), Semestrale (T+4) e Modelli di Prezzo:\n"
-    ]
+        radar_items = CycleRadarService.scan_active_cycles()
+        if not radar_items:
+            await update.message.reply_text("Nessun ciclo attivo calcolabile.")
+            return
 
-    for item in radar_items:
-        lines.append(f"*{item['name']}* (`{item['ticker']}`) - `{item['price_eur']:.2f} €`")
-        lines.append(f"{item['confluence']}")
-        lines.append(f"• 📅 *Ciclo Settimanale T:* Barra `{item['bars_settimanale']}/7` ➔ Mancano ~*{item['bars_left_settimanale']} candele* al minimo.")
-        lines.append(f"• ⏳ *Ciclo Semestrale T+4:* Barra `{item['bars_semestrale']}/138` ➔ Mancano ~*{item['bars_left_semestrale']} candele* al minimo.")
-        lines.append(f"• 🔮 *Previsione:* Prob. Rimbalzo *{item['rebound_prob']}* (Z-Score: `{item['z_score']:.2f}`)")
-        lines.append(f"• 🎯 *Setup in Euro:* Target TP1: `{item['tp1_eur']:.2f} €` | Stop Loss: `{item['sl_eur']:.2f} €` (R:R `{item['risk_reward']}`)\n")
+        lines = [
+            "🔄 *RADAR DEI CICLI & CONFLUENZE PREVISIONALI*\n",
+            "Monitoraggio combinato: Ciclo Settimanale (T), Semestrale (T+4) e Modelli di Prezzo:\n"
+        ]
 
-    lines.append("───────────────────────")
-    lines.append("💡 *Come Usare Questi Dati:* Quando il conteggio delle barre sul ciclo settimanale e semestrale arriva a zero in concomitanza con un'alta probabilità di rimbalzo (>80%), scatta la finestra di acquisto ideale.")
+        for item in radar_items:
+            lines.append(f"*{item['name']}* (`{item['ticker']}`) - `{item['price_eur']:.2f} €`")
+            lines.append(f"{item['confluence']}")
+            lines.append(f"• 📅 *Ciclo Settimanale T:* Barra `{item['bars_settimanale']}/7` ➔ Mancano ~*{item['bars_left_settimanale']} candele* al minimo.")
+            lines.append(f"• ⏳ *Ciclo Semestrale T+4:* Barra `{item['bars_semestrale']}/138` ➔ Mancano ~*{item['bars_left_semestrale']} candele* al minimo.")
+            lines.append(f"• 🔮 *Previsione:* Prob. Rimbalzo *{item['rebound_prob']}* (Z-Score: `{item['z_score']:.2f}`)")
+            lines.append(f"• 🎯 *Setup in Euro:* Target TP1: `{item['tp1_eur']:.2f} €` | Stop Loss: `{item['sl_eur']:.2f} €` (R:R `{item['risk_reward']}`)\n")
 
-    await send_safe_text(update, "\n".join(lines))
+        lines.append("───────────────────────")
+        lines.append("💡 *Come Usare Questi Dati:* Quando il conteggio delle barre sul ciclo settimanale e semestrale arriva a zero in concomitanza con un'alta probabilità di rimbalzo (>80%), scatta la finestra di acquisto ideale.")
+
+        full_text = "\n".join(lines)
+        await send_safe_text(update, full_text)
+
+        context.user_data["last_interaction"] = {
+            "command": "/cicli",
+            "topic": "Radar Ciclico Hurst",
+            "active_ticker": None,
+            "summary": full_text[:800],
+            "timestamp": time.time()
+        }
+        supabase_svc.log_message(user_id, "user", "/cicli")
+        supabase_svc.log_message(user_id, "assistant", full_text)
 
 async def memoria_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     ACTIVE_CHAT_IDS.add(user_id)
-    
-    recent_msgs = supabase_svc.get_recent_chat_history(user_id, limit=8)
-    long_term = supabase_svc.get_long_term_summary(user_id)
-    
-    lines = ["🧠 *STATO DELLA MEMORIA DEL BOT (BREVE & LUNGO TERMINE)*\n"]
-    lines.append("📅 *Memoria di Lungo Termine (30 Giorni):*")
-    if long_term:
-        lines.append(f"_{long_term}_\n")
-    else:
-        lines.append("_Nessuna decisione strategica mensile archiviata ancora. Viene aggiornata man mano che parliamo._\n")
 
-    lines.append("🗓️ *Memoria di Breve Termine (Ultimi Scambi):*")
-    if recent_msgs:
-        for m in recent_msgs[-6:]:
-            role_icon = "👤" if m["role"] == "user" else "🤖"
-            snippet = m["content"][:100].replace("\n", " ")
-            lines.append(f"{role_icon} *{m['role'].capitalize()}:* _{snippet}..._")
-    else:
-        lines.append("_Nessuno scambio recente registrato._")
+    async with get_user_lock(user_id):
+        recent_msgs = supabase_svc.get_recent_chat_history(user_id, limit=8)
+        long_term = supabase_svc.get_long_term_summary(user_id)
+        last_inter = context.user_data.get("last_interaction") or {}
+        
+        lines = ["🧠 *STATO DELLA MEMORIA DEL BOT (BREVE & LUNGO TERMINE)*\n"]
+        if last_inter:
+            lines.append(f"🔄 *Ultima Azione di Contesto:* `{last_inter.get('command')}` ({last_inter.get('topic')})\n")
 
-    lines.append("\n💡 Il bot ricorda automaticamente tutti i titoli analizzati e le strategie concordate.")
-    await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
+        lines.append("📅 *Memoria di Lungo Termine (30 Giorni):*")
+        if long_term:
+            lines.append(f"_{long_term}_\n")
+        else:
+            lines.append("_Nessuna decisione strategica mensile archiviata ancora. Viene aggiornata man mano che parliamo._\n")
+
+        lines.append("🗓️ *Memoria di Breve Termine (Ultimi Scambi):*")
+        if recent_msgs:
+            for m in recent_msgs[-6:]:
+                role_icon = "👤" if m["role"] == "user" else "🤖"
+                snippet = m["content"][:100].replace("\n", " ")
+                lines.append(f"{role_icon} *{m['role'].capitalize()}:* _{snippet}..._")
+        else:
+            lines.append("_Nessuno scambio recente registrato._")
+
+        lines.append("\n💡 Il bot ricorda automaticamente tutti i comandi eseguiti, i titoli analizzati e le preferenze personali.")
+        await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
 
 async def occasioni_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     ACTIVE_CHAT_IDS.add(user_id)
-    await update.message.reply_text("🔍 *Scansione quantitativa in corso sui mercati... elaboro le 10 migliori occasioni con approfondimento discorsivo in Euro (€)...*", parse_mode="Markdown")
-    
-    opps = OpportunityScannerService.scan_best_opportunities(top_n=10)
-    if not opps:
-        await update.message.reply_text("Nessun titolo attualmente in forte anomalia statistica.")
-        return
 
-    # Genera il report approfondito e discorsivo del CIO tramite Gemini
-    detailed_report = llm_svc.generate_detailed_opportunities_report(opps)
-    
-    if not detailed_report:
-        # Fallback strutturato algoritmico se l'LLM non risponde
-        lines = ["💎 *TOP 10 MIGLIORI OCCASIONI A SCONTO OGGI (IN EURO):*\n"]
-        for i, o in enumerate(opps, 1):
-            tr_info = ""
-            if o.get("tr_bid") and o.get("tr_ask"):
-                tr_info = f"  └─ 📱 *Trade Republic (L&S Live):* Vendita `{o['tr_bid']:.2f} €` | Acquisto `{o['tr_ask']:.2f} €`\n"
+    async with get_user_lock(user_id):
+        await update.message.reply_text("🔍 *Scansione quantitativa in corso sui mercati... elaboro le 10 migliori occasioni con approfondimento discorsivo in Euro (€)...*", parse_mode="Markdown")
+        
+        opps = OpportunityScannerService.scan_best_opportunities(top_n=10)
+        if not opps:
+            await update.message.reply_text("Nessun titolo attualmente in forte anomalia statistica.")
+            return
 
-            lines.append(
-                f"*{i}. {o['name']}* (`{o['ticker']}`)\n"
-                f"• Prezzo di Riferimento: `{o['price_eur']:.2f} €` (Oggi: `{o['change_pct']:+.2f}%`)\n"
-                f"{tr_info}"
-                f"• Livello RSI: `{o['rsi']:.1f}` | Z-Score: `{o['z_score']:.2f}`\n"
-                f"• 📈 Probabilità Rimbalzo: *{o['rebound_prob']}*\n"
-                f"• 🎯 Target Stimato: `{o['tp1_eur']:.2f} €`\n"
-                f"• 🛑 Stop Loss Calcolato: `{o['sl_eur']:.2f} €` (Rapporto R:R `{o['rr_ratio']}`)\n"
-                f"• ⚡ *Azione:* _{o['primary_action']}_\n"
-                f"📝 *Perché è un'occasione:* Il titolo presenta una deviazione statistica di {o['z_score']:.2f}σ rispetto alla media a 20 periodi con RSI a {o['rsi']:.1f}, configurando un netto ipervenduto con elevata asimmetria statistica favorevole all'accumulo strategico.\n"
-            )
+        # Genera il report approfondito e discorsivo del CIO tramite Gemini
+        detailed_report = llm_svc.generate_detailed_opportunities_report(opps)
+        
+        if not detailed_report:
+            lines = ["💎 *TOP 10 MIGLIORI OCCASIONI A SCONTO OGGI (IN EURO):*\n"]
+            for i, o in enumerate(opps, 1):
+                tr_info = ""
+                if o.get("tr_bid") and o.get("tr_ask"):
+                    tr_info = f"  └─ 📱 *Trade Republic (L&S Live):* Vendita `{o['tr_bid']:.2f} €` | Acquisto `{o['tr_ask']:.2f} €`\n"
 
-        lines.append("───────────────────────")
-        lines.append("💡 *Consiglio Esecutivo su Trade Republic:*")
-        lines.append("Per evitare lo spread di Lang & Schwarz, usa sempre un *Ordine Limite* qualche centesimo sotto il prezzo corrente anziché comprare a mercato.")
-        lines.append("Per simulare l'acquisto di uno di questi titoli, scrivi ad esempio: `/simula XDEM 500`")
-        detailed_report = "\n".join(lines)
+                lines.append(
+                    f"*{i}. {o['name']}* (`{o['ticker']}`)\n"
+                    f"• Prezzo di Riferimento: `{o['price_eur']:.2f} €` (Oggi: `{o['change_pct']:+.2f}%`)\n"
+                    f"{tr_info}"
+                    f"• Livello RSI: `{o['rsi']:.1f}` | Z-Score: `{o['z_score']:.2f}`\n"
+                    f"• 📈 Probabilità Rimbalzo: *{o['rebound_prob']}*\n"
+                    f"• 🎯 Target Stimato: `{o['tp1_eur']:.2f} €`\n"
+                    f"• 🛑 Stop Loss Calcolato: `{o['sl_eur']:.2f} €` (Rapporto R:R `{o['rr_ratio']}`)\n"
+                    f"• ⚡ *Azione:* _{o['primary_action']}_\n"
+                    f"📝 *Perché è un'occasione:* Il titolo presenta una deviazione statistica di {o['z_score']:.2f}σ rispetto alla media a 20 periodi con RSI a {o['rsi']:.1f}, configurando un netto ipervenduto con elevata asimmetria statistica favorevole all'accumulo strategico.\n"
+                )
 
-    await send_safe_text(update, detailed_report)
-    supabase_svc.log_message(user_id, "user", "/occasioni")
-    supabase_svc.log_message(user_id, "assistant", detailed_report)
+            lines.append("───────────────────────")
+            lines.append("💡 *Consiglio Esecutivo su Trade Republic:*")
+            lines.append("Per evitare lo spread di Lang & Schwarz, usa sempre un *Ordine Limite* qualche centesimo sotto il prezzo corrente anziché comprare a mercato.")
+            lines.append("Per simulare l'acquisto di uno di questi titoli, scrivi ad esempio: `/simula XDEM 500`")
+            detailed_report = "\n".join(lines)
+
+        await send_safe_text(update, detailed_report)
+
+        context.user_data["last_interaction"] = {
+            "command": "/occasioni",
+            "topic": "Top 10 Occasioni a Sconto",
+            "active_ticker": None,
+            "summary": detailed_report[:800],
+            "timestamp": time.time()
+        }
+        supabase_svc.log_message(user_id, "user", "/occasioni")
+        supabase_svc.log_message(user_id, "assistant", detailed_report)
 
 async def pelosi_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     ACTIVE_CHAT_IDS.add(user_id)
-    status_msg = await update.message.reply_text("🏛️ *Consulto i registri del Congresso USA e i report PTR ufficiali (Day Trader Suite)...*", parse_mode="Markdown")
 
-    try:
-        user_profile = supabase_svc.get_user_profile(user_id)
-        current_long_term = supabase_svc.get_long_term_summary(user_id)
+    async with get_user_lock(user_id):
+        status_msg = await update.message.reply_text("🏛️ *Consulto i registri del Congresso USA e i report PTR ufficiali (Day Trader Suite)...*", parse_mode="Markdown")
 
-        filings = day_trader_svc.get_congress_trades(member="pelosi", max_reports=3)
+        try:
+            user_profile = supabase_svc.get_user_profile(user_id)
+            current_long_term = supabase_svc.get_long_term_summary(user_id)
 
-        if not filings:
-            await send_safe_text(update, "Non sono riuscito a reperire i disclosure recenti del Congresso in questo momento. Riprova più tardi.")
-            return
+            filings = day_trader_svc.get_congress_trades(member="pelosi", max_reports=3)
 
-        user_query = "Quali sono gli ultimi disclosure e trade ufficiali depositati da Nancy Pelosi e membri del Congresso USA?"
-        explanation = llm_svc.explain_congress_trades(
-            user_query=user_query,
-            filings=filings,
-            user_profile=user_profile,
-            memory_context=current_long_term
-        )
+            if not filings:
+                await send_safe_text(update, "Non sono riuscito a reperire i disclosure recenti del Congresso in questo momento. Riprova più tardi.")
+                return
 
-        keyboard = [
-            [
-                InlineKeyboardButton("🔄 Aggiorna Congress Trades", callback_data="cmd_pelosi"),
-                InlineKeyboardButton("⚡ Day Trader Scanner", callback_data="cmd_scanner")
-            ],
-            [
-                InlineKeyboardButton("💼 Il Mio Portafoglio", callback_data="cmd_portfolio"),
-                InlineKeyboardButton("🌅 Briefing Mercati", callback_data="cmd_briefing")
+            user_query = "Quali sono gli ultimi disclosure e trade ufficiali depositati da Nancy Pelosi e membri del Congresso USA?"
+            explanation = llm_svc.explain_congress_trades(
+                user_query=user_query,
+                filings=filings,
+                user_profile=user_profile,
+                memory_context=current_long_term
+            )
+
+            keyboard = [
+                [
+                    InlineKeyboardButton("🔄 Aggiorna Congress Trades", callback_data="cmd_pelosi"),
+                    InlineKeyboardButton("⚡ Day Trader Scanner", callback_data="cmd_scanner")
+                ],
+                [
+                    InlineKeyboardButton("💼 Il Mio Portafoglio", callback_data="cmd_portfolio"),
+                    InlineKeyboardButton("🌅 Briefing Mercati", callback_data="cmd_briefing")
+                ]
             ]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
+            reply_markup = InlineKeyboardMarkup(keyboard)
 
-        if status_msg:
-            try:
-                await status_msg.delete()
-            except Exception:
-                pass
+            if status_msg:
+                try:
+                    await status_msg.delete()
+                except Exception:
+                    pass
 
-        supabase_svc.log_message(user_id, "assistant", explanation)
-        await send_safe_text(update, explanation, reply_markup=reply_markup)
+            context.user_data["last_interaction"] = {
+                "command": "/pelosi",
+                "topic": "Capitol Hill Pelosi Disclosures",
+                "active_ticker": None,
+                "summary": explanation[:800],
+                "timestamp": time.time()
+            }
+            supabase_svc.log_message(user_id, "user", "/pelosi")
+            supabase_svc.log_message(user_id, "assistant", explanation)
+            await send_safe_text(update, explanation, reply_markup=reply_markup)
 
-    except Exception as e:
-        print(f"[!] Errore in pelosi_cmd: {e}")
-        await send_safe_text(update, f"Si è verificato un errore durante l'interrogazione dei registri congressuali: {e}")
-    finally:
-        if status_msg:
-            try:
-                await status_msg.delete()
-            except Exception:
-                pass
+        except Exception as e:
+            print(f"[!] Errore in pelosi_cmd: {e}")
+            await send_safe_text(update, f"Si è verificato un errore durante l'interrogazione dei registri congressuali: {e}")
+        finally:
+            if status_msg:
+                try:
+                    await status_msg.delete()
+                except Exception:
+                    pass
 
 async def scanner_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     ACTIVE_CHAT_IDS.add(user_id)
-    status_msg = await update.message.reply_text("⚡ *Scansione dei grafici in corso: cerco breakout a 20 giorni, bull flags e titoli in ipervenduto...*", parse_mode="Markdown")
+
+    async with get_user_lock(user_id):
+        status_msg = await update.message.reply_text("⚡ *Scansione dei grafici in corso: cerco breakout a 20 giorni, bull flags e titoli in ipervenduto...*", parse_mode="Markdown")
+
+        try:
+            user_profile = supabase_svc.get_user_profile(user_id)
+            current_long_term = supabase_svc.get_long_term_summary(user_id)
+
+            target_symbols = [
+                "NVDA", "AAPL", "MSFT", "TSLA", "AMD", "AMZN", "META", "GOOGL",
+                "PLTR", "COIN", "MSTR", "SMCI", "AVGO", "INTC", "ASML", "ARM"
+            ]
+            scan_results = day_trader_svc.scan_market_setups(symbols=target_symbols)
+
+            user_query = "Quali setup tecnici e pattern di day trading (breakout 20d, bull flag, ipervenduto) emergono dallo scanner di oggi?"
+            explanation = llm_svc.explain_market_scan(
+                user_query=user_query,
+                scan_results=scan_results,
+                user_profile=user_profile,
+                memory_context=current_long_term
+            )
+
+            keyboard = [
+                [
+                    InlineKeyboardButton("🔄 Ripeti Scanner", callback_data="cmd_scanner"),
+                    InlineKeyboardButton("🏛️ Pelosi Tracker", callback_data="cmd_pelosi")
+                ],
+                [
+                    InlineKeyboardButton("💎 Top Occasioni", callback_data="cmd_occasioni"),
+                    InlineKeyboardButton("💼 Portafoglio", callback_data="cmd_portfolio")
+                ]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+
+            if status_msg:
+                try:
+                    await status_msg.delete()
+                except Exception:
+                    pass
+
+            context.user_data["last_interaction"] = {
+                "command": "/scanner",
+                "topic": "Day Trader Scanner",
+                "active_ticker": None,
+                "summary": explanation[:800],
+                "timestamp": time.time()
+            }
+            supabase_svc.log_message(user_id, "user", "/scanner")
+            supabase_svc.log_message(user_id, "assistant", explanation)
+            await send_safe_text(update, explanation, reply_markup=reply_markup)
+
+        except Exception as e:
+            print(f"[!] Errore in scanner_cmd: {e}")
+            await send_safe_text(update, f"Si è verificato un errore durante la scansione di mercato: {e}")
+        finally:
+            if status_msg:
+                try:
+                    await status_msg.delete()
+                except Exception:
+                    pass
 
     try:
         user_profile = supabase_svc.get_user_profile(user_id)
@@ -657,144 +802,189 @@ async def scanner_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
             except Exception:
                 pass
 
-async def previsione_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def previsione_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE, user_query: Optional[str] = None):
     user_id = update.effective_user.id
     ACTIVE_CHAT_IDS.add(user_id)
-    args = context.args or []
 
-    raw_ticker = args[0].upper() if args else ""
-    if not raw_ticker:
-        last_inter = supabase_svc.get_last_user_interaction(user_id)
-        raw_ticker = (last_inter.get("active_ticker") if last_inter else None) or "BTC"
+    async with get_user_lock(user_id):
+        args = context.args or []
+        raw_ticker = args[0].upper() if args else ""
+        extra_notes = " ".join(args[1:]) if len(args) > 1 else ""
+        if user_query and not extra_notes:
+            extra_notes = user_query
 
-    ticker = resolve_ticker(raw_ticker) or raw_ticker
-    status_msg = await update.message.reply_text(f"🔮 *Elaboro la Previsione Quantitativa d'Insieme per {ticker} (Monte Carlo, Hurst & Z-Score)...*", parse_mode="Markdown")
+        if not raw_ticker:
+            last_inter = supabase_svc.get_last_user_interaction(user_id)
+            raw_ticker = (last_inter.get("active_ticker") if last_inter else None) or "BTC"
 
-    try:
-        user_portfolio = supabase_svc.get_portfolio(user_id)
-        user_profile = supabase_svc.get_user_profile(user_id)
-        current_long_term = supabase_svc.get_long_term_summary(user_id)
+        ticker = resolve_ticker(raw_ticker) or raw_ticker
+        status_msg = await update.message.reply_text(f"🔮 *Elaboro la Previsione Quantitativa d'Insieme per {ticker} (Monte Carlo, Hurst & Z-Score)...*", parse_mode="Markdown")
 
-        forecast = EnsemblePredictorEngine.generate_ensemble_forecast(ticker)
-        if forecast.get("error"):
-            await send_safe_text(update, f"⚠️ Impossibile calcolare la previsione per `{ticker}`: {forecast['error']}")
-            return
+        try:
+            user_portfolio = supabase_svc.get_portfolio(user_id)
+            user_profile = supabase_svc.get_user_profile(user_id)
+            current_long_term = supabase_svc.get_long_term_summary(user_id)
 
-        user_query = f"Qual è la previsione quantitativa dettagliata e la traiettoria più probabile per {ticker}?"
-        explanation = llm_svc.explain_ensemble_prediction(
-            user_query=user_query,
-            forecast_data=forecast,
-            user_portfolio=user_portfolio,
-            user_profile=user_profile,
-            memory_context=current_long_term
-        )
+            forecast = EnsemblePredictorEngine.generate_ensemble_forecast(ticker)
+            if forecast.get("error"):
+                await send_safe_text(update, f"⚠️ Impossibile calcolare la previsione per `{ticker}`: {forecast['error']}")
+                return
 
-        keyboard = [
-            [
-                InlineKeyboardButton(f"🧮 Simula Ordine {ticker}", callback_data=f"sim_{ticker}"),
-                InlineKeyboardButton(f"🔬 Deep Dive Cicli", callback_data=f"quant_{ticker}")
-            ],
-            [
-                InlineKeyboardButton("🛡️ Radar Sentinella", callback_data="cmd_sentinel"),
-                InlineKeyboardButton("💼 Portafoglio", callback_data="cmd_portfolio")
+            full_query = f"Qual è la previsione quantitativa dettagliata e la traiettoria più probabile per {ticker}?"
+            if extra_notes:
+                full_query += f" Note e vincoli espressi dall'investitore: {extra_notes}"
+
+            explanation = llm_svc.explain_ensemble_prediction(
+                user_query=full_query,
+                forecast_data=forecast,
+                user_portfolio=user_portfolio,
+                user_profile=user_profile,
+                memory_context=current_long_term
+            )
+
+            keyboard = [
+                [
+                    InlineKeyboardButton(f"🧮 Simula Ordine {ticker}", callback_data=f"sim_{ticker}"),
+                    InlineKeyboardButton(f"🔬 Deep Dive Cicli", callback_data=f"quant_{ticker}")
+                ],
+                [
+                    InlineKeyboardButton("🛡️ Radar Sentinella", callback_data="cmd_sentinel"),
+                    InlineKeyboardButton("💼 Portafoglio", callback_data="cmd_portfolio")
+                ]
             ]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
+            reply_markup = InlineKeyboardMarkup(keyboard)
 
-        if status_msg:
-            try:
-                await status_msg.delete()
-            except Exception:
-                pass
+            if status_msg:
+                try:
+                    await status_msg.delete()
+                except Exception:
+                    pass
 
-        supabase_svc.log_message(user_id, "assistant", explanation)
-        await send_safe_text(update, explanation, reply_markup=reply_markup)
+            context.user_data["last_interaction"] = {
+                "command": "/previsione",
+                "topic": f"Previsione {ticker}",
+                "active_ticker": ticker,
+                "summary": explanation[:800],
+                "timestamp": time.time()
+            }
+            context.user_data["current_topic"] = {"ticker": ticker, "asset_name": forecast.get("asset_name", ticker)}
 
-    except Exception as e:
-        print(f"[!] Errore in previsione_cmd: {e}")
-        await send_safe_text(update, f"Si è verificato un errore durante l'elaborazione della previsione: {e}")
-    finally:
-        if status_msg:
-            try:
-                await status_msg.delete()
-            except Exception:
-                pass
+            user_cmd_log = f"/previsione {ticker} {extra_notes}".strip() if extra_notes else f"/previsione {ticker}"
+            supabase_svc.log_message(user_id, "user", user_cmd_log)
+            supabase_svc.log_message(user_id, "assistant", explanation)
+            await send_safe_text(update, explanation, reply_markup=reply_markup)
+
+        except Exception as e:
+            print(f"[!] Errore in previsione_cmd: {e}")
+            await send_safe_text(update, f"Si è verificato un errore durante l'elaborazione della previsione: {e}")
+        finally:
+            if status_msg:
+                try:
+                    await status_msg.delete()
+                except Exception:
+                    pass
 
 async def sentinel_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     ACTIVE_CHAT_IDS.add(user_id)
 
-    dash = sentinel_svc.get_sentinel_dashboard()
-    assets_str = "\n".join([f"• `{a}`" for a in dash["monitored_assets"]])
-    triggers_str = "\n".join([f"• {t}" for t in dash["active_triggers"]])
+    async with get_user_lock(user_id):
+        dash = sentinel_svc.get_sentinel_dashboard()
+        assets_str = "\n".join([f"• `{a}`" for a in dash["monitored_assets"]])
+        triggers_str = "\n".join([f"• {t}" for t in dash["active_triggers"]])
 
-    msg = (
-        "🛡️ *SENTINELLA PROATTIVA & RADAR DI MERCATO*\n"
-        "───────────────────────\n"
-        f"• *Stato Sorveglianza:* {dash['status']}\n"
-        f"• *Finestra Operativa:* {dash['active_hours']}\n"
-        f"• *Orario Attuale (CET):* `{dash['current_time_cet']}`\n"
-        f"• *Alert Inviati Oggi:* `{dash['alerts_sent_today']}`\n\n"
-        "📡 *Asset Sottoposti a Sorveglianza Continua:*\n"
-        f"{assets_str}\n\n"
-        "⚡ *Trigger di Allerta Proattiva:*\n"
-        f"{triggers_str}\n"
-        "───────────────────────\n"
-        "💡 *Come funziona la proattività:* Se uno dei tuoi titoli subisce uno shock di volatilità (>= 3.8%), tocca un minimo ciclico o una rottura dei massimi, oppure se Nancy Pelosi deposita una nuova operazione al Congresso, riceverai una notifica proattiva del CIO senza dover chiedere nulla!"
-    )
+        msg = (
+            "🛡️ *SENTINELLA PROATTIVA & RADAR DI MERCATO*\n"
+            "───────────────────────\n"
+            f"• *Stato Sorveglianza:* {dash['status']}\n"
+            f"• *Finestra Operativa:* {dash['active_hours']}\n"
+            f"• *Orario Attuale (CET):* `{dash['current_time_cet']}`\n"
+            f"• *Alert Inviati Oggi:* `{dash['alerts_sent_today']}`\n\n"
+            "📡 *Asset Sottoposti a Sorveglianza Continua:*\n"
+            f"{assets_str}\n\n"
+            "⚡ *Trigger di Allerta Proattiva:*\n"
+            f"{triggers_str}\n"
+            "───────────────────────\n"
+            "💡 *Come funziona la proattività:* Se uno dei tuoi titoli subisce uno shock di volatilità (>= 3.8%), tocca un minimo ciclico o una rottura dei massimi, oppure se Nancy Pelosi deposita una nuova operazione al Congresso, riceverai una notifica proattiva del CIO senza dover chiedere nulla!"
+        )
 
-    keyboard = [
-        [
-            InlineKeyboardButton("⚡ Day Trader Scanner", callback_data="cmd_scanner"),
-            InlineKeyboardButton("🏛️ Pelosi Tracker", callback_data="cmd_pelosi")
-        ],
-        [
-            InlineKeyboardButton("💼 Il Mio Portafoglio", callback_data="cmd_portfolio"),
-            InlineKeyboardButton("🌅 Briefing Mercati", callback_data="cmd_briefing")
+        keyboard = [
+            [
+                InlineKeyboardButton("⚡ Day Trader Scanner", callback_data="cmd_scanner"),
+                InlineKeyboardButton("🏛️ Pelosi Tracker", callback_data="cmd_pelosi")
+            ],
+            [
+                InlineKeyboardButton("💼 Il Mio Portafoglio", callback_data="cmd_portfolio"),
+                InlineKeyboardButton("🌅 Briefing Mercati", callback_data="cmd_briefing")
+            ]
         ]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    await send_safe_text(update, msg, reply_markup=reply_markup)
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await send_safe_text(update, msg, reply_markup=reply_markup)
+
+        context.user_data["last_interaction"] = {
+            "command": "/sentinel",
+            "topic": "Radar Sentinella Proattiva",
+            "active_ticker": None,
+            "summary": msg[:800],
+            "timestamp": time.time()
+        }
+        supabase_svc.log_message(user_id, "user", "/sentinel")
+        supabase_svc.log_message(user_id, "assistant", msg)
 
 async def simula_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    args = context.args
-    if len(args) < 2:
-        await update.message.reply_text(
-            "Uso corretto del simulatore: `/simula <TICKER> <BUDGET_IN_EURO>`\n\n"
-            "Esempio:\n"
-            "`/simula TSM 500` (Simula 500€ su TSMC)\n"
-            "`/simula NVDA 1000` (Simula 1.000€ su NVIDIA)",
-            parse_mode="Markdown"
+    user_id = update.effective_user.id
+    ACTIVE_CHAT_IDS.add(user_id)
+
+    async with get_user_lock(user_id):
+        args = context.args or []
+        if len(args) < 2:
+            await update.message.reply_text(
+                "Uso corretto del simulatore: `/simula <TICKER> <BUDGET_IN_EURO>`\n\n"
+                "Esempio:\n"
+                "`/simula TSM 500` (Simula 500€ su TSMC)\n"
+                "`/simula NVDA 1000` (Simula 1.000€ su NVIDIA)",
+                parse_mode="Markdown"
+            )
+            return
+
+        raw_ticker = args[0].upper()
+        ticker = resolve_ticker(raw_ticker) or raw_ticker
+        try:
+            budget = float(args[1].replace("€", "").replace(",", "."))
+        except ValueError:
+            await update.message.reply_text("Inserisci un budget numerico valido in Euro.")
+            return
+
+        await update.message.reply_text(f"🧮 Calcolo il piano di acquisto per *{ticker}* con budget di *{budget:.2f} €*...", parse_mode="Markdown")
+        sim = OrderSimulatorService.simulate_order(ticker, budget)
+        if "error" in sim:
+            await update.message.reply_text(f"Errore nella simulazione: {sim['error']}")
+            return
+
+        reply = (
+            f"📋 *SCHEDA OPERATIVA TRADE REPUBLIC: {sim['asset_name']}* (`{sim['ticker']}`)\n\n"
+            f"💶 *Budget Allocato:* `{sim['budget_eur']:.2f} €`\n"
+            f"🏷️ *Prezzo Attuale di Mercato:* `{sim['current_price_eur']:.2f} €`\n"
+            f"📦 *Quote Esatte da Comprare:* `{sim['shares_to_buy']} quote`\n\n"
+            f"⚙️ *Parametri di Ordine Consigliati su Trade Republic:*\n"
+            f"• Tipo d'Ordine: *{sim['suggested_order_type']}*\n"
+            f"• Prezzo Limite da Inserire: `{sim['limit_price_eur']:.2f} €` (protezione anti-spread)\n\n"
+            f"🎯 *Rapporto Rischio / Rendimento:* `{sim['risk_reward_ratio']}`\n"
+            f"• 🟢 *Obiettivo Take Profit (TP1):* `{sim['tp1_eur']:.2f} €` ➔ Potenziale guadagno: *+{sim['potential_gain_eur']:.2f} €* (`+{sim['potential_gain_pct']}%`)\n"
+            f"• 🔴 *Livello Stop Loss (Invalidazione):* `{sim['sl_eur']:.2f} €` ➔ Rischio monetario massimo: *{sim['monetary_risk_eur']:.2f} €* (`-{sim['monetary_risk_pct']}%`)"
         )
-        return
+        await update.message.reply_text(reply, parse_mode="Markdown")
 
-    raw_ticker = args[0].upper()
-    ticker = resolve_ticker(raw_ticker) or raw_ticker
-    try:
-        budget = float(args[1].replace("€", "").replace(",", "."))
-    except ValueError:
-        await update.message.reply_text("Inserisci un budget numerico valido in Euro.")
-        return
-
-    await update.message.reply_text(f"🧮 Calcolo il piano di acquisto per *{ticker}* con budget di *{budget:.2f} €*...", parse_mode="Markdown")
-    sim = OrderSimulatorService.simulate_order(ticker, budget)
-    if "error" in sim:
-        await update.message.reply_text(f"Errore nella simulazione: {sim['error']}")
-        return
-
-    reply = (
-        f"📋 *SCHEDA OPERATIVA TRADE REPUBLIC: {sim['asset_name']}* (`{sim['ticker']}`)\n\n"
-        f"💶 *Budget Allocato:* `{sim['budget_eur']:.2f} €`\n"
-        f"🏷️ *Prezzo Attuale di Mercato:* `{sim['current_price_eur']:.2f} €`\n"
-        f"📦 *Quote Esatte da Comprare:* `{sim['shares_to_buy']} quote`\n\n"
-        f"⚙️ *Parametri di Ordine Consigliati su Trade Republic:*\n"
-        f"• Tipo d'Ordine: *{sim['suggested_order_type']}*\n"
-        f"• Prezzo Limite da Inserire: `{sim['limit_price_eur']:.2f} €` (protezione anti-spread)\n\n"
-        f"🎯 *Rapporto Rischio / Rendimento:* `{sim['risk_reward_ratio']}`\n"
-        f"• 🟢 *Obiettivo Take Profit (TP1):* `{sim['tp1_eur']:.2f} €` ➔ Potenziale guadagno: *+{sim['potential_gain_eur']:.2f} €* (`+{sim['potential_gain_pct']}%`)\n"
-        f"• 🔴 *Livello Stop Loss (Invalidazione):* `{sim['sl_eur']:.2f} €` ➔ Rischio monetario massimo: *{sim['monetary_risk_eur']:.2f} €* (`-{sim['monetary_risk_pct']}%`)"
-    )
-    await update.message.reply_text(reply, parse_mode="Markdown")
+        context.user_data["last_interaction"] = {
+            "command": "/simula",
+            "topic": f"Simulazione Ordine {ticker}",
+            "active_ticker": ticker,
+            "summary": reply[:800],
+            "timestamp": time.time()
+        }
+        context.user_data["current_topic"] = {"ticker": ticker, "asset_name": sim.get("asset_name", ticker)}
+        supabase_svc.log_message(user_id, "user", f"/simula {ticker} {budget:.2f}€")
+        supabase_svc.log_message(user_id, "assistant", reply)
 
 async def profile_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Visualizza o aggiorna la scheda investitore e gli obiettivi patrimoniali."""
@@ -866,25 +1056,8 @@ async def profile_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     await send_safe_text(update, msg)
 
-async def portfolio_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    ACTIVE_CHAT_IDS.add(user_id)
-    positions = supabase_svc.get_portfolio(user_id)
-    
-    if not positions:
-        await update.message.reply_text(
-            "📂 *Il tuo portafoglio è attualmente vuoto.*\n\n"
-            "Puoi registrare una posizione con il comando:\n"
-            "`/add TICKER QUOTE PREZZO`\n\n"
-            "Esempi:\n"
-            "• `/add XDWD.DE 30.054 131.89` (MSCI World)\n"
-            "• `/add XDEM.DE 32.242 81.50` (Momentum)\n\n"
-            "Oppure mandami direttamente lo screenshot da Trade Republic!",
-            parse_mode="Markdown"
-        )
-        return
-
-    # Pass 1: Calcola controvalori individuali e totali
+def compute_portfolio_metrics(positions: list) -> tuple:
+    """Calcola in modo deterministico controvalori, P&L e pesi percentuali del portafoglio in Euro."""
     calc_items = []
     total_invested = 0.0
     total_current = 0.0
@@ -922,56 +1095,103 @@ async def portfolio_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "pnl_pct": pnl_pct
         })
 
-    # Calcola peso percentuale sul portafoglio
     for item in calc_items:
         item["weight_pct"] = (item["current_val"] / total_current) * 100 if total_current > 0 else 0.0
 
-    # Ordina posizioni per peso decrescente
     calc_items.sort(key=lambda x: x["weight_pct"], reverse=True)
+    return calc_items, total_invested, total_current
 
-    text_lines = ["💼 *IL TUO PORTAFOGLIO IN TEMPO REALE (IN EURO):*\n"]
-    for item in calc_items:
-        tr_info = ""
-        tr_quote = MarketDataService.get_trade_republic_ls_quote(item["ticker"])
-        if tr_quote and "bid" in tr_quote:
-            tr_info = f" *(TR: {tr_quote['bid']:.2f} €)*"
+async def portfolio_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE, user_query: Optional[str] = None):
+    user_id = update.effective_user.id
+    ACTIVE_CHAT_IDS.add(user_id)
 
-        icon = "🟢" if item["pnl_eur"] >= 0 else "🔴"
-        text_lines.append(
-            f"*{item['asset_name']}* (`{item['ticker']}`) — *Peso: {item['weight_pct']:.1f}%*\n"
-            f"• Quote: `{item['shares']:.4f}` | PMC: `{item['pmc']:.2f} €`\n"
-            f"• Prezzo Live: `{item['current_price_eur']:.2f} €`{tr_info}\n"
-            f"• Controvalore: `{item['current_val']:.2f} €` | Risultato: {icon} `{item['pnl_eur']:+.2f} €` (`{item['pnl_pct']:+.2f}%`)\n"
+    async with get_user_lock(user_id):
+        # Se user_query non è specificato ma context.args contiene testo aggiuntivo (es. /portafoglio cosa pensi di BYD?)
+        if user_query is None and context.args:
+            user_query = " ".join(context.args)
+
+        positions = supabase_svc.get_portfolio(user_id)
+        if not positions:
+            await update.message.reply_text(
+                "📂 *Il tuo portafoglio è attualmente vuoto.*\n\n"
+                "Puoi registrare una posizione con il comando:\n"
+                "`/add TICKER QUOTE PREZZO`\n\n"
+                "Esempi:\n"
+                "• `/add XDWD.DE 30.054 131.89` (MSCI World)\n"
+                "• `/add XDEM.DE 32.242 81.50` (Momentum)\n\n"
+                "Oppure mandami direttamente lo screenshot da Trade Republic!",
+                parse_mode="Markdown"
+            )
+            return
+
+        calc_items, total_invested, total_current = compute_portfolio_metrics(positions)
+
+        text_lines = ["💼 *IL TUO PORTAFOGLIO IN TEMPO REALE (IN EURO):*\n"]
+        for item in calc_items:
+            tr_info = ""
+            tr_quote = MarketDataService.get_trade_republic_ls_quote(item["ticker"])
+            if tr_quote and "bid" in tr_quote:
+                tr_info = f" *(TR: {tr_quote['bid']:.2f} €)*"
+
+            icon = "🟢" if item["pnl_eur"] >= 0 else "🔴"
+            text_lines.append(
+                f"*{item['asset_name']}* (`{item['ticker']}`) — *Peso: {item['weight_pct']:.1f}%*\n"
+                f"• Quote: `{item['shares']:.4f}` | PMC: `{item['pmc']:.2f} €`\n"
+                f"• Prezzo Live: `{item['current_price_eur']:.2f} €`{tr_info}\n"
+                f"• Controvalore: `{item['current_val']:.2f} €` | Risultato: {icon} `{item['pnl_eur']:+.2f} €` (`{item['pnl_pct']:+.2f}%`)\n"
+            )
+
+        tot_pnl_eur = total_current - total_invested
+        tot_pnl_pct = ((total_current - total_invested) / total_invested) * 100 if total_invested > 0 else 0.0
+        tot_icon = "🚀" if tot_pnl_eur >= 0 else "⚠️"
+
+        text_lines.append("───────────────────────")
+        text_lines.append(f"💰 *Capitale Investito:* `{total_invested:.2f} €`")
+        text_lines.append(f"📈 *Valore Attuale:* `{total_current:.2f} €`")
+        text_lines.append(f"{tot_icon} *Plusvalenza / Minusvalenza Totale:* `{tot_pnl_eur:+.2f} €` (`{tot_pnl_pct:+.2f}%`)")
+
+        await send_safe_text(update, "\n".join(text_lines))
+
+        # Diagnosi Strategica Esecutiva del Chief Investment Officer (CIO)
+        status_msg = await update.message.reply_text(
+            "🧠 *Elaboro la diagnosi patrimoniale di Asset Allocation e la strategia di ribilanciamento del CIO...*",
+            parse_mode="Markdown"
         )
+        user_profile = supabase_svc.get_user_profile(user_id)
+        long_term_mem = supabase_svc.get_long_term_summary(user_id)
+        diagnosis = llm_svc.generate_portfolio_strategic_diagnosis(
+            portfolio_items=calc_items,
+            total_invested=total_invested,
+            total_current=total_current,
+            user_profile=user_profile,
+            user_query_or_notes=user_query or "",
+            memory_context=long_term_mem
+        )
+        if diagnosis:
+            if status_msg:
+                try:
+                    await status_msg.delete()
+                except Exception:
+                    pass
+            await send_safe_text(update, diagnosis)
 
-    tot_pnl_eur = total_current - total_invested
-    tot_pnl_pct = ((total_current - total_invested) / total_invested) * 100 if total_invested > 0 else 0.0
-    tot_icon = "🚀" if tot_pnl_eur >= 0 else "⚠️"
+            # Salva stato sessione per dare piena continuità a qualunque messaggio o domanda successiva
+            context.user_data["last_interaction"] = {
+                "command": "/portafoglio",
+                "topic": "Diagnosi Portafoglio",
+                "active_ticker": None,
+                "summary": diagnosis[:800],
+                "calc_items": calc_items,
+                "total_invested": total_invested,
+                "total_current": total_current,
+                "timestamp": time.time()
+            }
 
-    text_lines.append("───────────────────────")
-    text_lines.append(f"💰 *Capitale Investito:* `{total_invested:.2f} €`")
-    text_lines.append(f"📈 *Valore Attuale:* `{total_current:.2f} €`")
-    text_lines.append(f"{tot_icon} *Plusvalenza / Minusvalenza Totale:* `{tot_pnl_eur:+.2f} €` (`{tot_pnl_pct:+.2f}%`)")
-
-    await send_safe_text(update, "\n".join(text_lines))
-
-    # Diagnosi Strategica Esecutiva del Chief Investment Officer (CIO)
-    status_msg = await update.message.reply_text(
-        "🧠 *Elaboro la diagnosi patrimoniale di Asset Allocation e la strategia di ribilanciamento del CIO...*",
-        parse_mode="Markdown"
-    )
-    user_profile = supabase_svc.get_user_profile(user_id)
-    diagnosis = llm_svc.generate_portfolio_strategic_diagnosis(calc_items, total_invested, total_current, user_profile)
-    if diagnosis:
-        try:
-            await status_msg.delete()
-        except Exception:
-            pass
-        await send_safe_text(update, diagnosis)
-        supabase_svc.log_message(user_id, "user", "/portafoglio")
-        supabase_svc.log_message(user_id, "assistant", diagnosis)
-    else:
-        await status_msg.edit_text("💡 Ricorda di ribilanciare periodicamente gli asset più volatili verso il Core World.")
+            user_cmd_log = f"/portafoglio {user_query}".strip() if user_query else "/portafoglio"
+            supabase_svc.log_message(user_id, "user", user_cmd_log)
+            supabase_svc.log_message(user_id, "assistant", diagnosis)
+        else:
+            await status_msg.edit_text("💡 Ricorda di ribilanciare periodicamente gli asset più volatili verso il Core World.")
 
 async def add_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -1148,8 +1368,10 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
         VideoDownloaderService.cleanup(local_file_path)
 
 async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id if update.effective_user else 0
     try:
-        await _handle_text_message_core(update, context)
+        async with get_user_lock(user_id):
+            await _handle_text_message_core(update, context)
     except Exception as e:
         print(f"[!] Errore critico in handle_text_message: {e}")
         try:
@@ -1238,6 +1460,42 @@ async def _handle_text_message_core(update: Update, context: ContextTypes.DEFAUL
     active_topic = context.user_data.get("current_topic") or {}
     active_ticker = active_topic.get("ticker", "")
 
+    # Recupera l'ultimo comando / interazione recente dell'utente (entro 30 minuti)
+    last_interaction = context.user_data.get("last_interaction") or {}
+    last_cmd = last_interaction.get("command", "")
+    last_topic = last_interaction.get("topic", "")
+    last_summary = last_interaction.get("summary", "")
+    last_time = last_interaction.get("timestamp", 0)
+    now_ts = time.time()
+
+    last_cmd_ctx = ""
+    if last_cmd and (now_ts - last_time < 1800):
+        last_cmd_ctx = f"Ultimo comando eseguito: {last_cmd} ({last_topic}). Sintesi risposta precedente: {last_summary[:400]}"
+
+    # Fast-path per comandi composti (es. /portafoglio cosa pensi di BYD?, /previsione NVDA con budget 2000€)
+    lower_raw = raw_text.lower()
+
+    if lower_raw.startswith(("/portafoglio ", "portafoglio ")):
+        extra = raw_text.split(None, 1)[1].strip() if " " in raw_text else ""
+        if extra:
+            await portfolio_cmd(update, context, user_query=extra)
+            return
+
+    if lower_raw.startswith(("/previsione ", "previsione ", "/previsioni ", "previsioni ", "/forecast ", "forecast ")):
+        rem = raw_text.split(None, 1)[1].strip() if " " in raw_text else ""
+        if rem:
+            parts = rem.split()
+            context.args = parts
+            await previsione_cmd(update, context, user_query=rem)
+            return
+
+    if lower_raw.startswith(("/simula ", "simula ")):
+        rem = raw_text.split(None, 1)[1].strip() if " " in raw_text else ""
+        if rem:
+            context.args = rem.split()
+            await simula_cmd(update, context)
+            return
+
     # Comandi rapidi testuali diretti
     if upper_text in ["PORTAFOGLIO", "/PORTAFOGLIO"]:
         await portfolio_cmd(update, context)
@@ -1286,7 +1544,12 @@ async def _handle_text_message_core(update: Update, context: ContextTypes.DEFAUL
         recent_context_str = "\n".join([f"{'Michele' if m['role'] == 'user' else 'Consulente'}: {m['content'][:400]}" for m in recent_history[-4:]])
 
     # Classificazione intelligente dell'intento tramite Gemini con memoria contestuale e topic attivo
-    classification = llm_svc.classify_intent(raw_text, recent_history_summary=recent_context_str, active_topic_ticker=active_ticker)
+    classification = llm_svc.classify_intent(
+        raw_text,
+        recent_history_summary=recent_context_str,
+        active_topic_ticker=active_ticker,
+        last_command_context=last_cmd_ctx
+    )
     intent = classification.get("intent", "general_chat")
     ticker = classification.get("ticker") or active_ticker
 
@@ -1361,8 +1624,9 @@ async def _handle_text_message_core(update: Update, context: ContextTypes.DEFAUL
 
     # Se l'utente chiede esplicitamente previsioni o target su un titolo
     if intent == "forecast_prediction":
-        context.args = [ticker] if ticker else []
-        await previsione_cmd(update, context)
+        target_ticker = ticker or active_ticker or (last_interaction.get("active_ticker") if last_interaction else None)
+        context.args = [target_ticker] if target_ticker else []
+        await previsione_cmd(update, context, user_query=raw_text)
         return
 
     # 2. Se l'utente chiede espressamente il bollettino / briefing programmato
@@ -1453,9 +1717,79 @@ async def _handle_text_message_core(update: Update, context: ContextTypes.DEFAUL
         await portfolio_cmd(update, context)
         return
 
-    # 3. Se l'utente chiede del portafoglio o di ricontrollare i calcoli
+    # 3. Se l'utente chiede del portafoglio o di riflettere/agire sulle posizioni
     if intent == "portfolio":
-        await portfolio_cmd(update, context)
+        # Controlliamo se è una semplice richiesta di visualizzazione o una domanda/riflessione specifica
+        is_simple_view = any(lower_raw.strip() == p for p in [
+            "portafoglio", "/portafoglio", "mio portafoglio", "il mio portafoglio",
+            "mostrami il portafoglio", "posizioni", "mie posizioni", "visualizza portafoglio",
+            "situazione portafoglio", "stato portafoglio", "saldo", "patrimonio"
+        ])
+
+        if is_simple_view:
+            await portfolio_cmd(update, context)
+            return
+
+        # È una domanda/riflessione di approfondimento (es. "cosa pensi se vendo BYD?", "come ribilanciare?")
+        status_msg = await update.message.reply_text(
+            "💼 *Analizzo la tua riflessione strategica rispetto all'asset allocation e al portafoglio in Euro...*",
+            parse_mode="Markdown"
+        )
+        positions = supabase_svc.get_portfolio(user_id)
+        if not positions:
+            if status_msg:
+                try:
+                    await status_msg.delete()
+                except Exception:
+                    pass
+            await update.message.reply_text("Non hai ancora registrato posizioni in portafoglio. Usa `/add TICKER QUOTE PREZZO` o inviami uno screenshot da Trade Republic.")
+            return
+
+        calc_items, total_invested, total_current = compute_portfolio_metrics(positions)
+        user_profile = supabase_svc.get_user_profile(user_id)
+        last_diagnosis_summary = last_interaction.get("summary", "")
+
+        consultation = llm_svc.generate_portfolio_followup_consultation(
+            user_query=raw_text,
+            portfolio_items=calc_items,
+            total_invested=total_invested,
+            total_current=total_current,
+            user_profile=user_profile,
+            last_diagnosis_summary=last_diagnosis_summary,
+            memory_context=memory_context
+        )
+
+        if status_msg:
+            try:
+                await status_msg.delete()
+            except Exception:
+                pass
+
+        if not consultation:
+            await portfolio_cmd(update, context, user_query=raw_text)
+            return
+
+        keyboard = [
+            [
+                InlineKeyboardButton("💼 Mostra Tabella Portafoglio", callback_data="cmd_portfolio"),
+                InlineKeyboardButton("💎 Top Occasioni", callback_data="cmd_occasioni")
+            ]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+
+        context.user_data["last_interaction"] = {
+            "command": "/portafoglio",
+            "topic": "Consulenza Portfolio Follow-up",
+            "active_ticker": None,
+            "summary": consultation[:800],
+            "calc_items": calc_items,
+            "total_invested": total_invested,
+            "total_current": total_current,
+            "timestamp": time.time()
+        }
+        supabase_svc.log_message(user_id, "user", raw_text)
+        supabase_svc.log_message(user_id, "assistant", consultation)
+        await send_safe_text(update, consultation, reply_markup=reply_markup)
         return
 
     # 4. Se l'utente chiede spiegazioni tecniche approfondite su probabilità, indicatori, Z-Score o Monte Carlo
