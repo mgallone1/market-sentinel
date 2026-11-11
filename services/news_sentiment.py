@@ -30,6 +30,23 @@ BEARISH_KEYWORDS = {
     "weak guidance": -2.5, "layoffs": -1.0, "bankruptcy": -3.0, "inflation pressure": -1.5
 }
 
+# Lessico per Shock Geopolitici & Sistemici (Sentinella Watchdog)
+GEOPOLITICAL_KEYWORDS = {
+    "war": 3.0, "missile": 3.5, "strike": 2.5, "airstrike": 3.5, "invasion": 4.0,
+    "escalation": 2.5, "retaliation": 3.0, "strait of hormuz": 4.0, "taiwan strait": 4.0,
+    "blockade": 3.0, "martial law": 3.5, "ceasefire broken": 3.0, "drone attack": 3.0,
+    "tariff": 2.8, "tariffs": 2.8, "trade war": 3.2, "sanctions": 2.2, "embargo": 2.8,
+    "export ban": 2.8, "curb exports": 2.2, "opec emergency": 3.5, "crude spike": 2.8,
+    "oil surge": 2.5, "pipeline blast": 3.5
+}
+
+MACRO_SHOCK_KEYWORDS = {
+    "emergency rate": 3.8, "emergency cut": 4.0, "emergency hike": 4.0,
+    "bank failure": 4.0, "bank run": 4.0, "liquidity crisis": 3.5, "credit crunch": 3.5,
+    "sovereign default": 4.0, "debt ceiling crisis": 3.0, "sovereign downgrade": 3.2,
+    "bailout": 3.0, "circuit breaker": 3.5, "flash crash": 3.8, "systemic risk": 3.2
+}
+
 class NewsSentimentService:
     @staticmethod
     def analyze_text(text: str) -> Dict[str, Any]:
@@ -245,3 +262,62 @@ class NewsSentimentService:
         """
         query = f"{ticker} stock news when:2d"
         return cls.fetch_google_realtime_news(query=query, max_items=max_items)
+
+    @classmethod
+    def detect_geopolitical_macro_shock(cls, max_age_hours: float = 4.0) -> Optional[Dict[str, Any]]:
+        """
+        Scansiona feed wire e breaking news internazionali alla ricerca di eventi geopolitici
+        o shock sistemici ad alto impatto (guerre, dazi, decisioni d'emergenza banche centrali, crisi bancarie).
+        Restituisce l'evento più critico solo se supera la soglia di severità sistemica.
+        """
+        candidates = []
+        
+        # 1. Raccoglie dalle squawk wire di terminale (FinancialJuice, etc.)
+        squawk_items = cls.fetch_telegram_squawk_news(channels=["financialjuice"], max_items_per_channel=8)
+        for item in squawk_items:
+            candidates.append(item)
+
+        # 2. Raccoglie breaking news internazionali su geopolitica e mercati
+        google_items = cls.fetch_google_realtime_news(query="geopolitical breaking news market war tariffs when:4h", max_items=5)
+        for item in google_items:
+            candidates.append(item)
+
+        highest_shock = None
+        highest_score = 0.0
+
+        for item in candidates:
+            text = f"{item.get('title', '')} {item.get('summary', '')}".lower()
+            
+            geo_score = 0.0
+            geo_matches = []
+            for kw, weight in GEOPOLITICAL_KEYWORDS.items():
+                if kw in text:
+                    geo_score += weight
+                    geo_matches.append(kw)
+
+            macro_score = 0.0
+            macro_matches = []
+            for kw, weight in MACRO_SHOCK_KEYWORDS.items():
+                if kw in text:
+                    macro_score += weight
+                    macro_matches.append(kw)
+
+            total_score = geo_score + macro_score
+            category = "geopolitical" if geo_score >= macro_score else "macro_shock"
+            matches = geo_matches if category == "geopolitical" else macro_matches
+
+            # Soglia di severità: richiede almeno 3.0 punti per evitare falsi allarmi
+            if total_score >= 3.0 and total_score > highest_score:
+                highest_score = total_score
+                highest_shock = {
+                    "category": category,
+                    "title": item.get("title", ""),
+                    "summary": item.get("summary", ""),
+                    "source": item.get("source", "Market Wire"),
+                    "published": item.get("published", ""),
+                    "severity_score": round(total_score, 1),
+                    "matched_keywords": matches,
+                    "link": item.get("link", "")
+                }
+
+        return highest_shock

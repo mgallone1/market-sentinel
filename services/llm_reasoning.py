@@ -1480,3 +1480,64 @@ LINEE GUIDA RIGOROSE:
 """
         res = self._call_gemini(prompt)
         return clean_telegram_markdown(res)
+
+    def generate_sentinel_alert(
+        self,
+        alert_type: str,
+        payload: Dict[str, Any],
+        user_portfolio: Optional[List[Dict[str, Any]]] = None,
+        user_profile: Optional[Dict[str, Any]] = None,
+        memory_context: str = ""
+    ) -> str:
+        """
+        Redige un alert proattivo ad altissima reattività per la Sentinella di Market Sentinel.
+        Tipi supportati:
+        - 'portfolio_movement': Movimento anticipato o anomalo su un titolo detenuto da Michele.
+        - 'major_asset_outlier': Movimento anomalo su una mega-cap o macro benchmark mondiale (Nvidia, Tesla, Oro, Petrolio, VIX, etc.).
+        - 'geopolitical_macro_shock': Evento geopolitico o macro sistemico critico catturato dalle breaking news wire.
+        """
+        if not self.client:
+            return ""
+
+        now_str = self._get_current_time_str()
+        user_profile = user_profile or {}
+        user_portfolio = user_portfolio or []
+        mem_block = f"\nCONTESTO E MEMORIA DI MICHELE:\n{memory_context}\n" if memory_context else ""
+
+        portfolio_summary = ", ".join([f"{p.get('name', p.get('ticker'))} ({p.get('ticker')})" for p in user_portfolio]) if user_portfolio else "Portafoglio non configurato."
+
+        prompt = f"""
+[CONTESTO DI SISTEMA INTERNO: Anno e data attuale {now_str}. Usalo SOLO come ancoraggio temporale contro allucinazioni sul passato. VIETATO ASSOLUTO iniziare recitando la data o convenevoli!]
+Sei il Chief Investment Officer (CIO) e Sentinella Personale di Michele.
+Il tuo ruolo è proteggere il suo capitale e cogliere tempestivamente le migliori asimmetrie di mercato.
+Michele ha impostato soglie vigili e anticipate per essere avvisato *in tempo*, prima che i movimenti si esauriscano o provochino danni.
+
+PORTAFOGLIO REALE DI MICHELE: {portfolio_summary}
+{mem_block}
+
+TIPO DI EVENTO RILEVATO DALLA SENTINELLA: {alert_type}
+DETTAGLI DELL'EVENTO:
+{json.dumps(payload, indent=2, ensure_ascii=False)}
+
+{HUMAN_ADVISOR_COMMUNICATION_SKILLS}
+
+COMPITO DI REDAZIONE (SARTORIALE, AUTOREVOLE E IMMEDIATO):
+- INIZIA SUBITO CON UN TITOLO IMPATTANTE CON EMOJI ADEGUATA:
+  • Se movimento portafoglio: '⚡ ALERT SENTINELLA PORTAFOGLIO: [NOME ASSET]'
+  • Se grande asset mondiale: '🌍 RADAR SENTINELLA MACRO: [NOME ASSET]'
+  • Se shock geopolitico: '🚨 RADAR SENTINELLA: SHOCK GEOPOLITICO & MACRO'
+- CORPO DEL MESSAGGIO (3 o 4 paragrafi concisi e discorsivi, senza gergo sterile):
+  1. Spiega con parole chiare COSA sta accadendo in questo momento (prezzo in Euro, variazione %, natura del movimento o breaking news).
+  2. Spiega il PERCHÉ e il CONTESTO: quale catalizzatore, rotazione settoriale o dinamica di mercato sta spingendo questo movimento.
+  3. CORRELAZIONE CON MICHELE: Se è un asset fuori portafoglio, spiega chiaramente come influenza i suoi investimenti (es. l'impatto di Nvidia o Tesla sull'ETF MSCI World Momentum XDEM, o dell'impennata del petrolio/VIX sull'inflazione e sull'azionario globale). Se è un titolo del suo portafoglio, confronta con il suo PMC.
+  4. GUIDA PRATICA SU TRADE REPUBLIC:
+     • Se è una discesa su un asset solido: spiega se rappresenta una finestra di accumulo a sconto per il suo PAC o per abbassare il PMC, raccomandando sempre un *Ordine Limite* per neutralizzare lo spread di Lang & Schwarz.
+     • Se è un'impennata: consiglia se mantenere la posizione (let profits run) o attendere consolidamento senza inseguire i prezzi sui massimi.
+     • Se è uno shock geopolitico: trasmetti lucidità e calma istituzionale, spiegando come la diversificazione globale del portafoglio assorbe la volatilità e perché non bisogna mai vendere in preda al panico emotivo.
+- Concludi con un invito diretto (es. "Scrivimi '[TICKER]' o premi il comando per approfondire").
+
+Tutte le quotazioni RIGOROSAMENTE in Euro (€).
+{TELEGRAM_FORMATTING_RULES}
+"""
+        res = self._call_gemini(prompt)
+        return clean_telegram_markdown(res)

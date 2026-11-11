@@ -1,8 +1,9 @@
 """
 Proactive Sentinel & Market Watchdog Service for Market Sentinel.
-Monitors portfolio assets, watchlist leaders, and Congressional filings autonomously.
-Delivers proactive institutional wealth-coaching alerts to Michele via Telegram
-when significant statistical anomalies, oversold setups, or new insider disclosures occur.
+Monitors dynamic portfolio assets, Tier-1 global mega-caps, macro barometers,
+geopolitical breaking shocks, and Congressional insider disclosures.
+Delivers timely, forward-looking wealth-coaching alerts to Michele via Telegram
+with early-detection thresholds (catch moves in time without noise).
 """
 
 import os
@@ -16,6 +17,7 @@ from services.market_data import MarketDataService
 from services.supabase_service import SupabaseService
 from services.ensemble_predictor import EnsemblePredictorEngine
 from services.day_trader_service import DayTraderService
+from services.news_sentiment import NewsSentimentService
 from services.llm_reasoning import LLMReasoningService, clean_telegram_markdown
 
 logger = logging.getLogger(__name__)
@@ -31,13 +33,18 @@ class ProactiveSentinelService:
 
         # Cooldown per ticker (timestamp dell'ultimo alert inviato)
         self.ticker_cooldowns: Dict[str, float] = {}
-        # Cooldown standard: 6 ore (21600 secondi) per lo stesso ticker
-        self.cooldown_seconds = 21600
+        # Cooldown standard: 4 ore (14400 secondi) per lo stesso ticker
+        self.cooldown_seconds = 14400
+
+        # Tracciamento alert geopolitici e macro shock
+        self.last_geopolitical_title: Optional[str] = None
+        self.last_geopolitical_ts: float = 0.0
+        self.geopolitical_cooldown_seconds = 10800  # 3 ore
 
         # Tracciamento giornaliero alert
         self.today_date_str = ""
         self.alerts_sent_today = 0
-        self.max_alerts_per_day = 3
+        self.max_alerts_per_day = 5  # Fino a 5 alert giornalieri per massima tempestività
 
         # Ultimo doc_id Pelosi notificato
         self.last_pelosi_doc_id: Optional[str] = None
@@ -65,16 +72,20 @@ class ProactiveSentinelService:
 
     async def run_sentinel_watchdog(self, app) -> Optional[str]:
         """
-        Ciclo autonomo di sorveglianza eseguito ogni 20-30 minuti in background.
-        Scansiona portfolio e watchlist alla ricerca di shock di volatilità o pattern ad alta asimmetria.
+        Ciclo autonomo di sorveglianza eseguito periodicamente (ogni 15-20 minuti) in background.
+        Scansiona:
+        1. Disclosure insider Capitol Hill (Nancy Pelosi & STOCK Act)
+        2. Shock geopolitici e macro sistemici critici dalle breaking news wire
+        3. Portafoglio reale di Michele con soglie calibrate (ETF 1.2%, Azioni 2.2%, Crypto 3.5%)
+        4. I Grandi Asset Mondiali Fuori Portafoglio (Tier-1 Mega-Cap 2.8%, Oro 1.5%, Brent 2.2%, VIX +8%)
         """
         if not self._is_active_hours():
-            logger.info("[Sentinel] Fuori orario di mercato attivo (08:00 - 22:00). Sleep.")
+            logger.info("[Sentinel] Fuori orario di mercato attivo (08:00 - 22:00 CET). Vigilanza silente.")
             return None
 
         self._reset_daily_counter_if_needed()
         if self.alerts_sent_today >= self.max_alerts_per_day:
-            logger.info(f"[Sentinel] Raggiunto limite massimo giornaliero di alert ({self.max_alerts_per_day}).")
+            logger.info(f"[Sentinel] Raggiunto limite massimo giornaliero di alert ({self.max_alerts_per_day}). Silenzio anti-spam attivo.")
             return None
 
         chat_ids = self.supabase_svc.get_active_chat_ids()
@@ -82,8 +93,14 @@ class ProactiveSentinelService:
             return None
 
         now_ts = time.time()
+        primary_chat_id = list(chat_ids)[0]
+        user_portfolio = self.supabase_svc.get_portfolio(primary_chat_id) or []
+        user_profile = self.supabase_svc.get_user_profile(primary_chat_id) or {}
+        memory_context = self.supabase_svc.get_long_term_summary(primary_chat_id) or ""
 
-        # 1. VERIFICA NUOVE DISCLOSURE CONGRESSO USA (Nancy Pelosi & Capitol Hill)
+        # ---------------------------------------------------------
+        # 1. VERIFICA NUOVE DISCLOSURE CONGRESSO USA (Nancy Pelosi)
+        # ---------------------------------------------------------
         try:
             reports = self.day_trader_svc.get_congress_trades(member="pelosi", max_reports=1)
             if reports:
@@ -112,22 +129,62 @@ class ProactiveSentinelService:
         except Exception as e:
             logger.warning(f"[Sentinel] Errore verifica Congress trades: {e}")
 
-        # 2. VERIFICA ASSET DI PORTAFOGLIO E WATCHLIST TATTICA
-        monitored_tickers = [
-            # Portafoglio core
-            "XDWD.DE", "XDEM.DE", "BYDDF", "BTC-EUR", "ADA-EUR",
-            # Watchlist tech e growth ad alta volatilità
-            "NVDA", "AAPL", "MSFT", "TSLA", "PLTR", "MSTR"
+        # ---------------------------------------------------------
+        # 2. VERIFICA SHOCK GEOPOLITICI & MACRO-SISTEMICI
+        # ---------------------------------------------------------
+        if (now_ts - self.last_geopolitical_ts) > self.geopolitical_cooldown_seconds:
+            try:
+                shock = NewsSentimentService.detect_geopolitical_macro_shock(max_age_hours=4.0)
+                if shock and shock.get("title") != self.last_geopolitical_title:
+                    self.last_geopolitical_title = shock.get("title")
+                    self.last_geopolitical_ts = now_ts
+
+                    alert_text = self.llm_svc.generate_sentinel_alert(
+                        alert_type="geopolitical_macro_shock",
+                        payload=shock,
+                        user_portfolio=user_portfolio,
+                        user_profile=user_profile,
+                        memory_context=memory_context
+                    )
+                    if not alert_text:
+                        alert_text = (
+                            f"🚨 *RADAR SENTINELLA: SHOCK GEOPOLITICO / MACRO*\n\n"
+                            f"• *Evento Rilevato:* {shock.get('title')}\n"
+                            f"• *Fonte:* {shock.get('source')} ({shock.get('published')})\n"
+                            f"• *Intensità:* Severità {shock.get('severity_score')}/10\n\n"
+                            f"💡 *Nota del CIO:* I mercati potrebbero registrare volatilità a breve termine. Ricorda che il portafoglio è strutturato su indici globali diversificati: evita reazioni emotive o vendite in panico. Scrivimi per monitorare l'evoluzione."
+                        )
+
+                    await self._broadcast_alert(app, chat_ids, alert_text)
+                    self.alerts_sent_today += 1
+                    logger.info(f"[Sentinel] Shock geopolitico notificato: {shock.get('title')}")
+                    return "geopolitical_alert_dispatched"
+            except Exception as e_geo:
+                logger.warning(f"[Sentinel] Errore verifica shock geopolitico: {e_geo}")
+
+        # ---------------------------------------------------------
+        # 3. VERIFICA PORTAFOGLIO REALE DI MICHELE (Soglie Anticipate)
+        # ---------------------------------------------------------
+        # Se il portafoglio su Supabase è vuoto, usa i titoli core di default
+        portfolio_items = user_portfolio if user_portfolio else [
+            {"ticker": "XDWD.DE", "name": "MSCI World Core", "asset_type": "etf"},
+            {"ticker": "XDEM.DE", "name": "MSCI World Momentum", "asset_type": "etf"},
+            {"ticker": "BYDDF", "name": "BYD Co.", "asset_type": "stock"},
+            {"ticker": "BTC-EUR", "name": "Bitcoin", "asset_type": "crypto"},
+            {"ticker": "ADA-EUR", "name": "Cardano", "asset_type": "crypto"}
         ]
 
-        for ticker in monitored_tickers:
-            # Check cooldown ticker
-            last_alert = self.ticker_cooldowns.get(ticker, 0)
+        for item in portfolio_items:
+            ticker = item.get("ticker")
+            if not ticker:
+                continue
+
+            # Cooldown per asset
+            last_alert = self.ticker_cooldowns.get(ticker, 0.0)
             if now_ts - last_alert < self.cooldown_seconds:
                 continue
 
             try:
-                # Recupera dati live
                 quote = MarketDataService.get_realtime_quote(ticker)
                 last_price = quote.get("last_price", 0.0)
                 change_pct = quote.get("change_pct", 0.0)
@@ -135,80 +192,210 @@ class ProactiveSentinelService:
                 if last_price <= 0:
                     continue
 
-                # Criteri di trigger proattivo:
-                # A) Forte movimento direzionale intraday (>= 3.8% di ribasso o rialzo)
-                # B) Ipervenduto statistico profondo (RSI < 28 o Z-Score <= -2.2)
-                is_shock_move = abs(change_pct) >= 3.8
-                
-                # Se c'è uno shock o un'anomalia, interroga il motore previsionale d'insieme
-                if is_shock_move:
+                # Calibrazione soglie anticipate per asset class
+                raw_type = (item.get("asset_type") or "").lower()
+                is_etf = "etf" in raw_type or ticker in ["XDWD.DE", "XDEM.DE", "SWDA.MI", "CSSPX.MI", "SXR8.DE", "VWCE.DE"]
+                is_crypto = "crypto" in raw_type or "BTC" in ticker or "ADA" in ticker or "ETH" in ticker
+
+                if is_etf:
+                    threshold = 1.2  # Soglia reattiva ETF: 1.2%
+                elif is_crypto:
+                    threshold = 3.5  # Soglia reattiva Crypto: 3.5%
+                else:
+                    threshold = 2.2  # Soglia reattiva Azioni: 2.2%
+
+                if abs(change_pct) >= threshold:
                     forecast = EnsemblePredictorEngine.generate_ensemble_forecast(ticker)
-                    if forecast.get("error"):
-                        continue
+                    asset_name = item.get("name") or forecast.get("asset_name", ticker)
 
-                    # Invia solo se c'è una chiara asimmetria o urgenza tattica
-                    asset_name = forecast.get("asset_name", ticker)
-                    price_eur = forecast.get("current_price_eur", last_price)
-                    bias = forecast.get("bias_direction")
-                    conviction = forecast.get("conviction_score")
-                    tp1 = forecast.get("target_tp1_eur")
-                    sl = forecast.get("stop_loss_eur")
+                    payload = {
+                        "ticker": ticker,
+                        "asset_name": asset_name,
+                        "price_eur": last_price,
+                        "change_pct": change_pct,
+                        "threshold_triggered": threshold,
+                        "user_pmc_eur": item.get("average_buy_price"),
+                        "user_shares": item.get("shares"),
+                        "ensemble": forecast
+                    }
 
-                    # Messaggio proattivo sartoriale del CIO
-                    direction_emoji = "🟢" if change_pct < 0 else "🚀"
-                    thesis_action = "Un'ottima finestra di accumulo a sconto per il tuo PAC o per un ingresso tattico" if change_pct < 0 else "Forte estensione dei prezzi: valuta se proteggere i guadagni o attendere consolidamento"
-
-                    msg = (
-                        f"⚡ *ALERT PROATTIVO DEL CIO: {asset_name.upper()}* (`{ticker}`)\n\n"
-                        f"{direction_emoji} *Anomalia Rilevata:* Il titolo sta registrando una variazione intraday del *{change_pct:+.2f}%* a quota *{price_eur:.2f} €*.\n\n"
-                        f"🧭 *Previsione Quantitativa d'Insieme:*\n"
-                        f"• *Scenario Atteso:* {bias}\n"
-                        f"• *Livello di Convinzione Modello:* `{conviction}`\n"
-                        f"• *Target Proiettato (TP1):* `{tp1:.2f} €`\n"
-                        f"• *Stop Loss Strutturale:* `{sl:.2f} €`\n"
-                        f"• *Orizzonte Stimato:* {forecast.get('time_horizon')}\n\n"
-                        f"💡 *Verdetto Operativo per Michele:*\n"
-                        f"{thesis_action}. Su Trade Republic, imposta sempre un *Ordine Limite* per neutralizzare lo spread di Lang & Schwarz.\n\n"
-                        f"Scrivimi *'{ticker}'* o premi `/previsione {ticker}` per consultare il quadro completo."
+                    alert_msg = self.llm_svc.generate_sentinel_alert(
+                        alert_type="portfolio_movement",
+                        payload=payload,
+                        user_portfolio=user_portfolio,
+                        user_profile=user_profile,
+                        memory_context=memory_context
                     )
 
-                    await self._broadcast_alert(app, chat_ids, msg)
+                    if not alert_msg:
+                        direction_sym = "🟢" if change_pct < 0 else "🚀"
+                        action_txt = "Finestra favorevole di accumulo per abbassare il PMC" if change_pct < 0 else "Spinta decisa al rialzo: lascia correre i profitti con ordine limite"
+                        alert_msg = (
+                            f"⚡ *ALERT SENTINELLA PORTAFOGLIO: {asset_name.upper()}* (`{ticker}`)\n\n"
+                            f"{direction_sym} *Movimento Anticipato Rilevato:* Variazione intraday del *{change_pct:+.2f}%* a quota *{last_price:.2f} €* (soglia sentinella: {threshold}%).\n\n"
+                            f"🧭 *Scenario Quantitativo:*\n"
+                            f"• *Bias Modello:* {forecast.get('bias_direction', 'In consolidamento')}\n"
+                            f"• *Target Primario (TP1):* `{forecast.get('target_tp1_eur', 0.0):.2f} €`\n"
+                            f"• *Stop Loss Strutturale:* `{forecast.get('stop_loss_eur', 0.0):.2f} €`\n\n"
+                            f"💡 *Guida per Michele su Trade Republic:*\n"
+                            f"{action_txt}. Ricorda di impostare un *Ordine Limite* per neutralizzare lo spread di Lang & Schwarz.\n\n"
+                            f"Scrivimi *'{ticker}'* per consultare la perizia completa."
+                        )
+
+                    await self._broadcast_alert(app, chat_ids, alert_msg)
                     self.ticker_cooldowns[ticker] = now_ts
                     self.alerts_sent_today += 1
-                    logger.info(f"[Sentinel] Alert proattivo inviato con successo per {ticker} ({change_pct:+.2f}%)!")
-                    return f"alert_dispatched_{ticker}"
+                    logger.info(f"[Sentinel] Alert portafoglio inviato per {ticker} ({change_pct:+.2f}%)!")
+                    return f"portfolio_alert_{ticker}"
 
-            except Exception as ex:
-                logger.warning(f"[Sentinel] Errore verifica ticker {ticker}: {ex}")
+            except Exception as e_port:
+                logger.warning(f"[Sentinel] Errore verifica portafoglio {ticker}: {e_port}")
+
+        # ---------------------------------------------------------
+        # 4. VERIFICA GRANDI ASSET MONDIALI (Mega-Cap & Macro Barometers)
+        # ---------------------------------------------------------
+        # Solo i Grandi della Terra, Zero Spazzatura
+        major_assets = [
+            # Mega-Cap Tech & AI Leaders
+            {"ticker": "NVDA", "name": "NVIDIA Corp.", "threshold": 2.8, "type": "megacap"},
+            {"ticker": "TSLA", "name": "Tesla Inc.", "threshold": 2.8, "type": "megacap"},
+            {"ticker": "AAPL", "name": "Apple Inc.", "threshold": 2.8, "type": "megacap"},
+            {"ticker": "MSFT", "name": "Microsoft Corp.", "threshold": 2.8, "type": "megacap"},
+            {"ticker": "AMZN", "name": "Amazon.com Inc.", "threshold": 2.8, "type": "megacap"},
+            {"ticker": "GOOGL", "name": "Alphabet Inc.", "threshold": 2.8, "type": "megacap"},
+            {"ticker": "META", "name": "Meta Platforms", "threshold": 2.8, "type": "megacap"},
+            {"ticker": "PLTR", "name": "Palantir Technologies", "threshold": 3.0, "type": "growth_leader"},
+            # Termometri Macroeconomici & Materie Prime
+            {"ticker": "GC=F", "name": "Oro Spot / Gold", "threshold": 1.5, "type": "commodity"},
+            {"ticker": "BZ=F", "name": "Petrolio Brent", "threshold": 2.2, "type": "commodity"},
+            {"ticker": "^VIX", "name": "Indice Volatilità VIX", "threshold": 8.0, "type": "vix_spike"},
+            {"ticker": "^TNX", "name": "Rendimento US 10Y Treasury", "threshold": 2.5, "type": "yield"},
+            {"ticker": "^GSPC", "name": "Indice S&P 500", "threshold": 1.2, "type": "benchmark"},
+            {"ticker": "^IXIC", "name": "Indice Nasdaq Composite", "threshold": 1.2, "type": "benchmark"}
+        ]
+
+        for ma in major_assets:
+            ticker = ma["ticker"]
+            last_alert = self.ticker_cooldowns.get(ticker, 0.0)
+            if now_ts - last_alert < self.cooldown_seconds:
+                continue
+
+            try:
+                quote = MarketDataService.get_realtime_quote(ticker)
+                last_price = quote.get("last_price", 0.0)
+                change_pct = quote.get("change_pct", 0.0)
+
+                if last_price <= 0:
+                    continue
+
+                threshold = ma["threshold"]
+                is_trigger = False
+
+                if ma.get("type") == "vix_spike":
+                    # Il VIX scatta solo su spike rialzista (impennata della paura di mercato)
+                    is_trigger = change_pct >= threshold
+                else:
+                    is_trigger = abs(change_pct) >= threshold
+
+                if is_trigger:
+                    payload = {
+                        "ticker": ticker,
+                        "asset_name": ma["name"],
+                        "price_eur": last_price,
+                        "change_pct": change_pct,
+                        "threshold_triggered": threshold,
+                        "asset_type": ma["type"],
+                        "note": "Movimento significativo sui grandi asset globali con potenziale contagio su liquidità e portafoglio."
+                    }
+
+                    alert_msg = self.llm_svc.generate_sentinel_alert(
+                        alert_type="major_asset_outlier",
+                        payload=payload,
+                        user_portfolio=user_portfolio,
+                        user_profile=user_profile,
+                        memory_context=memory_context
+                    )
+
+                    if not alert_msg:
+                        dir_icon = "📈" if change_pct > 0 else "📉"
+                        alert_msg = (
+                            f"🌍 *RADAR SENTINELLA MACRO: {ma['name'].upper()}* (`{ticker}`)\n\n"
+                            f"{dir_icon} *Anomalia Rilevata:* Movimento del *{change_pct:+.2f}%* a quota *{last_price:.2f}* (soglia reattiva: {threshold}%).\n\n"
+                            f"💡 *Cosa significa per Michele:*\n"
+                            f"Questo scostamento su un pilastro globale può influenzare la liquidità e i pesi del tuo portafoglio (in particolare l'ETF MSCI World Momentum XDEM e la componente azionaria). "
+                            f"Valuta con lucidità senza inseguire le code della volatilità.\n\n"
+                            f"Scrivimi *'{ticker}'* per esaminare la correlazione e i livelli tecnici."
+                        )
+
+                    await self._broadcast_alert(app, chat_ids, alert_msg)
+                    self.ticker_cooldowns[ticker] = now_ts
+                    self.alerts_sent_today += 1
+                    logger.info(f"[Sentinel] Alert grande asset inviato per {ticker} ({change_pct:+.2f}%)!")
+                    return f"major_asset_alert_{ticker}"
+
+            except Exception as e_ma:
+                logger.warning(f"[Sentinel] Errore verifica grande asset {ticker}: {e_ma}")
 
         return "no_triggers"
 
     async def _broadcast_alert(self, app, chat_ids: Set[int], message_text: str):
-        """Invia in modo sicuro il messaggio formattato a tutti gli utenti attivi."""
+        """Invia in modo sicuro il messaggio formattato a tutti gli utenti attivi con fallback testuale."""
         cleaned_text = clean_telegram_markdown(message_text)
         for chat_id in chat_ids:
             try:
                 await app.bot.send_message(chat_id=chat_id, text=cleaned_text, parse_mode="Markdown")
             except Exception as e:
-                logger.error(f"[Sentinel] Errore invio alert a {chat_id}: {e}")
+                logger.warning(f"[Sentinel] Errore invio alert formattato a {chat_id} ({e}): fallback plain text")
+                try:
+                    await app.bot.send_message(chat_id=chat_id, text=message_text)
+                except Exception as e2:
+                    logger.error(f"[Sentinel] Errore critico invio alert a {chat_id}: {e2}")
 
     def get_sentinel_dashboard(self) -> Dict[str, Any]:
-        """Restituisce lo stato operativo della sentinella per il comando /sentinel."""
+        """Restituisce lo stato operativo completo e dettagliato della sentinella per il comando /sentinel."""
         now = datetime.now(ROME_TZ)
         return {
-            "status": "Attivo e Vigilante 24/7",
+            "status": "Vigilante e Operativo 24/7",
             "active_hours": "08:00 - 22:00 CET",
             "current_time_cet": now.strftime("%H:%M:%S"),
             "alerts_sent_today": f"{self.alerts_sent_today}/{self.max_alerts_per_day}",
+            "cooldown_period": "4 ore per singolo asset | 3 ore geopolitica",
             "monitored_assets": [
                 "MSCI World Core (XDWD)", "MSCI World Momentum (XDEM)",
                 "BYD Co. (BYDDF)", "Bitcoin (BTC)", "Cardano (ADA)",
-                "NVIDIA (NVDA)", "Tesla (TSLA)", "Apple (AAPL)", "Microsoft (MSFT)", "Palantir (PLTR)"
+                "NVIDIA (NVDA)", "Tesla (TSLA)", "Apple (AAPL)", "Microsoft (MSFT)",
+                "Amazon (AMZN)", "Alphabet (GOOGL)", "Meta (META)", "Palantir (PLTR)",
+                "Oro Spot (GC=F / SGLD)", "Petrolio Brent (BZ=F)", "Indice VIX (^VIX)", "US 10Y Yield (^TNX)"
             ],
             "active_triggers": [
-                "Variazione intraday anomala (|Δ| >= 3.8%)",
-                "Ipervenduto estremo (Z-Score <= -2.2 / RSI <= 27)",
-                "Breakout istituzionale sui massimi a 20 giorni",
-                "Nuove disclosure Congressuali USA (Nancy Pelosi PTR)"
+                "Variazione ETF Core anticipata (|Δ| >= 1.2%)",
+                "Variazione Azioni portafoglio (|Δ| >= 2.2%)",
+                "Variazione Crypto portafoglio (|Δ| >= 3.5%)",
+                "Mega-Cap Tech & AI Leader (|Δ| >= 2.8%)",
+                "Materie Prime & Macro (Oro 1.5%, Brent 2.2%, VIX Spike >= +8.0%)",
+                "Detector Geopolitico & Macro Shock (Wire terminal FinancialJuice & Breaking)",
+                "Capitol Hill STOCK Act Disclosures (Nancy Pelosi PTR)"
+            ],
+            "detection_pillars": [
+                {
+                    "name": "💼 Portafoglio Dinamico (Supabase)",
+                    "rule": "ETF Core: |Δ| >= 1.2% | Azioni: |Δ| >= 2.2% | Crypto: |Δ| >= 3.5%"
+                },
+                {
+                    "name": "🌍 Grandi della Terra (Mega-Cap & AI Leaders)",
+                    "rule": "NVDA, TSLA, AAPL, MSFT, AMZN, GOOGL, META, PLTR (|Δ| >= 2.8%)"
+                },
+                {
+                    "name": "⚖️ Termometri Macro & Materie Prime",
+                    "rule": "Oro: |Δ| >= 1.5% | Brent: |Δ| >= 2.2% | VIX: Spike >= +8.0% | US 10Y: |Δ| >= 2.5%"
+                },
+                {
+                    "name": "🚨 Detector Geopolitico & Macro Shock",
+                    "rule": "Scansione continua wire terminal (FinancialJuice) & breaking news su guerre, dazi, tassi e banche"
+                },
+                {
+                    "name": "🏛️ Capitol Hill Disclosure Tracker",
+                    "rule": "Intercettazione tempestiva report STOCK Act (Hon. Nancy Pelosi & Congresso USA)"
+                }
             ]
         }

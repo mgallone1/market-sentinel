@@ -918,8 +918,10 @@ async def sentinel_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     async with get_user_lock(user_id):
         dash = sentinel_svc.get_sentinel_dashboard()
-        assets_str = "\n".join([f"• `{a}`" for a in dash["monitored_assets"]])
-        triggers_str = "\n".join([f"• {t}" for t in dash["active_triggers"]])
+        pillars_lines = []
+        for p in dash.get("detection_pillars", []):
+            pillars_lines.append(f"• *{p['name']}*\n  `{p['rule']}`")
+        pillars_str = "\n".join(pillars_lines)
 
         msg = (
             "🛡️ *SENTINELLA PROATTIVA & RADAR DI MERCATO*\n"
@@ -927,13 +929,12 @@ async def sentinel_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"• *Stato Sorveglianza:* {dash['status']}\n"
             f"• *Finestra Operativa:* {dash['active_hours']}\n"
             f"• *Orario Attuale (CET):* `{dash['current_time_cet']}`\n"
-            f"• *Alert Inviati Oggi:* `{dash['alerts_sent_today']}`\n\n"
-            "📡 *Asset Sottoposti a Sorveglianza Continua:*\n"
-            f"{assets_str}\n\n"
-            "⚡ *Trigger di Allerta Proattiva:*\n"
-            f"{triggers_str}\n"
+            f"• *Alert Inviati Oggi:* `{dash['alerts_sent_today']}`\n"
+            f"• *Cooldown Intelligente:* `{dash.get('cooldown_period', '4h per asset')}`\n\n"
+            "📡 *I 5 Pilastri di Sorveglianza Attiva:*\n"
+            f"{pillars_str}\n"
             "───────────────────────\n"
-            "💡 *Come funziona la proattività:* Se uno dei tuoi titoli subisce uno shock di volatilità (>= 3.8%), tocca un minimo ciclico o una rottura dei massimi, oppure se Nancy Pelosi deposita una nuova operazione al Congresso, riceverai una notifica proattiva del CIO senza dover chiedere nulla!"
+            "💡 *Come funziona la Sentinella:* Le soglie sono tarate per cogliere i movimenti in anticipo (es. ETF all'1.2%, Mega-Cap al 2.8%, VIX a +8.0% e breaking geopolitiche da squawk wire). Quando si verifica un'anomalia, ricevi subito un alert strategico del CIO con impatto e condotta operativa su Trade Republic!"
         )
 
         keyboard = [
