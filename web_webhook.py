@@ -120,21 +120,23 @@ async def main():
     # Avvia il loop di keep-alive in background
     asyncio.create_task(anti_sleep_loop())
 
-    print("🤖 Bot Telegram avviato in modalità 24/7 con server HTTP, keep-alive e trigger cloud attivi...")
+    print("🤖 Bot Telegram avviato in modalità 24/7 con server HTTP, keep-alive e trigger cloud attivi...", flush=True)
     async with bot_application:
         await bot_application.start()
+        print("🚀 [Telegram] Application.start() completato con successo!", flush=True)
         
         # Connessione polling resiliente ai conflitti del rolling deploy di Render
         for attempt in range(8):
             try:
+                print(f"📡 [Polling] Avvio updater.start_polling (tentativo {attempt+1}/8)...", flush=True)
                 await bot_application.updater.start_polling(drop_pending_updates=True, bootstrap_retries=5)
-                print("✅ [Polling] Updater connesso a Telegram con successo (nessun conflitto).")
+                print("✅ [Polling] Updater connesso a Telegram con successo (nessun conflitto)!", flush=True)
                 break
             except telegram.error.Conflict:
-                print(f"⚠️ [Polling] Conflitto con istanza precedente (tentativo {attempt+1}/8). Attesa 5 secondi che la vecchia istanza termini...")
+                print(f"⚠️ [Polling] Conflitto con istanza precedente (tentativo {attempt+1}/8). Attesa 5 secondi che la vecchia istanza termini...", flush=True)
                 await asyncio.sleep(5)
             except Exception as pe:
-                print(f"⚠️ [Polling] Errore start_polling: {pe}. Attendo 4 secondi...")
+                print(f"⚠️ [Polling] Errore start_polling: {pe}. Attendo 4 secondi...", flush=True)
                 await asyncio.sleep(4)
 
         while True:

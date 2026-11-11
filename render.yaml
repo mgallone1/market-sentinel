@@ -5,8 +5,10 @@ services:
     region: frankfurt
     plan: free
     buildCommand: pip install -r requirements.txt
-    startCommand: python web_webhook.py
+    startCommand: python -u web_webhook.py
     envVars:
+      - key: PYTHONUNBUFFERED
+        value: "1"
       - key: PYTHON_VERSION
         value: 3.11.8
       - key: TELEGRAM_BOT_TOKEN
