@@ -209,6 +209,16 @@ def resolve_ticker(text: str) -> Optional[str]:
 
     return None
 
+def get_target_msg(update: Any):
+    """Restituisce l'oggetto messaggio valido per .reply_text sia per comandi che per callback query."""
+    if hasattr(update, "callback_query") and update.callback_query and getattr(update.callback_query, "message", None):
+        return update.callback_query.message
+    if hasattr(update, "message") and getattr(update, "message", None):
+        return update.message
+    if getattr(update, "effective_message", None):
+        return update.effective_message
+    return update
+
 async def send_safe_text(update: Any, text: str, parse_mode: str = "Markdown", reply_markup: Optional[InlineKeyboardMarkup] = None):
     """
     Invia messaggi spezzandoli automaticamente se superano il limite Telegram (3500 caratteri)
@@ -216,7 +226,7 @@ async def send_safe_text(update: Any, text: str, parse_mode: str = "Markdown", r
     In caso di qualsiasi eccezione dell'entity parser di Telegram, esegue un fallback a strip_markdown
     senza parse_mode per garantire che l'utente non veda MAI asterischi o cancelletti a schermo.
     """
-    target = getattr(update, "message", None) or update
+    target = get_target_msg(update)
     cleaned = clean_telegram_markdown(text) if parse_mode == "Markdown" else text
 
     if len(cleaned) <= 3500:
@@ -521,13 +531,14 @@ async def briefing_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cicli_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     ACTIVE_CHAT_IDS.add(user_id)
+    msg_target = get_target_msg(update)
 
     async with get_user_lock(user_id):
-        await update.message.reply_text("📡 *Scansione Multi-Ciclica & Previsionale in corso (Hurst & Migliorino)...*", parse_mode="Markdown")
+        await msg_target.reply_text("📡 *Scansione Multi-Ciclica & Previsionale in corso (Hurst & Migliorino)...*", parse_mode="Markdown")
 
         radar_items = CycleRadarService.scan_active_cycles()
         if not radar_items:
-            await update.message.reply_text("Nessun ciclo attivo calcolabile.")
+            await msg_target.reply_text("Nessun ciclo attivo calcolabile.")
             return
 
         lines = [
@@ -600,18 +611,20 @@ async def memoria_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
             lines.append("_Nessuno scambio recente registrato._")
 
         lines.append("\n💡 Il bot ricorda automaticamente tutti i comandi eseguiti, i titoli analizzati e le preferenze personali.")
-        await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
+        msg_target = get_target_msg(update)
+        await msg_target.reply_text("\n".join(lines), parse_mode="Markdown")
 
 async def occasioni_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     ACTIVE_CHAT_IDS.add(user_id)
+    msg_target = get_target_msg(update)
 
     async with get_user_lock(user_id):
-        await update.message.reply_text("🔍 *Scansione quantitativa in corso sui mercati... elaboro le 10 migliori occasioni con approfondimento discorsivo in Euro (€)...*", parse_mode="Markdown")
+        await msg_target.reply_text("🔍 *Scansione quantitativa in corso sui mercati... elaboro le 10 migliori occasioni con approfondimento discorsivo in Euro (€)...*", parse_mode="Markdown")
         
         opps = OpportunityScannerService.scan_best_opportunities(top_n=10)
         if not opps:
-            await update.message.reply_text("Nessun titolo attualmente in forte anomalia statistica.")
+            await msg_target.reply_text("Nessun titolo attualmente in forte anomalia statistica.")
             return
 
         # Genera il report approfondito e discorsivo del CIO tramite Gemini
@@ -657,9 +670,10 @@ async def occasioni_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def pelosi_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     ACTIVE_CHAT_IDS.add(user_id)
+    msg_target = get_target_msg(update)
 
     async with get_user_lock(user_id):
-        status_msg = await update.message.reply_text("🏛️ *Consulto i registri del Congresso USA e i report PTR ufficiali (Day Trader Suite)...*", parse_mode="Markdown")
+        status_msg = await msg_target.reply_text("🏛️ *Consulto i registri del Congresso USA e i report PTR ufficiali (Day Trader Suite)...*", parse_mode="Markdown")
 
         try:
             user_profile = supabase_svc.get_user_profile(user_id)
@@ -721,9 +735,10 @@ async def pelosi_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def scanner_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     ACTIVE_CHAT_IDS.add(user_id)
+    msg_target = get_target_msg(update)
 
     async with get_user_lock(user_id):
-        status_msg = await update.message.reply_text("⚡ *Scansione dei grafici in corso: cerco breakout a 20 giorni, bull flags e titoli in ipervenduto...*", parse_mode="Markdown")
+        status_msg = await msg_target.reply_text("⚡ *Scansione dei grafici in corso: cerco breakout a 20 giorni, bull flags e titoli in ipervenduto...*", parse_mode="Markdown")
 
         try:
             user_profile = supabase_svc.get_user_profile(user_id)
@@ -847,7 +862,8 @@ async def previsione_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE, use
             raw_ticker = (last_inter.get("active_ticker") if last_inter else None) or "BTC"
 
         ticker = resolve_ticker(raw_ticker) or raw_ticker
-        status_msg = await update.message.reply_text(f"🔮 *Elaboro la Previsione Quantitativa d'Insieme per {ticker} (Monte Carlo, Hurst & Z-Score)...*", parse_mode="Markdown")
+        msg_target = get_target_msg(update)
+        status_msg = await msg_target.reply_text(f"🔮 *Elaboro la Previsione Quantitativa d'Insieme per {ticker} (Monte Carlo, Hurst & Z-Score)...*", parse_mode="Markdown")
 
         try:
             user_portfolio = supabase_svc.get_portfolio(user_id)
@@ -964,11 +980,12 @@ async def sentinel_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def simula_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     ACTIVE_CHAT_IDS.add(user_id)
+    msg_target = get_target_msg(update)
 
     async with get_user_lock(user_id):
         args = context.args or []
         if len(args) < 2:
-            await update.message.reply_text(
+            await msg_target.reply_text(
                 "Uso corretto del simulatore: `/simula <TICKER> <BUDGET_IN_EURO>`\n\n"
                 "Esempio:\n"
                 "`/simula TSM 500` (Simula 500€ su TSMC)\n"
@@ -982,13 +999,13 @@ async def simula_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             budget = float(args[1].replace("€", "").replace(",", "."))
         except ValueError:
-            await update.message.reply_text("Inserisci un budget numerico valido in Euro.")
+            await msg_target.reply_text("Inserisci un budget numerico valido in Euro.")
             return
 
-        await update.message.reply_text(f"🧮 Calcolo il piano di acquisto per *{ticker}* con budget di *{budget:.2f} €*...", parse_mode="Markdown")
+        await msg_target.reply_text(f"🧮 Calcolo il piano di acquisto per *{ticker}* con budget di *{budget:.2f} €*...", parse_mode="Markdown")
         sim = OrderSimulatorService.simulate_order(ticker, budget)
         if "error" in sim:
-            await update.message.reply_text(f"Errore nella simulazione: {sim['error']}")
+            await msg_target.reply_text(f"Errore nella simulazione: {sim['error']}")
             return
 
         reply = (
@@ -1003,7 +1020,7 @@ async def simula_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"• 🟢 *Obiettivo Take Profit (TP1):* `{sim['tp1_eur']:.2f} €` ➔ Potenziale guadagno: *+{sim['potential_gain_eur']:.2f} €* (`+{sim['potential_gain_pct']}%`)\n"
             f"• 🔴 *Livello Stop Loss (Invalidazione):* `{sim['sl_eur']:.2f} €` ➔ Rischio monetario massimo: *{sim['monetary_risk_eur']:.2f} €* (`-{sim['monetary_risk_pct']}%`)"
         )
-        await update.message.reply_text(reply, parse_mode="Markdown")
+        await msg_target.reply_text(reply, parse_mode="Markdown")
 
         context.user_data["last_interaction"] = {
             "command": "/simula",
@@ -1020,6 +1037,7 @@ async def profile_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Visualizza o aggiorna la scheda investitore e gli obiettivi patrimoniali."""
     user_id = update.effective_user.id
     ACTIVE_CHAT_IDS.add(user_id)
+    msg_target = get_target_msg(update)
     args = context.args
 
     if args:
@@ -1033,7 +1051,7 @@ async def profile_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 val = float(nums[0].replace(",", "."))
                 profile["monthly_pac_eur"] = val
                 supabase_svc.save_user_profile(user_id, profile)
-                await update.message.reply_text(
+                await msg_target.reply_text(
                     f"✅ *Budget PAC aggiornato!*\n"
                     f"Ora il tuo piano di accumulo mensile è impostato su `{val:.2f} €/mese`.\n"
                     f"Tutti i consigli di acquisto, simulazione e ribilanciamento terranno conto di questo importo.",
@@ -1044,7 +1062,7 @@ async def profile_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if "orizzonte" in full_arg or "anni" in full_arg:
             profile["horizon"] = " ".join(args)
             supabase_svc.save_user_profile(user_id, profile)
-            await update.message.reply_text(
+            await msg_target.reply_text(
                 f"✅ *Orizzonte temporale aggiornato a:*\n`{profile['horizon']}`",
                 parse_mode="Markdown"
             )
@@ -1053,7 +1071,7 @@ async def profile_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if "rischio" in full_arg:
             profile["risk_profile"] = " ".join(args)
             supabase_svc.save_user_profile(user_id, profile)
-            await update.message.reply_text(
+            await msg_target.reply_text(
                 f"✅ *Profilo di rischio aggiornato a:*\n`{profile['risk_profile']}`",
                 parse_mode="Markdown"
             )
@@ -1153,6 +1171,7 @@ def compute_portfolio_metrics(positions: list) -> tuple:
 async def portfolio_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE, user_query: Optional[str] = None):
     user_id = update.effective_user.id
     ACTIVE_CHAT_IDS.add(user_id)
+    msg_target = get_target_msg(update)
 
     async with get_user_lock(user_id):
         # Se user_query non è specificato ma context.args contiene testo aggiuntivo (es. /portafoglio cosa pensi di BYD?)
@@ -1161,7 +1180,7 @@ async def portfolio_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE, user
 
         positions = supabase_svc.get_portfolio(user_id)
         if not positions:
-            await update.message.reply_text(
+            await msg_target.reply_text(
                 "📂 *Il tuo portafoglio è attualmente vuoto.*\n\n"
                 "Puoi registrare una posizione con il comando:\n"
                 "`/add TICKER QUOTE PREZZO`\n\n"
@@ -1202,7 +1221,7 @@ async def portfolio_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE, user
         await send_safe_text(update, "\n".join(text_lines))
 
         # Diagnosi Strategica Esecutiva del Chief Investment Officer (CIO)
-        status_msg = await update.message.reply_text(
+        status_msg = await msg_target.reply_text(
             "🧠 *Elaboro la diagnosi patrimoniale di Asset Allocation e la strategia di ribilanciamento del CIO...*",
             parse_mode="Markdown"
         )
@@ -2263,7 +2282,7 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
     await query.answer()
     data = query.data or ""
 
-    if data == "briefing" or data.startswith("briefing"):
+    if data == "briefing" or data.startswith("briefing") or data == "cmd_briefing":
         await briefing_cmd(update, context)
         return
 

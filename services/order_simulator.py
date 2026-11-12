@@ -63,3 +63,15 @@ class OrderSimulatorService:
             "monetary_risk_pct": risk_pct,
             "risk_reward_ratio": pred["risk_reward_tp1"]
         }
+
+    @staticmethod
+    def simulate_trade_republic_order(ticker: str, budget_eur: float) -> Dict[str, Any]:
+        """Alias compatibile per la simulazione d'ordine su Trade Republic."""
+        res = OrderSimulatorService.simulate_order(ticker, budget_eur)
+        if "error" in res:
+            res["status"] = "error"
+        else:
+            res["status"] = "ok"
+            res["risk_reward_tp1"] = res.get("risk_reward_ratio", "1:1.5")
+            res["stop_loss_eur"] = res.get("sl_eur", 0.0)
+        return res
