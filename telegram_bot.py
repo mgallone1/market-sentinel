@@ -145,6 +145,29 @@ TICKER_MAP = {
     "ASML": "ASML",
     "MARVELL": "MRVL",
     "MRVL": "MRVL",
+    # Commodities: Metalli Preziosi e Petrolio (Negoziabili su Alpaca & Trade Republic)
+    "ORO": "GLD",
+    "GOLD": "GLD",
+    "GLD": "GLD",
+    "ARGENTO": "SLV",
+    "SILVER": "SLV",
+    "SLV": "SLV",
+    "PETROLIO": "USO",
+    "OIL": "USO",
+    "CRUDE OIL": "USO",
+    "USO": "USO",
+    "BRENT": "BNO",
+    "BNO": "BNO",
+    "GAS": "UNG",
+    "GAS NATURALE": "UNG",
+    "NATURAL GAS": "UNG",
+    "UNG": "UNG",
+    "RAME": "CPER",
+    "COPPER": "CPER",
+    "CPER": "CPER",
+    "PLATINO": "PPLT",
+    "PLATINUM": "PPLT",
+    "PPLT": "PPLT",
     "BROADCOM": "AVGO",
     "AVGO": "AVGO",
     "QUALCOMM": "QCOM",
@@ -2452,6 +2475,27 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         await scanner_cmd(update, context)
         return
 
+    if data in ["buy_gld", "buy_uso", "buy_slv"]:
+        sym_map = {"buy_gld": "GLD", "buy_uso": "USO", "buy_slv": "SLV"}
+        chosen_sym = sym_map[data]
+        curr_p = mkt_svc.get_current_price(chosen_sym) or 100.0
+        shares = max(1, int(1000.0 / curr_p)) # ~1,000$ di ordine
+        stop_p = round(curr_p * 0.985, 2)
+        target_p = round(curr_p * 1.03, 2)
+        res = alpaca_service.place_bracket_order(chosen_sym, shares, "buy", target_p, stop_p)
+        if "error" not in res:
+            await query.message.reply_text(
+                f"✅ *ORDINE COMMODITY INVIATO SU ALPACA!* 🚀\n"
+                f"• *Strumento:* `{chosen_sym}`\n"
+                f"• *Quantità:* `x{shares} quote` (~$1,000)\n"
+                f"• *Stop Loss:* `${stop_p:.2f}` (-1.5%)\n"
+                f"• *Take Profit:* `${target_p:.2f}` (+3.0%)",
+                parse_mode="Markdown"
+            )
+        else:
+            await query.message.reply_text(f"⚠️ Errore esecuzione: {res.get('error')}")
+        return
+
     if data == "explain_cycles":
         user_id = update.effective_user.id
         msg_target = query.message
@@ -2638,6 +2682,7 @@ async def post_init(application):
     bot_commands = [
         BotCommand("portafoglio", "💼 Diagnosi del portafoglio e asset allocation"),
         BotCommand("alpaca", "⚡ Trading live: saldo, posizioni e chiusura"),
+        BotCommand("materieprime", "🛢️ Metalli e Petrolio: Oro, Argento, WTI, Gas"),
         BotCommand("previsione", "🔮 Previsione ensemble (Monte Carlo, Hurst & Z-Score)"),
         BotCommand("sentinel", "🛡️ Stato radar sentinella proattiva 24/7"),
         BotCommand("scanner", "⚡ Day trader chart scanner (breakout & ipervenduto)"),
@@ -2694,6 +2739,49 @@ async def post_init(application):
         print("⏰ [Scheduler] Programmato: Briefing 07:00 / 15:00 CET | Watchdog Sentinella ogni 20 minuti!")
     except Exception as e:
         print(f"[!] Errore configurazione scheduler in post_init: {e}")
+
+async def commodities_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Quadro e quotazioni in tempo reale di Metalli e Petrolio."""
+    target_msg = get_target_msg(update)
+    status_msg = await target_msg.reply_text("🛢️ *Interrogo i mercati delle Materie Prime (Oro, Argento, Petrolio, Rame)...*", parse_mode="Markdown")
+
+    assets = [
+        ("GLD", "Oro Fisico (Gold ETF)"),
+        ("SLV", "Argento Fisico (Silver ETF)"),
+        ("USO", "Petrolio WTI (US Oil Fund)"),
+        ("BNO", "Petrolio Brent (Brent Oil)"),
+        ("CPER", "Rame (Copper Index)"),
+        ("UNG", "Gas Naturale (Natural Gas)")
+    ]
+
+    lines = [
+        "🛢️ *COMMODITIES & METALLI PREZIOSI (ALPACA TRADABLE)*\n"
+        "────────────────────────\n"
+    ]
+
+    keyboard = []
+    for sym, name in assets:
+        p = mkt_svc.get_current_price(sym)
+        p_str = f"${p:.2f}" if p else "N/D"
+        lines.append(f"• *{name}* (`{sym}`): `{p_str}`")
+
+    lines.append("\n💡 *Come Operare via Chat:*")
+    lines.append("Puoi digitare direttamente in chat:")
+    lines.append("• _\"Compra 10 azioni di Oro\"_ o _\"Compra 500$ di GLD\"_")
+    lines.append("• _\"Compra 20 azioni di Petrolio\"_ o _\"Compra 500$ di USO\"_")
+    lines.append("• _\"Short 15 quote di Argento\"_ o _\"Vendi SLV\"_")
+
+    keyboard.append([
+        InlineKeyboardButton("🥇 Compra Oro (GLD)", callback_data="buy_gld"),
+        InlineKeyboardButton("🛢️ Compra Petrolio (USO)", callback_data="buy_uso")
+    ])
+    keyboard.append([
+        InlineKeyboardButton("🥈 Compra Argento (SLV)", callback_data="buy_slv"),
+        InlineKeyboardButton("⚡ Saldo Alpaca", callback_data="alpaca_refresh")
+    ])
+
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await status_msg.edit_text("\n".join(lines), parse_mode="Markdown", reply_markup=reply_markup)
 
 async def alpaca_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Comando per visualizzare lo stato di Alpaca Trading e gestire le posizioni."""
@@ -2771,6 +2859,10 @@ def main():
     app.add_handler(CommandHandler("portafoglio", portfolio_cmd))
     app.add_handler(CommandHandler("alpaca", alpaca_cmd))
     app.add_handler(CommandHandler("trade", alpaca_cmd))
+    app.add_handler(CommandHandler("materieprime", commodities_cmd))
+    app.add_handler(CommandHandler("commodities", commodities_cmd))
+    app.add_handler(CommandHandler("oro", commodities_cmd))
+    app.add_handler(CommandHandler("petrolio", commodities_cmd))
     app.add_handler(CommandHandler("profilo", profile_cmd))
     app.add_handler(CommandHandler("memoria", memoria_cmd))
     app.add_handler(CommandHandler("add", add_cmd))
