@@ -48,6 +48,9 @@ from services.cycle_analyst import CycleAnalystService
 from services.hurst_migliorino_cycles import HurstMigliorinoCycleService
 from services.cycle_radar import CycleRadarService
 from services.advanced_predictive_system import AdvancedPredictiveSystem
+from services.alpaca_execution_service import AlpacaExecutionService
+
+alpaca_service = AlpacaExecutionService()
 from services.video_downloader import VideoDownloaderService
 from services.day_trader_service import DayTraderService
 from services.ensemble_predictor import EnsemblePredictorEngine
@@ -2310,6 +2313,56 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         await sentinel_cmd(update, context)
         return
 
+    if data == "alpaca_refresh":
+        summary = alpaca_service.get_account_summary()
+        acc = summary.get("account", {})
+        clock = summary.get("clock", {})
+        positions = summary.get("positions", [])
+        is_open = "APERTA 🟢" if clock.get("is_open") else "CHIUSA 🔴"
+        val = float(acc.get("portfolio_value", 0))
+        cash = float(acc.get("cash", 0))
+        buying_power = float(acc.get("buying_power", 0))
+        
+        msg = (
+            "⚡ *ALPACA EXECUTION & DAY TRADER*\n"
+            "────────────────────────\n"
+            f"• *Stato Borsa USA:* {is_open}\n"
+            f"• *Valore Portafoglio:* `${val:,.2f}`\n"
+            f"• *Liquidità Libera (Cash):* `${cash:,.2f}`\n"
+            f"• *Buying Power:* `${buying_power:,.2f}`\n\n"
+        )
+        keyboard = []
+        if positions:
+            msg += f"📈 *POSIZIONI ATTIVE ({len(positions)}):*\n"
+            for p in positions:
+                sym = p['symbol']
+                side = p['side'].upper()
+                qty = p['qty']
+                pl = float(p['unrealized_pl'])
+                plpc = float(p['unrealized_plpc']) * 100
+                curr = float(p['current_price'])
+                sign = "🟢 +" if pl >= 0 else "🔴 "
+                msg += f"  • `{sym}` ({side} x{qty}): `${curr:.2f}` | P&L: {sign}${pl:.2f} ({plpc:+.2f}%)\n"
+            keyboard.append([InlineKeyboardButton("🚨 Chiudi Tutte le Posizioni", callback_data="alpaca_close_all")])
+        else:
+            msg += "💤 *Nessuna posizione a mercato.* Portafoglio 100% in contanti.\n"
+            
+        keyboard.append([
+            InlineKeyboardButton("⚡ Esegui Scanner Day-Trade", callback_data="alpaca_run_scanner"),
+            InlineKeyboardButton("🔄 Aggiorna", callback_data="alpaca_refresh")
+        ])
+        await query.message.edit_text(msg, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
+        return
+
+    if data == "alpaca_close_all":
+        res = alpaca_service.close_all_positions()
+        await query.message.reply_text("🚨 *Tutte le posizioni Alpaca sono state liquidate a mercato.*", parse_mode="Markdown")
+        return
+
+    if data == "alpaca_run_scanner":
+        await scanner_cmd(update, context)
+        return
+
     if data == "explain_cycles":
         user_id = update.effective_user.id
         msg_target = query.message
@@ -2495,6 +2548,7 @@ async def post_init(application):
     """Configura il menu dei comandi nativo di Telegram e avvia lo scheduler dei briefing e della sentinella proattiva."""
     bot_commands = [
         BotCommand("portafoglio", "💼 Diagnosi del portafoglio e asset allocation"),
+        BotCommand("alpaca", "⚡ Trading live: saldo, posizioni e chiusura"),
         BotCommand("previsione", "🔮 Previsione ensemble (Monte Carlo, Hurst & Z-Score)"),
         BotCommand("sentinel", "🛡️ Stato radar sentinella proattiva 24/7"),
         BotCommand("scanner", "⚡ Day trader chart scanner (breakout & ipervenduto)"),
@@ -2552,6 +2606,55 @@ async def post_init(application):
     except Exception as e:
         print(f"[!] Errore configurazione scheduler in post_init: {e}")
 
+async def alpaca_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Comando per visualizzare lo stato di Alpaca Trading e gestire le posizioni."""
+    summary = alpaca_service.get_account_summary()
+    acc = summary.get("account", {})
+    clock = summary.get("clock", {})
+    positions = summary.get("positions", [])
+    
+    if "error" in acc:
+        await update.message.reply_text(f"⚠️ Errore connessione Alpaca: {acc['error']}")
+        return
+        
+    is_open = "APERTA 🟢" if clock.get("is_open") else "CHIUSA 🔴"
+    val = float(acc.get("portfolio_value", 0))
+    cash = float(acc.get("cash", 0))
+    buying_power = float(acc.get("buying_power", 0))
+    
+    msg = (
+        "⚡ *ALPACA EXECUTION & DAY TRADER*\n"
+        "────────────────────────\n"
+        f"• *Stato Borsa USA:* {is_open}\n"
+        f"• *Valore Portafoglio:* `${val:,.2f}`\n"
+        f"• *Liquidità Libera (Cash):* `${cash:,.2f}`\n"
+        f"• *Buying Power:* `${buying_power:,.2f}`\n\n"
+    )
+    
+    keyboard = []
+    if positions:
+        msg += f"📈 *POSIZIONI ATTIVE ({len(positions)}):*\n"
+        for p in positions:
+            sym = p['symbol']
+            side = p['side'].upper()
+            qty = p['qty']
+            pl = float(p['unrealized_pl'])
+            plpc = float(p['unrealized_plpc']) * 100
+            curr = float(p['current_price'])
+            sign = "🟢 +" if pl >= 0 else "🔴 "
+            msg += f"  • `{sym}` ({side} x{qty}): `${curr:.2f}` | P&L: {sign}${pl:.2f} ({plpc:+.2f}%)\n"
+        keyboard.append([InlineKeyboardButton("🚨 Chiudi Tutte le Posizioni", callback_data="alpaca_close_all")])
+    else:
+        msg += "💤 *Nessuna posizione a mercato.* Portafoglio 100% in contanti.\n"
+        
+    keyboard.append([
+        InlineKeyboardButton("⚡ Esegui Scanner Day-Trade", callback_data="alpaca_run_scanner"),
+        InlineKeyboardButton("🔄 Aggiorna", callback_data="alpaca_refresh")
+    ])
+    
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await update.message.reply_text(msg, parse_mode="Markdown", reply_markup=reply_markup)
+
 def main():
     token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
     if not token:
@@ -2577,6 +2680,8 @@ def main():
     app.add_handler(CommandHandler("cicli", cicli_cmd))
     app.add_handler(CommandHandler("simula", simula_cmd))
     app.add_handler(CommandHandler("portafoglio", portfolio_cmd))
+    app.add_handler(CommandHandler("alpaca", alpaca_cmd))
+    app.add_handler(CommandHandler("trade", alpaca_cmd))
     app.add_handler(CommandHandler("profilo", profile_cmd))
     app.add_handler(CommandHandler("memoria", memoria_cmd))
     app.add_handler(CommandHandler("add", add_cmd))
