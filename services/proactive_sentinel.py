@@ -340,15 +340,23 @@ class ProactiveSentinelService:
         return "no_triggers"
 
     async def _broadcast_alert(self, app, chat_ids: Set[int], message_text: str):
-        """Invia in modo sicuro il messaggio formattato a tutti gli utenti attivi con fallback testuale."""
+        """Invia in modo sicuro il messaggio formattato a tutti gli utenti attivi con fallback testuale e salvataggio DB."""
         cleaned_text = clean_telegram_markdown(message_text)
         for chat_id in chat_ids:
             try:
                 await app.bot.send_message(chat_id=chat_id, text=cleaned_text, parse_mode="Markdown")
+                try:
+                    self.supabase_svc.log_message(chat_id, "assistant", cleaned_text)
+                except Exception:
+                    pass
             except Exception as e:
                 logger.warning(f"[Sentinel] Errore invio alert formattato a {chat_id} ({e}): fallback plain text")
                 try:
                     await app.bot.send_message(chat_id=chat_id, text=message_text)
+                    try:
+                        self.supabase_svc.log_message(chat_id, "assistant", message_text)
+                    except Exception:
+                        pass
                 except Exception as e2:
                     logger.error(f"[Sentinel] Errore critico invio alert a {chat_id}: {e2}")
 
