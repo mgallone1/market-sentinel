@@ -1643,6 +1643,95 @@ async def _handle_text_message_core(update: Update, context: ContextTypes.DEFAUL
     # Salva il messaggio dell'utente nella memoria di breve termine
     supabase_svc.log_message(user_id, "user", raw_text)
 
+    # --- 0.1 INTERCETTAZIONE ORDINI IN TEMPO REALE SU ALPACA ---
+    # Riconosce ordini vocali/testuali tipo: "compra 5 azioni di NVDA", "vendi TSLA", "fai un trade su AAPL", "compra 100$ di NVDA"
+    order_pattern = re.search(r'\b(compra|acquista|long|short|vendi)\s+(\d+(?:\.\d+)?)\s*(azioni|pezzi|quote|\$|euro|usd)?\s*(?:di|su)?\s*([A-Za-z0-9\.\-\/]+)', raw_text, re.IGNORECASE)
+    if not order_pattern:
+        order_pattern = re.search(r'\b(compra|acquista|long|short|vendi)\s+([A-Za-z0-9\.\-\/]+)\s*(?:per\s+)?(\d+(?:\.\d+)?)\s*(\$|euro|usd|azioni|quote)?', raw_text, re.IGNORECASE)
+
+    if order_pattern:
+        groups = order_pattern.groups()
+        # Normalizza i campi
+        action = groups[0].lower()
+        side = "sell" if action in ["short", "vendi"] else "buy"
+        
+        # Estrai ticker e quantità/ammontare
+        if groups[1].replace('.', '', 1).isdigit():
+            val_num = float(groups[1])
+            unit = (groups[2] or "azioni").lower()
+            sym = groups[3].upper()
+        else:
+            sym = groups[1].upper()
+            val_num = float(groups[2]) if groups[2] else 1.0
+            unit = (groups[3] or "azioni").lower()
+
+        # Risolvi ticker (es. NVIDIA -> NVDA, TESLA -> TSLA)
+        resolved_sym = resolve_ticker(sym) or sym
+        resolved_sym = resolved_sym.replace(".MI", "") # Alpaca tratta ticker USA o crypto
+
+        status_order_msg = await update.message.reply_text(
+            f"⚡ *ELABORAZIONE ORDINE ALPACA IN TEMPO REALE...*\n"
+            f"• *Operazione:* `{side.upper()}`\n"
+            f"• *Strumento:* `{resolved_sym}`\n"
+            f"• *Parametro:* `{val_num} {unit}`\n"
+            f"Calcolo Stop Loss e Target 2R prima dell'invio a mercato...",
+            parse_mode="Markdown"
+        )
+
+        try:
+            # Recupera ultimo prezzo
+            last_p = mkt_svc.get_current_price(resolved_sym)
+            if not last_p or last_p <= 0:
+                last_p = 100.0 # fallback
+
+            # Calcolo quote se importo in $
+            if unit in ["$", "usd", "euro"]:
+                shares = max(1, int(val_num / last_p))
+            else:
+                shares = max(1, int(val_num))
+
+            # Calcola Bracket automatico (Stop 1.5%, Target 3.0% = 2R)
+            if side == "buy":
+                stop_loss = round(last_p * 0.985, 2)
+                take_profit = round(last_p * 1.03, 2)
+            else:
+                stop_loss = round(last_p * 1.015, 2)
+                take_profit = round(last_p * 0.97, 2)
+
+            # Invia ordine bracket su Alpaca
+            order_res = alpaca_service.place_bracket_order(
+                symbol=resolved_sym,
+                qty=shares,
+                side=side,
+                take_profit_price=take_profit,
+                stop_loss_price=stop_loss
+            )
+
+            if "error" in order_res:
+                await status_order_msg.edit_text(
+                    f"⚠️ *Errore rifiuto ordine da Alpaca:*\n`{order_res['error']}`\n\n"
+                    f"_Verifica che la borsa sia aperta (ore 15:30) o che l'asset sia negoziabile._",
+                    parse_mode="Markdown"
+                )
+            else:
+                order_id = order_res.get('id', 'N/D')
+                await status_order_msg.edit_text(
+                    f"✅ *ORDINE ESEGUITO SU ALPACA!* 🚀\n"
+                    f"────────────────────────\n"
+                    f"• *ID Ordine:* `{order_id[:8]}...`\n"
+                    f"• *Operazione:* `{side.upper()} x{shares} {resolved_sym}`\n"
+                    f"• *Prezzo Stimato:* `${last_p:.2f}`\n"
+                    f"• *Stop Loss Protettivo:* `${stop_loss:.2f}` (-1.5%)\n"
+                    f"• *Take Profit Automatico (2R):* `${take_profit:.2f}` (+3.0%)\n"
+                    f"• *Tipo Ordine:* `Bracket Day Order`\n\n"
+                    f"L'operazione è ora registrata e visibile sul tuo conto Alpaca Paper.",
+                    parse_mode="Markdown"
+                )
+            return
+        except Exception as oe:
+            await status_order_msg.edit_text(f"⚠️ Errore esecuzione ordine: {oe}")
+            return
+
     # Recupera memoria di breve termine (ultimi 8 scambi completi) e lungo termine (30 giorni)
     recent_history = supabase_svc.get_recent_chat_history(user_id, limit=8)
     long_term_mem = supabase_svc.get_long_term_summary(user_id)
