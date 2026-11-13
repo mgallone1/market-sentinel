@@ -49,8 +49,10 @@ from services.hurst_migliorino_cycles import HurstMigliorinoCycleService
 from services.cycle_radar import CycleRadarService
 from services.advanced_predictive_system import AdvancedPredictiveSystem
 from services.alpaca_execution_service import AlpacaExecutionService
+from services.risk_budget_manager import RiskBudgetManager
 
 alpaca_service = AlpacaExecutionService()
+risk_manager = RiskBudgetManager(max_risk_usd=100.0, min_rr=2.0)
 from services.video_downloader import VideoDownloaderService
 from services.day_trader_service import DayTraderService
 from services.ensemble_predictor import EnsemblePredictorEngine
