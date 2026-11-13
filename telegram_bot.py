@@ -1666,6 +1666,11 @@ async def _handle_text_message_core(update: Update, context: ContextTypes.DEFAUL
     # Salva il messaggio dell'utente nella memoria di breve termine
     supabase_svc.log_message(user_id, "user", raw_text)
 
+    # --- 0.0 INTERCETTAZIONE RAPIDA COMANDI CHAT SENZA SLASH ---
+    if raw_text.strip().lower() in ["alpaca", "trade", "trading", "saldo", "conto"]:
+        await alpaca_cmd(update, context)
+        return
+
     # --- 0.1 INTERCETTAZIONE ORDINI IN TEMPO REALE SU ALPACA ---
     # Riconosce ordini vocali/testuali tipo: "compra 5 azioni di NVDA", "vendi TSLA", "fai un trade su AAPL", "compra 100$ di NVDA"
     order_pattern = re.search(r'\b(compra|acquista|long|short|vendi)\s+(\d+(?:\.\d+)?)\s*(azioni|pezzi|quote|\$|euro|usd)?\s*(?:di|su)?\s*([A-Za-z0-9\.\-\/]+)', raw_text, re.IGNORECASE)
@@ -2785,52 +2790,57 @@ async def commodities_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def alpaca_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Comando per visualizzare lo stato di Alpaca Trading e gestire le posizioni."""
-    summary = alpaca_service.get_account_summary()
-    acc = summary.get("account", {})
-    clock = summary.get("clock", {})
-    positions = summary.get("positions", [])
-    
-    if "error" in acc:
-        await update.message.reply_text(f"⚠️ Errore connessione Alpaca: {acc['error']}")
-        return
+    target_msg = get_target_msg(update)
+    try:
+        summary = alpaca_service.get_account_summary()
+        acc = summary.get("account", {})
+        clock = summary.get("clock", {})
+        positions = summary.get("positions", [])
         
-    is_open = "APERTA 🟢" if clock.get("is_open") else "CHIUSA 🔴"
-    val = float(acc.get("portfolio_value", 0))
-    cash = float(acc.get("cash", 0))
-    buying_power = float(acc.get("buying_power", 0))
-    
-    msg = (
-        "⚡ *ALPACA EXECUTION & DAY TRADER*\n"
-        "────────────────────────\n"
-        f"• *Stato Borsa USA:* {is_open}\n"
-        f"• *Valore Portafoglio:* `${val:,.2f}`\n"
-        f"• *Liquidità Libera (Cash):* `${cash:,.2f}`\n"
-        f"• *Buying Power:* `${buying_power:,.2f}`\n\n"
-    )
-    
-    keyboard = []
-    if positions:
-        msg += f"📈 *POSIZIONI ATTIVE ({len(positions)}):*\n"
-        for p in positions:
-            sym = p['symbol']
-            side = p['side'].upper()
-            qty = p['qty']
-            pl = float(p['unrealized_pl'])
-            plpc = float(p['unrealized_plpc']) * 100
-            curr = float(p['current_price'])
-            sign = "🟢 +" if pl >= 0 else "🔴 "
-            msg += f"  • `{sym}` ({side} x{qty}): `${curr:.2f}` | P&L: {sign}${pl:.2f} ({plpc:+.2f}%)\n"
-        keyboard.append([InlineKeyboardButton("🚨 Chiudi Tutte le Posizioni", callback_data="alpaca_close_all")])
-    else:
-        msg += "💤 *Nessuna posizione a mercato.* Portafoglio 100% in contanti.\n"
+        if "error" in acc:
+            await send_safe_text(update, f"⚠️ Errore connessione Alpaca: {acc['error']}")
+            return
+            
+        is_open = "APERTA 🟢" if clock.get("is_open") else "CHIUSA 🔴"
+        val = float(acc.get("portfolio_value", 0))
+        cash = float(acc.get("cash", 0))
+        buying_power = float(acc.get("buying_power", 0))
         
-    keyboard.append([
-        InlineKeyboardButton("⚡ Esegui Scanner Day-Trade", callback_data="alpaca_run_scanner"),
-        InlineKeyboardButton("🔄 Aggiorna", callback_data="alpaca_refresh")
-    ])
-    
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text(msg, parse_mode="Markdown", reply_markup=reply_markup)
+        msg = (
+            "⚡ *ALPACA EXECUTION & DAY TRADER*\n"
+            "────────────────────────\n"
+            f"• *Stato Borsa USA:* {is_open}\n"
+            f"• *Valore Portafoglio:* `${val:,.2f}`\n"
+            f"• *Liquidità Libera (Cash):* `${cash:,.2f}`\n"
+            f"• *Buying Power:* `${buying_power:,.2f}`\n\n"
+        )
+        
+        keyboard = []
+        if positions:
+            msg += f"📈 *POSIZIONI ATTIVE ({len(positions)}):*\n"
+            for p in positions:
+                sym = p['symbol']
+                side = p['side'].upper()
+                qty = p['qty']
+                pl = float(p['unrealized_pl'])
+                plpc = float(p['unrealized_plpc']) * 100
+                curr = float(p['current_price'])
+                sign = "🟢 +" if pl >= 0 else "🔴 "
+                msg += f"  • `{sym}` ({side} x{qty}): `${curr:.2f}` | P&L: {sign}${pl:.2f} ({plpc:+.2f}%)\n"
+            keyboard.append([InlineKeyboardButton("🚨 Chiudi Tutte le Posizioni", callback_data="alpaca_close_all")])
+        else:
+            msg += "💤 *Nessuna posizione a mercato.* Portafoglio 100% in contanti.\n"
+            
+        keyboard.append([
+            InlineKeyboardButton("⚡ Esegui Scanner Day-Trade", callback_data="alpaca_run_scanner"),
+            InlineKeyboardButton("🔄 Aggiorna", callback_data="alpaca_refresh")
+        ])
+        
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await send_safe_text(update, msg, parse_mode="Markdown", reply_markup=reply_markup)
+    except Exception as e:
+        print(f"[!] Errore alpaca_cmd: {e}")
+        await send_safe_text(update, f"⚠️ Errore consultazione Alpaca: {str(e)}")
 
 def main():
     token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
