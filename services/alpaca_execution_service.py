@@ -100,6 +100,61 @@ class AlpacaExecutionService:
 
         return self._api_request("orders", method="POST", payload=payload)
 
+    def place_crypto_order(
+        self,
+        symbol: str,
+        qty: Optional[float] = None,
+        notional: Optional[float] = None,
+        side: str = "buy"
+    ) -> Dict[str, Any]:
+        """
+        Piazza un ordine crypto su Alpaca (mercato attivo 24/7).
+        Su Alpaca il simbolo va espresso come BTC/USD o ETH/USD.
+        Si può specificare o la quantità in coin (qty) o il controvalore in dollari (notional, es. 250$).
+        """
+        sym = symbol.upper()
+        if "/" not in sym and not sym.endswith("USD"):
+            sym = f"{sym}/USD"
+        elif not "/" in sym and sym.endswith("USD"):
+            sym = f"{sym[:-3]}/USD"
+
+        payload: Dict[str, Any] = {
+            "symbol": sym,
+            "side": side.lower(),
+            "type": "market",
+            "time_in_force": "gtc"
+        }
+        if qty is not None:
+            payload["qty"] = str(round(qty, 6))
+        elif notional is not None:
+            payload["notional"] = str(round(notional, 2))
+        else:
+            payload["notional"] = "100.0"
+
+        return self._api_request("orders", method="POST", payload=payload)
+
+    def get_crypto_latest_bars(self, symbols: Optional[List[str]] = None) -> Dict[str, Any]:
+        """Recupera le quotazioni realtime dal feed ufficiale Alpaca Crypto."""
+        symbols = symbols or ["BTC/USD", "ETH/USD", "SOL/USD"]
+        sym_param = ",".join(symbols)
+        url = f"https://data.alpaca.markets/v1beta3/crypto/us/latest/bars?symbols={sym_param}"
+        req = urllib.request.Request(
+            url,
+            headers={
+                'APCA-API-KEY-ID': self.api_key,
+                'APCA-API-SECRET-KEY': self.secret_key
+            },
+            method="GET"
+        )
+        try:
+            with urllib.request.urlopen(req) as resp:
+                content = resp.read().decode()
+                res = json.loads(content) if content else {}
+                return res.get("bars", {})
+        except Exception as e:
+            logger.error(f"Errore recupero crypto bars Alpaca: {e}")
+            return {}
+
     def close_all_positions(self) -> Dict[str, Any]:
         return self._api_request("positions", method="DELETE")
 

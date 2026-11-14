@@ -1723,9 +1723,37 @@ async def _handle_text_message_core(update: Update, context: ContextTypes.DEFAUL
             f"• *Operazione:* `{side.upper()}`\n"
             f"• *Strumento:* `{resolved_sym}`\n"
             f"• *Parametro:* `{val_num} {unit}`\n"
-            f"Calcolo Stop Loss e Target 2R prima dell'invio a mercato...",
+            f"Calcolo parametri prima dell'invio a mercato...",
             parse_mode="Markdown"
         )
+
+        # Riconoscimento speciale per Crypto (BTC, ETH, SOL...)
+        is_crypto_target = any(c in resolved_sym for c in ["BTC", "ETH", "SOL", "BITCOIN", "ETHEREUM", "SOLANA"]) or "/" in resolved_sym
+        if is_crypto_target:
+            crypto_sym = "BTC/USD" if "BTC" in resolved_sym or "BITCOIN" in resolved_sym else (
+                "ETH/USD" if "ETH" in resolved_sym or "ETHEREUM" in resolved_sym else (
+                    "SOL/USD" if "SOL" in resolved_sym or "SOLANA" in resolved_sym else f"{resolved_sym}/USD"
+                )
+            )
+            notional_amt = val_num if unit in ["$", "usd", "euro", "dollari"] else (val_num * 100.0)
+            res_crypto = alpaca_service.place_crypto_order(symbol=crypto_sym, notional=notional_amt, side=side)
+            if "error" in res_crypto:
+                await status_order_msg.edit_text(
+                    f"⚠️ *Errore ordine Crypto su Alpaca:*\n`{res_crypto['error']}`",
+                    parse_mode="Markdown"
+                )
+            else:
+                await status_order_msg.edit_text(
+                    f"✅ *ORDINE CRYPTO ESEGUITO SU ALPACA (24/7)!* 🚀\n"
+                    f"────────────────────────\n"
+                    f"• *Coppia:* `{crypto_sym}`\n"
+                    f"• *Operazione:* `{side.upper()}`\n"
+                    f"• *Importo Notionale:* `${notional_amt:.2f}`\n"
+                    f"• *Status:* `{res_crypto.get('status', 'inviato').upper()}`\n\n"
+                    f"💡 _Visualizza il saldo aggiornato con `/alpaca`._",
+                    parse_mode="Markdown"
+                )
+            return
 
         try:
             # Recupera ultimo prezzo
@@ -2461,7 +2489,7 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         is_weekend = now_rome.weekday() >= 5
         market_note = ""
         if is_weekend:
-            market_note = "\n⚠️ *Weekend: I mercati azionari tradizionali sono CHIUSI.* Riaprono lunedì alle 15:30 CET. Nessun ordine azionario o day-trade viene eseguito nel weekend.\n"
+            market_note = "\n⚠️ *Weekend: I mercati azionari sono CHIUSI, ma il mercato Crypto è ATTIVO 24/7!*\nPuoi negoziare BTC, ETH e SOL senza interruzioni.\n"
 
         val = float(acc.get("portfolio_value", 0))
         cash = float(acc.get("cash", 0))
@@ -2492,10 +2520,11 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         else:
             msg += "💤 *Nessuna posizione a mercato.* Portafoglio 100% in contanti.\n"
             
-        keyboard.append([
-            InlineKeyboardButton("⚡ Esegui Scanner Day-Trade", callback_data="alpaca_run_scanner"),
-            InlineKeyboardButton("🔄 Aggiorna", callback_data="alpaca_refresh")
-        ])
+        if is_weekend:
+            keyboard.append([InlineKeyboardButton("🪙 Crypto Trading 24/7", callback_data="cmd_crypto")])
+        else:
+            keyboard.append([InlineKeyboardButton("⚡ Esegui Scanner Day-Trade", callback_data="alpaca_run_scanner")])
+        keyboard.append([InlineKeyboardButton("🔄 Aggiorna Saldo", callback_data="alpaca_refresh")])
         await query.message.edit_text(msg, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
         return
 
@@ -2527,6 +2556,32 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
             )
         else:
             await query.message.reply_text(f"⚠️ Errore esecuzione: {res.get('error')}")
+        return
+
+    if data in ["buy_crypto_btc", "buy_crypto_eth", "buy_crypto_sol"]:
+        sym_map = {
+            "buy_crypto_btc": "BTC/USD",
+            "buy_crypto_eth": "ETH/USD",
+            "buy_crypto_sol": "SOL/USD"
+        }
+        chosen_sym = sym_map[data]
+        res = alpaca_service.place_crypto_order(symbol=chosen_sym, notional=100.0, side="buy")
+        if "error" not in res:
+            await query.message.reply_text(
+                f"✅ *ORDINE CRYPTO ESEGUITO SU ALPACA (24/7)!* 🚀\n"
+                f"• *Coppia:* `{chosen_sym}`\n"
+                f"• *Importo Notionale:* `$100.00`\n"
+                f"• *Tipo Ordine:* Market GTC (Crypto 24/7)\n"
+                f"• *Status:* `{res.get('status', 'inviato').upper()}`\n\n"
+                "💡 _Verifica la posizione aggiornata digitando `/alpaca`._",
+                parse_mode="Markdown"
+            )
+        else:
+            await query.message.reply_text(f"⚠️ Errore esecuzione crypto: {res.get('error')}")
+        return
+
+    if data == "cmd_crypto":
+        await crypto_cmd(update, context)
         return
 
     if data == "explain_cycles":
@@ -2786,6 +2841,56 @@ async def post_init(application):
     except Exception as e:
         print(f"[!] Errore configurazione scheduler in post_init: {e}")
 
+async def crypto_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Quadro e quotazioni in tempo reale delle principali Crypto negoziabili 24/7 su Alpaca."""
+    target_msg = get_target_msg(update)
+    status_msg = await target_msg.reply_text("🪙 *Interrogo il book di negoziazione Crypto 24/7 di Alpaca...*", parse_mode="Markdown")
+
+    bars = alpaca_service.get_crypto_latest_bars(["BTC/USD", "ETH/USD", "SOL/USD"])
+    eur_usd = mkt_svc.get_eur_usd_rate() or 1.08
+
+    lines = [
+        "🪙 *ALPACA CRYPTO TRADING 24/7*",
+        "────────────────────────",
+        "⚡ *Mercato sempre attivo anche nel Weekend!*",
+        "Tutti i prezzi convertiti con tasso EUR/USD live.\n"
+    ]
+
+    crypto_catalog = [
+        ("BTC/USD", "Bitcoin", "BTC"),
+        ("ETH/USD", "Ethereum", "ETH"),
+        ("SOL/USD", "Solana", "SOL")
+    ]
+
+    for pair, name, short_name in crypto_catalog:
+        bar = bars.get(pair, {})
+        price_usd = float(bar.get("c", 0.0))
+        price_eur = price_usd / eur_usd if price_usd > 0 else 0.0
+        p_usd_str = f"${price_usd:,.2f}" if price_usd > 0 else "N/D"
+        p_eur_str = f"€{price_eur:,.2f}" if price_eur > 0 else "N/D"
+        lines.append(f"• *{name}* (`{pair}`): `{p_usd_str}` (`{p_eur_str}`)")
+
+    lines.append("\n💡 *Come Operare con Ordine Diretto:*")
+    lines.append("Puoi digitare liberamente in chat:")
+    lines.append("• _\"Compra 100$ di Bitcoin su Alpaca\"_")
+    lines.append("• _\"Compra 200$ di Ethereum\"_")
+    lines.append("• _\"Vendi 50$ di Solana\"_")
+    lines.append("\nOppure seleziona un ordine rapido da $100:")
+
+    keyboard = [
+        [
+            InlineKeyboardButton("🟠 Compra $100 BTC", callback_data="buy_crypto_btc"),
+            InlineKeyboardButton("🔷 Compra $100 ETH", callback_data="buy_crypto_eth")
+        ],
+        [
+            InlineKeyboardButton("🟣 Compra $100 SOL", callback_data="buy_crypto_sol"),
+            InlineKeyboardButton("⚡ Saldo Alpaca", callback_data="alpaca_refresh")
+        ]
+    ]
+
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await status_msg.edit_text("\n".join(lines), parse_mode="Markdown", reply_markup=reply_markup)
+
 async def commodities_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Quadro e quotazioni in tempo reale di Metalli e Petrolio."""
     target_msg = get_target_msg(update)
@@ -2847,7 +2952,7 @@ async def alpaca_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         is_weekend = now_rome.weekday() >= 5
         market_note = ""
         if is_weekend:
-            market_note = "\n⚠️ *Weekend: I mercati azionari tradizionali sono CHIUSI.* Riaprono lunedì alle 15:30 CET. Nessun ordine azionario o day-trade viene eseguito nel weekend.\n"
+            market_note = "\n⚠️ *Weekend: I mercati azionari sono CHIUSI, ma il mercato Crypto è ATTIVO 24/7!*\nPuoi negoziare BTC, ETH e SOL senza interruzioni.\n"
 
         val = float(acc.get("portfolio_value", 0))
         cash = float(acc.get("cash", 0))
@@ -2879,10 +2984,11 @@ async def alpaca_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             msg += "💤 *Nessuna posizione a mercato.* Portafoglio 100% in contanti.\n"
             
-        keyboard.append([
-            InlineKeyboardButton("⚡ Esegui Scanner Day-Trade", callback_data="alpaca_run_scanner"),
-            InlineKeyboardButton("🔄 Aggiorna", callback_data="alpaca_refresh")
-        ])
+        if is_weekend:
+            keyboard.append([InlineKeyboardButton("🪙 Crypto Trading 24/7", callback_data="cmd_crypto")])
+        else:
+            keyboard.append([InlineKeyboardButton("⚡ Esegui Scanner Day-Trade", callback_data="alpaca_run_scanner")])
+        keyboard.append([InlineKeyboardButton("🔄 Aggiorna Saldo", callback_data="alpaca_refresh")])
         
         reply_markup = InlineKeyboardMarkup(keyboard)
         await send_safe_text(update, msg, parse_mode="Markdown", reply_markup=reply_markup)
@@ -2917,6 +3023,11 @@ def main():
     app.add_handler(CommandHandler("portafoglio", portfolio_cmd))
     app.add_handler(CommandHandler("alpaca", alpaca_cmd))
     app.add_handler(CommandHandler("trade", alpaca_cmd))
+    app.add_handler(CommandHandler("crypto", crypto_cmd))
+    app.add_handler(CommandHandler("bitcoin", crypto_cmd))
+    app.add_handler(CommandHandler("btc", crypto_cmd))
+    app.add_handler(CommandHandler("eth", crypto_cmd))
+    app.add_handler(CommandHandler("sol", crypto_cmd))
     app.add_handler(CommandHandler("materieprime", commodities_cmd))
     app.add_handler(CommandHandler("commodities", commodities_cmd))
     app.add_handler(CommandHandler("oro", commodities_cmd))
