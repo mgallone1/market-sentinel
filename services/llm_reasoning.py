@@ -1108,24 +1108,35 @@ LINEE GUIDA RIGOROSE:
 
         now_dt = datetime.now(ZoneInfo("Europe/Rome"))
         cur_hhmm = now_dt.strftime("%H:%M")
-        if slot == "morning":
+        is_weekend = now_dt.weekday() >= 5  # 5 = Sabato, 6 = Domenica
+        day_name = "Sabato" if now_dt.weekday() == 5 else ("Domenica" if now_dt.weekday() == 6 else now_dt.strftime("%A"))
+
+        if is_weekend:
             time_focus = (
-                f"FASCIA ORARIA: MATTINO (ORE {cur_hhmm} CET). "
+                f"FASCIA ORARIA: FINE SETTIMANA ({day_name.upper()} ORE {cur_hhmm} CET) - MERCATI AZIONARI TRADIZIONALI CHIUSI.\n"
+                "I mercati azionari (Wall Street, Milano, Francoforte, Tokyo) sono RIGOROSAMENTE CHIUSI per il fine settimana e riapriranno lunedì.\n"
+                "DIVIETO ASSOLUTO di parlare di 'apertura borse', 'pre-market USA', 'chiusura di seduta' o 'seduta attiva' come se le borse fossero aperte oggi.\n"
+                "FOCUS OBBLIGATORIO: Bilancio settimanale complessivo appena concluso, dinamiche del fine settimana su Crypto (mercato 24/7 con Bitcoin/Ethereum), "
+                "eventi geopolitici, catalizzatori macro in vista per la riapertura di lunedì e strategia/riflessione di portafoglio a mercati fermi."
+            )
+        elif slot == "morning":
+            time_focus = (
+                f"FASCIA ORARIA: MATTINO FERIALE (ORE {cur_hhmm} CET). "
                 "Sintesi ragionata e densa delle ultime 12 ore: chiusura sessione asiatica, overnight USA, futures europei e catalizzatori in apertura borse europee (ore 09:00 CET)."
             )
         elif slot == "afternoon":
             time_focus = (
-                f"FASCIA ORARIA: POMERIGGIO (ORE {cur_hhmm} CET). "
+                f"FASCIA ORARIA: POMERIGGIO FERIALE (ORE {cur_hhmm} CET). "
                 "Sintesi delle contrattazioni europee a metà seduta, dati macro USA (ore 14:30) e sessione attiva di Wall Street."
             )
         elif slot == "evening":
             time_focus = (
-                f"FASCIA ORARIA: SERA / CHIUSURA MERCATI (ORE {cur_hhmm} CET). "
+                f"FASCIA ORARIA: SERA FERIALE / CHIUSURA MERCATI (ORE {cur_hhmm} CET). "
                 "Borse europee CHIUSE (alle 17:30 CET). Focus su: andamento e chiusura di Wall Street (ore 22:00 CET), bilancio giornaliero definitivo, flussi crypto e prospettive per la seduta successiva."
             )
         else:
             time_focus = (
-                f"FASCIA ORARIA: NOTTE / OVERNIGHT (ORE {cur_hhmm} CET). "
+                f"FASCIA ORARIA: NOTTE / OVERNIGHT FERIALE (ORE {cur_hhmm} CET). "
                 "Mercati azionari occidentali chiusi. Focus su: bilancio finale di Wall Street, futures notturni, crypto 24/7 e prime indicazioni dall'Asia."
             )
 

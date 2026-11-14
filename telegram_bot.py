@@ -372,6 +372,7 @@ async def fetch_macro_market_context():
 async def build_macro_briefing(slot: str = "auto") -> str:
     """
     Costruisce il briefing macro e geopolitico in tempo reale:
+    - Riconosce weekend (Sabato/Domenica): borse tradizionali CHIUSE, focus su bilancio, macro & crypto 24/7.
     - Calcola la sessione di mercato in base all'ora esatta di Roma:
       * morning: 06:00-11:59 (apertura Europa & Asia overnight)
       * afternoon: 12:00-17:29 (metà seduta UE & sessione USA)
@@ -384,32 +385,39 @@ async def build_macro_briefing(slot: str = "auto") -> str:
     h = now_rome.hour
     m = now_rome.minute
     cur_time = now_rome.strftime("%H:%M")
+    is_weekend = now_rome.weekday() >= 5
+    day_name = "Sabato" if now_rome.weekday() == 5 else ("Domenica" if now_rome.weekday() == 6 else "")
 
-    if slot == "auto":
-        if 6 <= h < 12:
-            slot = "morning"
-        elif 12 <= h < 17 or (h == 17 and m < 30):
-            slot = "afternoon"
-        elif (h == 17 and m >= 30) or (18 <= h <= 22):
-            slot = "evening"
-        else:
-            slot = "night"
-
-    if slot == "morning":
-        title_header = f"🌅 *BRIEFING MATTINO (ORE {cur_time} CET) - APERTURA BORSE EUROPEE*"
-    elif slot == "afternoon":
-        title_header = f"☕ *BRIEFING POMERIGGIO (ORE {cur_time} CET) - SESSIONE USA & MACRO*"
-    elif slot == "evening":
-        title_header = f"🌙 *BRIEFING SERALE (ORE {cur_time} CET) - CHIUSURA WALL STREET & BILANCIO*"
+    if is_weekend:
+        slot = "weekend"
+        title_header = f"☕ *BRIEFING WEEKEND ({day_name.upper()} ORE {cur_time} CET) - MERCATI CHIUSI & SINTESI*"
     else:
-        title_header = f"🌌 *BRIEFING NOTTURNO (ORE {cur_time} CET) - OVERNIGHT & MERCATI GLOBALI*"
+        if slot == "auto":
+            if 6 <= h < 12:
+                slot = "morning"
+            elif 12 <= h < 17 or (h == 17 and m < 30):
+                slot = "afternoon"
+            elif (h == 17 and m >= 30) or (18 <= h <= 22):
+                slot = "evening"
+            else:
+                slot = "night"
+
+        if slot == "morning":
+            title_header = f"🌅 *BRIEFING MATTINO (ORE {cur_time} CET) - APERTURA BORSE EUROPEE*"
+        elif slot == "afternoon":
+            title_header = f"☕ *BRIEFING POMERIGGIO (ORE {cur_time} CET) - SESSIONE USA & MACRO*"
+        elif slot == "evening":
+            title_header = f"🌙 *BRIEFING SERALE (ORE {cur_time} CET) - CHIUSURA WALL STREET & BILANCIO*"
+        else:
+            title_header = f"🌌 *BRIEFING NOTTURNO (ORE {cur_time} CET) - OVERNIGHT & MERCATI GLOBALI*"
 
     indices_summary, global_news, eur_rate = await fetch_macro_market_context()
 
+    status_tag = " (Mercati Chiusi nel Weekend)" if is_weekend else ""
     header_lines = [
         title_header + "\n",
         f"💶 *Tasso di Cambio EUR/USD:* `1.00 € = {eur_rate:.4f} $`\n",
-        "📊 *Indici & Asset Chiave (in Euro):*"
+        f"📊 *Indici & Asset Chiave (in Euro){status_tag}:*"
     ]
     for item in indices_summary:
         icon = "🟢" if item["change"] >= 0 else "🔴"
@@ -426,7 +434,13 @@ async def build_macro_briefing(slot: str = "auto") -> str:
         previous_briefing_context=prev_briefing
     )
     if not macro_comment:
-        if slot == "morning":
+        if is_weekend:
+            macro_comment = (
+                f"I mercati azionari tradizionali sono chiusi per il fine settimana ({day_name}). "
+                "La settimana si è chiusa con un bilancio guidato dai dati sull'inflazione e dai rendimenti obbligazionari. "
+                "Il mercato Crypto prosegue gli scambi 24/7 mentre gli investitori monitorano le tensioni geopolitiche in vista della riapertura di lunedì."
+            )
+        elif slot == "morning":
             macro_comment = (
                 "Sessione asiatica mista con futures europei cauti. L'overnight di Wall Street riflette un riposizionamento "
                 "in attesa dei catalizzatori macroeconomici e delle decisioni sui tassi. Focus sui titoli tech ed energia."
@@ -509,8 +523,13 @@ async def briefing_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         h = now_rome.hour
         m = now_rome.minute
         cur_time = now_rome.strftime("%H:%M")
+        is_weekend = now_rome.weekday() >= 5
+        day_name = "Sabato" if now_rome.weekday() == 5 else ("Domenica" if now_rome.weekday() == 6 else "")
 
-        if 6 <= h < 12:
+        if is_weekend:
+            slot = "weekend"
+            slot_label = f"del weekend ({day_name} ore {cur_time} CET - Borse chiuse)"
+        elif 6 <= h < 12:
             slot = "morning"
             slot_label = f"del mattino (ore {cur_time} CET)"
         elif 12 <= h < 17 or (h == 17 and m < 30):
@@ -2438,6 +2457,12 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         clock = summary.get("clock", {})
         positions = summary.get("positions", [])
         is_open = "APERTA 🟢" if clock.get("is_open") else "CHIUSA 🔴"
+        now_rome = datetime.now(ZoneInfo("Europe/Rome"))
+        is_weekend = now_rome.weekday() >= 5
+        market_note = ""
+        if is_weekend:
+            market_note = "\n⚠️ *Weekend: I mercati azionari tradizionali sono CHIUSI.* Riaprono lunedì alle 15:30 CET. Nessun ordine azionario o day-trade viene eseguito nel weekend.\n"
+
         val = float(acc.get("portfolio_value", 0))
         cash = float(acc.get("cash", 0))
         buying_power = float(acc.get("buying_power", 0))
@@ -2448,7 +2473,8 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
             f"• *Stato Borsa USA:* {is_open}\n"
             f"• *Valore Portafoglio:* `${val:,.2f}`\n"
             f"• *Liquidità Libera (Cash):* `${cash:,.2f}`\n"
-            f"• *Buying Power:* `${buying_power:,.2f}`\n\n"
+            f"• *Buying Power:* `${buying_power:,.2f}`\n"
+            f"{market_note}\n"
         )
         keyboard = []
         if positions:
@@ -2615,14 +2641,27 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
 
 _last_briefing_sent: Dict[str, float] = {}
 
-# Funzione per inviare briefing automatici programmati (07:00 e 15:00 CET)
+# Funzione per inviare briefing automatici programmati (07:00 e 15:00 CET nei feriali, 09:30 nei weekend)
 async def send_scheduled_briefing(app, slot: str, force: bool = False):
     """
     Eroga il briefing programmato a tutti gli utenti attivi:
-    - slot='morning' alle 07:00 CET (sintesi ultime 12 ore)
-    - slot='afternoon' alle 15:00 CET (sintesi ultime ore e pre-apertura USA)
+    - Nei giorni feriali (lun-ven):
+      * slot='morning' alle 07:00 CET (sintesi ultime 12 ore e pre-Europa)
+      * slot='afternoon' alle 15:00 CET (sintesi pre-apertura USA)
+      * slot='evening' alle 21:30 CET (chiusura Wall Street & bilancio)
+    - Nel weekend (sabato e domenica):
+      * Supprime i briefing infrasettimanali 'afternoon' (15:00) e 'evening' (21:30) per evitare messaggi inutili a mercati chiusi.
+      * Eroga una singola edizione Weekend Macro & Crypto alle 09:30 CET con bilancio e catalyst.
     - Deduplicazione automatica entro 40 minuti per evitare doppi invii.
     """
+    now_rome = datetime.now(ZoneInfo("Europe/Rome"))
+    is_weekend = now_rome.weekday() >= 5
+
+    # Nel weekend non mandiamo gli aggiornamenti 'afternoon' (15:00) o 'evening' (21:30) delle borse aperte
+    if is_weekend and slot in ["afternoon", "evening"] and not force:
+        print(f"⏸️ [Scheduler] Weekend attivo ({now_rome.strftime('%A')}): briefing '{slot}' soppresso poiché i mercati azionari sono chiusi.")
+        return
+
     import time
     now_ts = time.time()
     last_sent = _last_briefing_sent.get(slot, 0)
@@ -2631,7 +2670,7 @@ async def send_scheduled_briefing(app, slot: str, force: bool = False):
         return
     _last_briefing_sent[slot] = now_ts
 
-    print(f"⏰ [Scheduler] Esecuzione briefing programmato: slot={slot} (force={force})...")
+    print(f"⏰ [Scheduler] Esecuzione briefing programmato: slot={slot} (weekend={is_weekend}, force={force})...")
     try:
         briefing_text = await build_macro_briefing(slot=slot)
         chat_ids = supabase_svc.get_active_chat_ids()
@@ -2804,6 +2843,12 @@ async def alpaca_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
             
         is_open = "APERTA 🟢" if clock.get("is_open") else "CHIUSA 🔴"
+        now_rome = datetime.now(ZoneInfo("Europe/Rome"))
+        is_weekend = now_rome.weekday() >= 5
+        market_note = ""
+        if is_weekend:
+            market_note = "\n⚠️ *Weekend: I mercati azionari tradizionali sono CHIUSI.* Riaprono lunedì alle 15:30 CET. Nessun ordine azionario o day-trade viene eseguito nel weekend.\n"
+
         val = float(acc.get("portfolio_value", 0))
         cash = float(acc.get("cash", 0))
         buying_power = float(acc.get("buying_power", 0))
@@ -2814,7 +2859,8 @@ async def alpaca_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"• *Stato Borsa USA:* {is_open}\n"
             f"• *Valore Portafoglio:* `${val:,.2f}`\n"
             f"• *Liquidità Libera (Cash):* `${cash:,.2f}`\n"
-            f"• *Buying Power:* `${buying_power:,.2f}`\n\n"
+            f"• *Buying Power:* `${buying_power:,.2f}`\n"
+            f"{market_note}\n"
         )
         
         keyboard = []
