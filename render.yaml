@@ -4,8 +4,8 @@ services:
     env: python
     region: frankfurt
     plan: free
-    buildCommand: pip install -r requirements.txt
-    startCommand: python -u web_webhook.py
+    buildCommand: echo "Render deprecated"
+    startCommand: python -c "import time, http.server; server = http.server.HTTPServer(('0.0.0.0', 8080), http.server.SimpleHTTPRequestHandler); server.serve_forever()"
     envVars:
       - key: PYTHONUNBUFFERED
         value: "1"
