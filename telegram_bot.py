@@ -2831,12 +2831,12 @@ async def post_init(application):
             id="evening_briefing_2130",
             replace_existing=True
         )
-        # Watchdog proattivo ogni 20 minuti
+        # Watchdog proattivo della Sentinella ogni 10 minuti (per massima reattività)
         scheduler.add_job(
             sentinel_watchdog_job,
-            CronTrigger(minute="*/20", timezone="Europe/Rome"),
+            CronTrigger(minute="*/10", timezone="Europe/Rome"),
             args=[application],
-            id="sentinel_watchdog_20min",
+            id="sentinel_watchdog_10min",
             replace_existing=True
         )
         scheduler.start()

@@ -47,7 +47,7 @@ class ProactiveSentinelService:
         # Tracciamento giornaliero alert
         self.today_date_str = ""
         self.alerts_sent_today = 0
-        self.max_alerts_per_day = 5  # Fino a 5 alert giornalieri per massima tempestività
+        self.max_alerts_per_day = 12  # Fino a 12 alert giornalieri per garantire che nessuna disclosure politica o shock venga bloccato
 
         # Ultimo doc_id Pelosi e Trump notificato
         self.last_pelosi_doc_id: Optional[str] = None
@@ -71,9 +71,9 @@ class ProactiveSentinelService:
             logger.warning(f"Inizializzazione Trump doc_id: {e}")
 
     def _is_active_hours(self) -> bool:
-        """Verifica se l'orario attuale è compreso nella finestra attiva (08:00 - 22:00 CET)."""
+        """Finestra attiva sentinella (07:00 - 23:00 CET per coprire disclosure serali USA)."""
         now = datetime.now(ROME_TZ)
-        return 8 <= now.hour < 22
+        return 7 <= now.hour < 23
 
     def is_weekend(self) -> bool:
         """Verifica se oggi è sabato o domenica a Roma."""
