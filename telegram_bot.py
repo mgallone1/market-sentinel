@@ -727,15 +727,19 @@ async def pelosi_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
             current_long_term = supabase_svc.get_long_term_summary(user_id)
 
             filings = day_trader_svc.get_congress_trades(member="pelosi", max_reports=3)
+            trump_filings = day_trader_svc.get_trump_disclosures(max_reports=3)
 
-            if not filings:
-                await send_safe_text(update, "Non sono riuscito a reperire i disclosure recenti del Congresso in questo momento. Riprova più tardi.")
+            # Combina i disclosure di Capitol Hill con i Form 4 SEC di Trump & Family
+            all_political_filings = filings + trump_filings
+
+            if not all_political_filings:
+                await send_safe_text(update, "Non sono riuscito a reperire i disclosure recenti in questo momento. Riprova più tardi.")
                 return
 
-            user_query = "Quali sono gli ultimi disclosure e trade ufficiali depositati da Nancy Pelosi e membri del Congresso USA?"
+            user_query = "Quali sono gli ultimi disclosure e trade ufficiali depositati da Nancy Pelosi, Donald Trump & famiglia e membri chiave del Congresso USA?"
             explanation = llm_svc.explain_congress_trades(
                 user_query=user_query,
-                filings=filings,
+                filings=all_political_filings,
                 user_profile=user_profile,
                 memory_context=current_long_term
             )
@@ -2787,7 +2791,7 @@ async def post_init(application):
         BotCommand("previsione", "🔮 Previsione ensemble (Monte Carlo, Hurst & Z-Score)"),
         BotCommand("sentinel", "🛡️ Stato radar sentinella proattiva 24/7"),
         BotCommand("scanner", "⚡ Day trader chart scanner (breakout & ipervenduto)"),
-        BotCommand("pelosi", "🏛️ Congressional trades & Pelosi tracker"),
+        BotCommand("pelosi", "🏛️ Trades Capitol Hill & Donald Trump Network"),
         BotCommand("profilo", "👤 Profilo investitore, PAC e orizzonte temporale"),
         BotCommand("briefing", "🌅 Quadro di mercato, Wall Street ed Europa"),
         BotCommand("occasioni", "💎 Top 10 occasioni a sconto con tesi del CIO"),
@@ -3011,6 +3015,8 @@ def main():
     app.add_handler(CommandHandler("briefing", briefing_cmd))
     app.add_handler(CommandHandler("occasioni", occasioni_cmd))
     app.add_handler(CommandHandler("pelosi", pelosi_cmd))
+    app.add_handler(CommandHandler("trump", pelosi_cmd))
+    app.add_handler(CommandHandler("djt", pelosi_cmd))
     app.add_handler(CommandHandler("congresso", pelosi_cmd))
     app.add_handler(CommandHandler("scanner", scanner_cmd))
     app.add_handler(CommandHandler("daytrade", scanner_cmd))

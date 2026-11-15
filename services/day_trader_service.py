@@ -10,6 +10,8 @@ Integrates the modular Day Trader Skill suite (from Jakeschincariol/day-trader-s
 import os
 import sys
 import json
+import urllib.request
+import urllib.error
 import logging
 import subprocess
 import tempfile
@@ -35,6 +37,7 @@ class DayTraderService:
         Fetches the latest Periodic Transaction Reports (PTRs) filed by a member of Congress
         (default: Nancy Pelosi) and parses the underlying transactions.
         """
+        members = [m.strip() for m in member.split(",") if m.strip()] if "," in member else [member]
         results = []
         try:
             if not os.path.exists(self.pelosi_script):
@@ -49,12 +52,12 @@ class DayTraderService:
             import datetime as _dt
             current_year = _dt.date.today().year
             filings = ptr_mod.load_index(current_year)
-            selected = ptr_mod.select(filings, members=[member])
+            selected = ptr_mod.select(filings, members=members)
 
             if not selected and current_year > 2025:
                 # Fallback to previous year if early in the year
                 filings_prev = ptr_mod.load_index(current_year - 1)
-                selected = ptr_mod.select(filings_prev, members=[member])
+                selected = ptr_mod.select(filings_prev, members=members)
 
             for filing in selected[:max_reports]:
                 doc_id = filing.get("doc_id")
@@ -114,6 +117,46 @@ class DayTraderService:
         except Exception as e:
             logger.error(f"Error fetching congress trades: {e}", exc_info=True)
 
+        return results
+
+    def get_trump_disclosures(self, max_reports: int = 4) -> List[Dict[str, Any]]:
+        """
+        Monitora le disclosure ufficiali, i Form 4 SEC EDGAR e le operazioni insider
+        relative a Donald Trump, alla sua famiglia e a Trump Media & Technology Group (DJT).
+        """
+        results = []
+        try:
+            headers = {"User-Agent": "MarketSentinel bot@sentinel.com"}
+            url = "https://data.sec.gov/submissions/CIK0001849635.json"  # DJT CIK
+            req = urllib.request.Request(url, headers=headers)
+            with urllib.request.urlopen(req, timeout=12) as resp:
+                data = json.loads(resp.read().decode())
+                recent = data.get("filings", {}).get("recent", {})
+                forms = recent.get("form", [])
+                dates = recent.get("filingDate", [])
+                accessions = recent.get("accessionNumber", [])
+                docs = recent.get("primaryDocument", [])
+                descriptions = recent.get("primaryDocDescription", [])
+
+                for i in range(min(max_reports, len(forms))):
+                    form = forms[i]
+                    date_str = dates[i]
+                    acc = accessions[i]
+                    acc_clean = acc.replace("-", "")
+                    doc = docs[i]
+                    desc = descriptions[i] if i < len(descriptions) else ""
+                    doc_url = f"https://www.sec.gov/Archives/edgar/data/1849635/{acc_clean}/{doc}"
+
+                    results.append({
+                        "doc_id": f"DJT-{acc}",
+                        "entity": "Donald J. Trump / Trump Media Group (DJT)",
+                        "form": form,
+                        "filed": date_str,
+                        "description": desc or f"Filing SEC {form}",
+                        "url": doc_url
+                    })
+        except Exception as e:
+            logger.warning(f"Errore recupero Trump disclosures da SEC: {e}")
         return results
 
     def scan_market_setups(self, symbols: Optional[List[str]] = None) -> Dict[str, Any]:

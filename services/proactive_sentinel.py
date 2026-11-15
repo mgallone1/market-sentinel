@@ -14,6 +14,8 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 from typing import Dict, Any, List, Set, Optional
 
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+
 from services.market_data import MarketDataService
 from services.supabase_service import SupabaseService
 from services.ensemble_predictor import EnsemblePredictorEngine
@@ -47,12 +49,13 @@ class ProactiveSentinelService:
         self.alerts_sent_today = 0
         self.max_alerts_per_day = 5  # Fino a 5 alert giornalieri per massima tempestività
 
-        # Ultimo doc_id Pelosi notificato
+        # Ultimo doc_id Pelosi e Trump notificato
         self.last_pelosi_doc_id: Optional[str] = None
-        self._init_last_pelosi()
+        self.last_trump_doc_id: Optional[str] = None
+        self._init_last_political_disclosures()
 
-    def _init_last_pelosi(self):
-        """Memorizza il doc_id iniziale per non inviare alert su vecchi report già noti."""
+    def _init_last_political_disclosures(self):
+        """Memorizza i doc_id iniziali per non inviare alert su vecchi report già noti."""
         try:
             reports = self.day_trader_svc.get_congress_trades(member="pelosi", max_reports=1)
             if reports:
@@ -60,10 +63,21 @@ class ProactiveSentinelService:
         except Exception as e:
             logger.warning(f"Inizializzazione Pelosi doc_id: {e}")
 
+        try:
+            trump_reports = self.day_trader_svc.get_trump_disclosures(max_reports=1)
+            if trump_reports:
+                self.last_trump_doc_id = trump_reports[0].get("doc_id")
+        except Exception as e:
+            logger.warning(f"Inizializzazione Trump doc_id: {e}")
+
     def _is_active_hours(self) -> bool:
         """Verifica se l'orario attuale è compreso nella finestra attiva (08:00 - 22:00 CET)."""
         now = datetime.now(ROME_TZ)
         return 8 <= now.hour < 22
+
+    def is_weekend(self) -> bool:
+        """Verifica se oggi è sabato o domenica a Roma."""
+        return datetime.now(ROME_TZ).weekday() >= 5
 
     def _reset_daily_counter_if_needed(self):
         today_str = datetime.now(ROME_TZ).strftime("%Y-%m-%d")
@@ -131,6 +145,33 @@ class ProactiveSentinelService:
             logger.warning(f"[Sentinel] Errore verifica Congress trades: {e}")
 
         # ---------------------------------------------------------
+        # 1B. VERIFICA DISCLOSURE & FORMS DONALD TRUMP & FAMIGLIA (DJT / SEC)
+        # ---------------------------------------------------------
+        try:
+            trump_reports = self.day_trader_svc.get_trump_disclosures(max_reports=1)
+            if trump_reports:
+                top_tr = trump_reports[0]
+                t_doc_id = top_tr.get("doc_id")
+                if t_doc_id and self.last_trump_doc_id and t_doc_id != self.last_trump_doc_id:
+                    self.last_trump_doc_id = t_doc_id
+                    t_msg = (
+                        "🏛️ *RADAR INSIDER: TRUMP & TRUMP FAMILY NETWORK*\n\n"
+                        f"È stato appena registrato un nuovo filing ufficiale da parte del network di **Donald J. Trump / DJT**:\n"
+                        f"• *Modulo:* `{top_tr.get('form', 'SEC')}`\n"
+                        f"• *Oggetto:* {top_tr.get('description')}\n"
+                        f"• *Data Deposito:* {top_tr.get('filed', 'recente')}\n"
+                        f"• *Documento Ufficiale SEC:* [Visualizza Filing EDGAR]({top_tr.get('url')})\n\n"
+                        "💡 *Nota del CIO:* Le movimentazioni e i filing legati a Trump Media generano frequenti ondate di volatilità sistemica e flussi di speculazione. Scrivimi `/pelosi` o `DJT` per esaminare l'impatto."
+                    )
+                    await self._broadcast_alert(app, chat_ids, t_msg)
+                    self.alerts_sent_today += 1
+                    return "trump_disclosure_alert_dispatched"
+                elif not self.last_trump_doc_id and t_doc_id:
+                    self.last_trump_doc_id = t_doc_id
+        except Exception as e_tr:
+            logger.warning(f"[Sentinel] Errore verifica Trump disclosures: {e_tr}")
+
+        # ---------------------------------------------------------
         # 2. VERIFICA SHOCK GEOPOLITICI & MACRO-SISTEMICI
         # ---------------------------------------------------------
         if (now_ts - self.last_geopolitical_ts) > self.geopolitical_cooldown_seconds:
@@ -166,7 +207,9 @@ class ProactiveSentinelService:
         # ---------------------------------------------------------
         # 3. VERIFICA PORTAFOGLIO REALE DI MICHELE (Soglie Anticipate)
         # ---------------------------------------------------------
-        # Se il portafoglio su Supabase è vuoto, usa i titoli core di default
+        # Nel weekend, i mercati azionari tradizionali sono chiusi. Scansioniamo SOLO le Crypto (24/7).
+        weekend_mode = self.is_weekend()
+
         portfolio_items = user_portfolio if user_portfolio else [
             {"ticker": "XDWD.DE", "name": "MSCI World Core", "asset_type": "etf"},
             {"ticker": "XDEM.DE", "name": "MSCI World Momentum", "asset_type": "etf"},
@@ -178,6 +221,13 @@ class ProactiveSentinelService:
         for item in portfolio_items:
             ticker = item.get("ticker")
             if not ticker:
+                continue
+
+            raw_type = (item.get("asset_type") or "").lower()
+            is_crypto = "crypto" in raw_type or any(c in ticker.upper() for c in ["BTC", "ADA", "ETH", "XRP", "SOL", "LINK", "DOGE"])
+
+            # Se è weekend e NON è una crypto, saltiamo per evitare falsi allarmi a borse chiuse
+            if weekend_mode and not is_crypto:
                 continue
 
             # Cooldown per asset
@@ -194,9 +244,7 @@ class ProactiveSentinelService:
                     continue
 
                 # Calibrazione soglie anticipate per asset class
-                raw_type = (item.get("asset_type") or "").lower()
                 is_etf = "etf" in raw_type or ticker in ["XDWD.DE", "XDEM.DE", "SWDA.MI", "CSSPX.MI", "SXR8.DE", "VWCE.DE"]
-                is_crypto = "crypto" in raw_type or "BTC" in ticker or "ADA" in ticker or "ETH" in ticker
 
                 if is_etf:
                     threshold = 1.2  # Soglia reattiva ETF: 1.2%
@@ -243,7 +291,17 @@ class ProactiveSentinelService:
                             f"Scrivimi *'{ticker}'* per consultare la perizia completa."
                         )
 
-                    await self._broadcast_alert(app, chat_ids, alert_msg)
+                    keyboard = [
+                        [
+                            InlineKeyboardButton("💎 Simula Piano Ingresso", callback_data=f"sim_{ticker}"),
+                            InlineKeyboardButton("🔄 Cicli & Elliott", callback_data=f"quant_{ticker}")
+                        ],
+                        [
+                            InlineKeyboardButton("⚡ Saldo Alpaca", callback_data="alpaca_refresh")
+                        ]
+                    ]
+                    markup = InlineKeyboardMarkup(keyboard)
+                    await self._broadcast_alert(app, chat_ids, alert_msg, reply_markup=markup)
                     self.ticker_cooldowns[ticker] = now_ts
                     self.alerts_sent_today += 1
                     logger.info(f"[Sentinel] Alert portafoglio inviato per {ticker} ({change_pct:+.2f}%)!")
@@ -255,6 +313,10 @@ class ProactiveSentinelService:
         # ---------------------------------------------------------
         # 4. VERIFICA GRANDI ASSET MONDIALI (Mega-Cap & Macro Barometers)
         # ---------------------------------------------------------
+        # Nel weekend, le borse azionarie tradizionali e i benchmark sono chiusi: saltiamo per evitare falsi allarmi
+        if weekend_mode:
+            logger.info("[Sentinel] Modalità Weekend attiva: controllo grandi asset azionari tradizionali sospeso.")
+            return "weekend_crypto_only"
         # Solo i Grandi della Terra, Zero Spazzatura
         major_assets = [
             # Mega-Cap Tech & AI Leaders
@@ -328,7 +390,17 @@ class ProactiveSentinelService:
                             f"Scrivimi *'{ticker}'* per esaminare la correlazione e i livelli tecnici."
                         )
 
-                    await self._broadcast_alert(app, chat_ids, alert_msg)
+                    keyboard = [
+                        [
+                            InlineKeyboardButton("💎 Simula Piano Ingresso", callback_data=f"sim_{ticker}"),
+                            InlineKeyboardButton("🔄 Cicli & Elliott", callback_data=f"quant_{ticker}")
+                        ],
+                        [
+                            InlineKeyboardButton("⚡ Saldo Alpaca", callback_data="alpaca_refresh")
+                        ]
+                    ]
+                    markup = InlineKeyboardMarkup(keyboard)
+                    await self._broadcast_alert(app, chat_ids, alert_msg, reply_markup=markup)
                     self.ticker_cooldowns[ticker] = now_ts
                     self.alerts_sent_today += 1
                     logger.info(f"[Sentinel] Alert grande asset inviato per {ticker} ({change_pct:+.2f}%)!")
@@ -339,12 +411,12 @@ class ProactiveSentinelService:
 
         return "no_triggers"
 
-    async def _broadcast_alert(self, app, chat_ids: Set[int], message_text: str):
+    async def _broadcast_alert(self, app, chat_ids: Set[int], message_text: str, reply_markup=None):
         """Invia in modo sicuro il messaggio formattato a tutti gli utenti attivi con fallback testuale e salvataggio DB."""
         cleaned_text = clean_telegram_markdown(message_text)
         for chat_id in chat_ids:
             try:
-                await app.bot.send_message(chat_id=chat_id, text=cleaned_text, parse_mode="Markdown")
+                await app.bot.send_message(chat_id=chat_id, text=cleaned_text, parse_mode="Markdown", reply_markup=reply_markup)
                 try:
                     self.supabase_svc.log_message(chat_id, "assistant", cleaned_text)
                 except Exception:
@@ -352,7 +424,7 @@ class ProactiveSentinelService:
             except Exception as e:
                 logger.warning(f"[Sentinel] Errore invio alert formattato a {chat_id} ({e}): fallback plain text")
                 try:
-                    await app.bot.send_message(chat_id=chat_id, text=message_text)
+                    await app.bot.send_message(chat_id=chat_id, text=message_text, reply_markup=reply_markup)
                     try:
                         self.supabase_svc.log_message(chat_id, "assistant", message_text)
                     except Exception:
@@ -403,8 +475,8 @@ class ProactiveSentinelService:
                     "rule": "Scansione continua wire terminal (FinancialJuice) & breaking news su guerre, dazi, tassi e banche"
                 },
                 {
-                    "name": "🏛️ Capitol Hill Disclosure Tracker",
-                    "rule": "Intercettazione tempestiva report STOCK Act (Hon. Nancy Pelosi & Congresso USA)"
+                    "name": "🏛️ Capitol Hill & Trump Disclosure Tracker",
+                    "rule": "Intercettazione tempestiva report STOCK Act (Hon. Nancy Pelosi, Congresso USA) e Form 4 SEC EDGAR (Donald J. Trump & DJT Network)"
                 }
             ]
         }
