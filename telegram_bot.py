@@ -1035,33 +1035,43 @@ async def simula_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     async with get_user_lock(user_id):
         args = context.args or []
-        if len(args) < 2:
+        if len(args) < 1:
             await msg_target.reply_text(
-                "Uso corretto del simulatore: `/simula <TICKER> <BUDGET_IN_EURO>`\n\n"
-                "Esempio:\n"
-                "`/simula TSM 500` (Simula 500€ su TSMC)\n"
-                "`/simula NVDA 1000` (Simula 1.000€ su NVIDIA)",
+                "Uso corretto del simulatore: `/simula <TICKER> [BUDGET_IN_EURO]`\n\n"
+                "Esempi:\n"
+                "• `/simula NVDA` (Calcola automaticamente su base 1 quota o PAC)\n"
+                "• `/simula TSM 500` (Simula 500€ su TSMC)\n"
+                "• `/simula NVDA 1000` (Simula 1.000€ su NVIDIA)",
                 parse_mode="Markdown"
             )
             return
 
         raw_ticker = args[0].upper()
         ticker = resolve_ticker(raw_ticker) or raw_ticker
-        try:
-            budget = float(args[1].replace("€", "").replace(",", "."))
-        except ValueError:
-            await msg_target.reply_text("Inserisci un budget numerico valido in Euro.")
-            return
+        
+        budget = 0.0
+        if len(args) >= 2:
+            try:
+                budget = float(args[1].replace("€", "").replace(",", "."))
+            except ValueError:
+                await msg_target.reply_text("Inserisci un budget numerico valido in Euro.")
+                return
+        else:
+            # Nessun budget passato da riga di comando: controlla il profilo utente
+            profile = supabase_svc.get_user_profile(user_id) or {}
+            budget = float(profile.get("monthly_pac_eur", 0.0) or 0.0)
 
-        await msg_target.reply_text(f"🧮 Calcolo il piano di acquisto per *{ticker}* con budget di *{budget:.2f} €*...", parse_mode="Markdown")
+        calc_note = f" con budget di *{budget:.2f} €*" if budget > 0 else " con dimensionamento automatico"
+        await msg_target.reply_text(f"🧮 Calcolo il piano di acquisto per *{ticker}*{calc_note}...", parse_mode="Markdown")
         sim = OrderSimulatorService.simulate_order(ticker, budget)
         if "error" in sim:
             await msg_target.reply_text(f"Errore nella simulazione: {sim['error']}")
             return
 
+        budget_note = " (calibrato sul tuo PAC)" if (not sim.get("budget_is_fallback") and budget > 0) else " _(simulazione standard / quota intera base)_"
         reply = (
             f"📋 *SCHEDA OPERATIVA TRADE REPUBLIC: {sim['asset_name']}* (`{sim['ticker']}`)\n\n"
-            f"💶 *Budget Allocato:* `{sim['budget_eur']:.2f} €`\n"
+            f"💶 *Budget Allocato:* `{sim['budget_eur']:.2f} €`{budget_note}\n"
             f"🏷️ *Prezzo Attuale di Mercato:* `{sim['current_price_eur']:.2f} €`\n"
             f"📦 *Quote Esatte da Comprare:* `{sim['shares_to_buy']} quote`\n\n"
             f"⚙️ *Parametri di Ordine Consigliati su Trade Republic:*\n"
@@ -1069,7 +1079,8 @@ async def simula_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"• Prezzo Limite da Inserire: `{sim['limit_price_eur']:.2f} €` (protezione anti-spread)\n\n"
             f"🎯 *Rapporto Rischio / Rendimento:* `{sim['risk_reward_ratio']}`\n"
             f"• 🟢 *Obiettivo Take Profit (TP1):* `{sim['tp1_eur']:.2f} €` ➔ Potenziale guadagno: *+{sim['potential_gain_eur']:.2f} €* (`+{sim['potential_gain_pct']}%`)\n"
-            f"• 🔴 *Livello Stop Loss (Invalidazione):* `{sim['sl_eur']:.2f} €` ➔ Rischio monetario massimo: *{sim['monetary_risk_eur']:.2f} €* (`-{sim['monetary_risk_pct']}%`)"
+            f"• 🔴 *Livello Stop Loss (Invalidazione):* `{sim['sl_eur']:.2f} €` ➔ Rischio monetario massimo: *{sim['monetary_risk_eur']:.2f} €* (`-{sim['monetary_risk_pct']}%`)\n\n"
+            f"💡 *Nota:* Per personalizzare il budget digita `/simula {sim['ticker']} <IMPORTO>` (es. `/simula {sim['ticker']} 500`)."
         )
         await msg_target.reply_text(reply, parse_mode="Markdown")
 
@@ -2676,15 +2687,18 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
 
     elif data.startswith("sim_"):
         ticker = data.replace("sim_", "")
-        profile = supabase_svc.get_user_profile(query.from_user.id)
-        budget = profile.get("monthly_pac_eur", 500.0)
+        profile = supabase_svc.get_user_profile(query.from_user.id) or {}
+        raw_pac = profile.get("monthly_pac_eur", 0.0)
+        budget = float(raw_pac) if raw_pac and float(raw_pac) > 0 else 0.0
         sim = OrderSimulatorService.simulate_trade_republic_order(ticker, budget)
         if sim.get("status") == "error":
             await query.message.reply_text(f"⚠️ Impossibile calcolare la simulazione per {ticker}.")
             return
+
+        budget_label = "(calibrato sul tuo PAC)" if (not sim.get("budget_is_fallback") and budget > 0) else "(simulazione standard / quota base)"
         sim_text = (
             f"📋 *SCHEDA OPERATIVA TRADE REPUBLIC: {sim['asset_name']}* (`{sim['ticker']}`)\n\n"
-            f"💶 *Budget Allocato:* `{sim['budget_eur']:.2f} €` (calibrato sul tuo PAC)\n"
+            f"💶 *Budget Allocato:* `{sim['budget_eur']:.2f} €` {budget_label}\n"
             f"🏷️ *Prezzo Attuale:* `{sim['current_price_eur']:.2f} €`\n"
             f"📦 *Quote Esatte da Comprare:* `{sim['shares_to_buy']} quote`\n\n"
             f"⚙️ *Parametri d'Ordine su Trade Republic:*\n"
@@ -2694,7 +2708,8 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
             f"• Take Profit (TP1): `{sim['tp1_eur']:.2f} €` (R:R `{sim['risk_reward_tp1']}`)\n"
             f"• Stop Loss Consigliato: `{sim['stop_loss_eur']:.2f} €`\n\n"
             f"💡 *Come inserire l'ordine su Trade Republic:*\n"
-            f"Apri l'app > Cerca `{sim['ticker']}` > Clicca su *Acquista* > In alto a destra seleziona *Ordine Limite* > Inserisci `{sim['limit_price_eur']:.2f} €` e `{sim['shares_to_buy']}` quote."
+            f"Apri l'app > Cerca `{sim['ticker']}` > Clicca su *Acquista* > In alto a destra seleziona *Ordine Limite* > Inserisci `{sim['limit_price_eur']:.2f} €` e `{sim['shares_to_buy']}` quote.\n\n"
+            f"ℹ️ _Per simulare con un budget specifico scrivi es:_ `/simula {sim['ticker']} 500`"
         )
         await send_safe_text(query, sim_text)
 

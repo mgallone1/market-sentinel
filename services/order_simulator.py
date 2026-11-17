@@ -31,8 +31,16 @@ class OrderSimulatorService:
         if price_eur <= 0:
             return {"error": "Prezzo di mercato non valido"}
 
+        # Gestione budget 0 o non configurato: fallback per calcolo su 1 quota intera o default intelligente
+        budget_is_fallback = False
+        effective_budget = budget_eur
+        if effective_budget is None or effective_budget <= 0:
+            budget_is_fallback = True
+            # Budget minimo equivalente ad almeno 1 quota intera (arrotondato verso l'alto a decine di euro) o 500€
+            effective_budget = max(500.0, round((price_eur * 1.05) / 10) * 10.0)
+
         # Quote acquistabili con il budget inserito
-        shares = budget_eur / price_eur
+        shares = effective_budget / price_eur
         
         # Ordine limite consigliato: 0.2% sotto il prezzo ask corrente per evitare spread
         limit_order_price = round(price_eur * 0.998, 2)
@@ -50,7 +58,9 @@ class OrderSimulatorService:
         return {
             "ticker": ticker.upper(),
             "asset_name": fund.get("short_name", ticker),
-            "budget_eur": budget_eur,
+            "budget_eur": effective_budget,
+            "budget_is_fallback": budget_is_fallback,
+            "raw_budget_eur": budget_eur,
             "current_price_eur": price_eur,
             "shares_to_buy": round(shares, 4),
             "suggested_order_type": "Ordine Limite (Limit Order)",
