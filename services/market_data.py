@@ -293,16 +293,19 @@ class MarketDataService:
             }
 
     @staticmethod
-    def get_ticker_news(ticker: str, max_items: int = 5) -> list:
+    def get_ticker_news(ticker: str, max_items: int = 6) -> list:
         """
-        Recupera le ultime notizie ufficiali associate al ticker (supporta formato legacy e v1.8+).
+        Recupera le notizie ufficiali da Yahoo Finance e le arricchisce con notizie
+        in tempo reale da Google News RSS su politica, geopolitica ed earnings per quel titolo.
         """
+        results = []
+        sym = ticker.strip().upper()
+
+        # 1. Notizie Yahoo Finance
         try:
-            t = yf.Ticker(ticker.strip().upper())
+            t = yf.Ticker(sym)
             news_items = t.news or []
-            results = []
             for item in news_items[:max_items]:
-                # Supporto formato yfinance 1.8+ (annidato in 'content')
                 content = item.get("content") if isinstance(item.get("content"), dict) else item
                 title = content.get("title", "")
                 summary = content.get("summary", "")
@@ -319,7 +322,36 @@ class MarketDataService:
                         "publisher": publisher,
                         "time": pub_time
                     })
-            return results
         except Exception as e:
-            print(f"[MarketDataService] Errore recupero news per {ticker}: {e}")
-            return []
+            print(f"[MarketDataService] Errore recupero news Yahoo per {ticker}: {e}")
+
+        # 2. Arricchimento con Google News RSS in tempo reale (focus geopolitica, catalizzatori, trimestrali)
+        try:
+            import urllib.parse
+            import xml.etree.ElementTree as ET
+
+            # Cerca per nome società o ticker
+            search_term = "Nvidia" if "NVDA" in sym else ("Tesla" if "TSLA" in sym else ("Apple" if "AAPL" in sym else sym))
+            q = urllib.parse.quote(f"{search_term} borsa OR mercato OR trimestrale OR antitrust OR geopolitica")
+            url = f"https://news.google.com/rss/search?q={q}+when:3d&hl=it&gl=IT&ceid=IT:it"
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
+            with urllib.request.urlopen(req, timeout=4) as resp:
+                xml_data = resp.read().decode("utf-8", errors="ignore")
+                root = ET.fromstring(xml_data)
+                for item in root.findall(".//item")[:4]:
+                    t_el = item.find("title")
+                    p_el = item.find("pubDate")
+                    l_el = item.find("link")
+                    title_text = t_el.text if t_el is not None and t_el.text else ""
+                    if title_text and not any(r["title"].lower() == title_text.lower() for r in results):
+                        results.append({
+                            "title": title_text,
+                            "summary": "Aggiornamento stampa/geopolitica in tempo reale",
+                            "link": l_el.text if l_el is not None else "",
+                            "publisher": "Google News Live",
+                            "time": p_el.text if p_el is not None else ""
+                        })
+        except Exception as e:
+            print(f"[MarketDataService] Errore recupero RSS news per {ticker}: {e}")
+
+        return results[:max_items]
