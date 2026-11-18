@@ -12,12 +12,26 @@ from typing import Dict, Any, Optional
 
 class MarketDataService:
     ISIN_MAP = {
-        "XDEM.DE": "IE00BL25JP72",
-        "XDEM": "IE00BL25JP72",
-        "XDWD.DE": "IE00BJ0KDQ92",
-        "XDWD": "IE00BJ0KDQ92",
-        "BY6.F": "CNE100000296",
-        "BYD": "CNE100000296"
+        "XDEM.DE": ("IE00BL25JP72", "etf"),
+        "XDEM": ("IE00BL25JP72", "etf"),
+        "XDWD.DE": ("IE00BJ0KDQ92", "etf"),
+        "XDWD": ("IE00BJ0KDQ92", "etf"),
+        "BY6.F": ("CNE100000296", "aktie"),
+        "BY6": ("CNE100000296", "aktie"),
+        "BYD": ("CNE100000296", "aktie"),
+        "NVDA": ("US67066G1040", "aktie"),
+        "NVD.DE": ("US67066G1040", "aktie"),
+        "AAPL": ("US0378331005", "aktie"),
+        "TSLA": ("US88160R1014", "aktie"),
+        "MSFT": ("US5949181045", "aktie"),
+        "AMZN": ("US0231351067", "aktie"),
+        "GOOGL": ("US02079K3059", "aktie"),
+        "META": ("US30303M1027", "aktie"),
+        "TSM": ("US8740391004", "aktie"),
+        "AMD": ("US0079031078", "aktie"),
+        "PLTR": ("US69608A1088", "aktie"),
+        "ASML": ("NL0010273215", "aktie"),
+        "ASML.AS": ("NL0010273215", "aktie")
     }
 
     @classmethod
@@ -56,27 +70,59 @@ class MarketDataService:
     def get_trade_republic_ls_quote(cls, ticker: str) -> Dict[str, float]:
         """
         Recupera le quotazioni in tempo reale da Lang & Schwarz Exchange (il market maker ufficiale di Trade Republic).
-        Restituisce prezzo di vendita (Bid), prezzo di acquisto (Ask) e Mid price in Euro (€).
+        Restituisce prezzo Bid, Ask, Mid e la variazione percentuale odierna calcolata sul listino L&S (7:30 - 23:00).
         """
         sym = ticker.strip().upper()
-        isin = cls.ISIN_MAP.get(sym)
-        if not isin:
+        mapping = cls.ISIN_MAP.get(sym)
+        if not mapping:
+            # Fallback controllo su ticker base
+            base_sym = sym.split(".")[0]
+            mapping = cls.ISIN_MAP.get(base_sym)
+        if not mapping:
             return {}
 
-        url = f"https://www.ls-x.de/de/etf/{isin}"
+        isin, category = mapping
+        url = f"https://www.ls-x.de/de/{category}/{isin}"
         req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
         try:
             with urllib.request.urlopen(req, timeout=4) as resp:
+                if resp.getcode() != 200:
+                    return {}
                 html_text = resp.read().decode("utf-8", errors="ignore")
+                if "Kein Wertpapier gefunden" in html_text or "Seite nicht gefunden" in html_text:
+                    return {}
+
+                pos_mid = html_text.find('field="mid"')
+                if pos_mid == -1:
+                    return {}
+
+                chunk = html_text[pos_mid:pos_mid+500]
                 data = {}
-                for m in re.finditer(r'field=\"(bid|ask|mid|last)\"[^>]*>([^<]+)', html_text):
-                    val_str = m.group(2).strip().replace(".", "").replace(",", ".")
+
+                # Prezzo Mid (riferimento centrale Trade Republic)
+                m_mid = re.search(r'field="mid"[^>]*>([^<]+)', chunk)
+                if m_mid:
+                    data["mid"] = float(m_mid.group(1).replace(".", "").replace(",", "."))
+
+                # Variazione percentuale Trade Republic / Lang & Schwarz odierna
+                m_perf = re.search(r'field="midPerf1dRelWithPercentSign"[^>]*>(?:<span[^>]*>)?([^<&]+)', chunk)
+                if m_perf:
+                    perf_str = m_perf.group(1).replace(".", "").replace(",", ".").replace("+", "").strip()
                     try:
-                        data[m.group(1)] = float(val_str)
+                        data["change_pct"] = float(perf_str)
                     except Exception:
                         pass
+
+                # Bid e Ask
+                m_bid = re.search(r'field="bid"[^>]*>([^<]+)', html_text)
+                if m_bid:
+                    data["bid"] = float(m_bid.group(1).replace(".", "").replace(",", "."))
+                m_ask = re.search(r'field="ask"[^>]*>([^<]+)', html_text)
+                if m_ask:
+                    data["ask"] = float(m_ask.group(1).replace(".", "").replace(",", "."))
+
                 return data
-        except Exception:
+        except Exception as e:
             return {}
 
     @classmethod
@@ -92,8 +138,9 @@ class MarketDataService:
     @classmethod
     def get_realtime_quote(cls, ticker: str) -> Dict[str, Any]:
         """
-        Recupera il prezzo esatto in tempo reale tramite fast_info e arricchisce con dati Trade Republic (L&S).
-        Garantisce numeri finiti e validi, senza alcun NaN o None.
+        Recupera il prezzo esatto e la variazione percentuale allineati alle quotazioni
+        di Trade Republic (Lang & Schwarz Exchange, orario 7:30 - 23:00) e comprensivi
+        di Pre-Market e Post-Market (extended hours).
         """
         import math
         def safe_float(val, fallback=0.0):
@@ -109,6 +156,31 @@ class MarketDataService:
 
         try:
             sym = ticker.strip().upper()
+
+            # 1. Priorità Trade Republic / Lang & Schwarz (ETF e titoli su L&S operativi 7:30 - 23:00)
+            ls_quote = cls.get_trade_republic_ls_quote(sym)
+            if ls_quote and "mid" in ls_quote:
+                mid_p = safe_float(ls_quote["mid"], 0.0)
+                if mid_p > 0:
+                    bid_p = safe_float(ls_quote.get("bid"), mid_p)
+                    ask_p = safe_float(ls_quote.get("ask"), mid_p)
+                    change_p = safe_float(ls_quote.get("change_pct"), 0.0)
+                    prev_c = round(mid_p / (1.0 + (change_p / 100.0)), 2) if (1.0 + (change_p / 100.0)) > 0 else mid_p
+                    return {
+                        "last_price": round(mid_p, 2),
+                        "previous_close": prev_c,
+                        "change_pct": round(change_p, 2),
+                        "currency": "EUR",
+                        "day_high": None,
+                        "day_low": None,
+                        "market_cap": None,
+                        "tr_bid": round(bid_p, 2),
+                        "tr_ask": round(ask_p, 2),
+                        "tr_mid": round(mid_p, 2),
+                        "source": "trade_republic_ls"
+                    }
+
+            # 2. Quotazione standard o titoli esteri / crypto via Yahoo Finance con Pre/Post Market
             t = yf.Ticker(sym)
             fi = t.fast_info
             
@@ -117,8 +189,20 @@ class MarketDataService:
             last_price = safe_float(raw_last, 0.0)
             prev_close = safe_float(raw_prev, last_price)
 
-            # Se last_price o prev_close sono <= 0 (pre-market o prime ore del mattino),
-            # recupera l'ultimo prezzo valido dallo storico recente
+            # Includi le quotazioni Pre-Market e After-Hours (prepost=True)
+            # per non mostrare scostamenti sfasati quando la borsa regolare è chiusa
+            try:
+                df_intra = t.history(period="2d", interval="5m", prepost=True)
+                if not df_intra.empty and "Close" in df_intra:
+                    valid_intra = df_intra["Close"].dropna()
+                    if not valid_intra.empty:
+                        extended_last = safe_float(valid_intra.iloc[-1], 0.0)
+                        if extended_last > 0:
+                            last_price = extended_last
+            except Exception:
+                pass
+
+            # Fallback se last_price è ancora non valido
             if last_price <= 0:
                 try:
                     df_fallback = t.history(period="5d", interval="1d")
@@ -135,30 +219,16 @@ class MarketDataService:
 
             change_pct = ((last_price - prev_close) / prev_close) * 100 if prev_close > 0 else 0.0
 
-            res = {
+            return {
                 "last_price": round(last_price, 2),
                 "previous_close": round(prev_close, 2),
                 "change_pct": round(change_pct, 2),
                 "currency": getattr(fi, "currency", "USD") or "USD",
                 "day_high": round(safe_float(getattr(fi, "day_high", None)), 2) if getattr(fi, "day_high", None) is not None else None,
                 "day_low": round(safe_float(getattr(fi, "day_low", None)), 2) if getattr(fi, "day_low", None) is not None else None,
-                "market_cap": getattr(fi, "market_cap", None)
+                "market_cap": getattr(fi, "market_cap", None),
+                "source": "extended_market"
             }
-
-            # Se disponibile quotazione Lang & Schwarz (Trade Republic), arricchisce con bid/ask reali
-            ls_quote = cls.get_trade_republic_ls_quote(sym)
-            if ls_quote and "bid" in ls_quote and "ask" in ls_quote:
-                bid_f = safe_float(ls_quote["bid"], 0.0)
-                ask_f = safe_float(ls_quote["ask"], 0.0)
-                if bid_f > 0:
-                    res["tr_bid"] = round(bid_f, 2)
-                    res["tr_ask"] = round(ask_f if ask_f > 0 else bid_f, 2)
-                    res["tr_mid"] = round((bid_f + (ask_f if ask_f > 0 else bid_f)) / 2, 2)
-                    # Se last_price era 0, usiamo il prezzo L&S reale di Trade Republic
-                    if last_price <= 0:
-                        res["last_price"] = res["tr_mid"]
-
-            return res
         except Exception as e:
             print(f"[MarketDataService] Errore realtime quote {ticker}: {e}")
             return {"last_price": 0.0, "previous_close": 0.0, "change_pct": 0.0, "currency": "USD"}
