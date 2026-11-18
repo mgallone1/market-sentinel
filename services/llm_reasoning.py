@@ -84,6 +84,9 @@ def clean_telegram_markdown(s: str) -> str:
     s = re.sub(r'^(Oggi\s+[0-9]+[^\,\.\:]*[\,\.\:]*\s*)', '', s, flags=re.IGNORECASE)
     s = re.sub(r'^(Nel panorama di mercato odierno[^\,\.\:]*[\,\.\:]*\s*)', '', s, flags=re.IGNORECASE)
 
+    # 9. Rimuovi chiusure paternalistiche, psicologiche o domande aperte su "come ti senti / come preferisci muoverti"
+    s = re.sub(r'\n+(Come ti senti|Come vuoi muoverti|Come preferisci muoverti|Preferisci che prepariamo|Dimmi, Michele|Tu come preferisci|Ti senti pronto|La domanda che ti pongo)[^\n]*\?.*$', '', s, flags=re.IGNORECASE | re.DOTALL)
+
     return s.strip()
 
 def strip_markdown(s: str) -> str:
@@ -1528,15 +1531,12 @@ COMPITO DI REDAZIONE (SARTORIALE, AUTOREVOLE E IMMEDIATO):
   • Se movimento portafoglio: '⚡ ALERT SENTINELLA PORTAFOGLIO: [NOME ASSET]'
   • Se grande asset mondiale: '🌍 RADAR SENTINELLA MACRO: [NOME ASSET]'
   • Se shock geopolitico: '🚨 RADAR SENTINELLA: SHOCK GEOPOLITICO & MACRO'
-- CORPO DEL MESSAGGIO (3 o 4 paragrafi concisi e discorsivi, senza gergo sterile):
-  1. Spiega con parole chiare COSA sta accadendo in questo momento (prezzo in Euro, variazione %, natura del movimento o breaking news).
-  2. Spiega il PERCHÉ e il CONTESTO: quale catalizzatore, rotazione settoriale o dinamica di mercato sta spingendo questo movimento.
-  3. CORRELAZIONE CON MICHELE: Se è un asset fuori portafoglio, spiega chiaramente come influenza i suoi investimenti (es. l'impatto di Nvidia o Tesla sull'ETF MSCI World Momentum XDEM, o dell'impennata del petrolio/VIX sull'inflazione e sull'azionario globale). Se è un titolo del suo portafoglio, confronta con il suo PMC.
-  4. GUIDA PRATICA SU TRADE REPUBLIC:
-     • Se è una discesa su un asset solido: spiega se rappresenta una finestra di accumulo a sconto per il suo PAC o per abbassare il PMC, raccomandando sempre un *Ordine Limite* per neutralizzare lo spread di Lang & Schwarz.
-     • Se è un'impennata: consiglia se mantenere la posizione (let profits run) o attendere consolidamento senza inseguire i prezzi sui massimi.
-     • Se è uno shock geopolitico: trasmetti lucidità e calma istituzionale, spiegando come la diversificazione globale del portafoglio assorbe la volatilità e perché non bisogna mai vendere in preda al panico emotivo.
-- Concludi con un invito diretto (es. "Scrivimi '[TICKER]' o premi il comando per approfondire").
+- CORPO DEL MESSAGGIO (2 o 3 paragrafi concisi, densi di dati e fatti, zero convenevoli):
+  1. DINAMICA E LIVELLI: Prezzo in Euro, variazione % esatta, natura dell'anomalia rilevata.
+  2. CAUSE REALI, GEOPOLITICA E CATALIZZATORI: Niente frasi fatte ("rotazione", "il mercato sconta incertezza"). Cita i fatti specifici: geopolitica (controlli chip, tensioni commerciali, audizioni), decisioni tassi/bond, dati trimestrali o notizie di settore.
+  3. CORRELAZIONE E IMPATTO SU MICHELE: Come questo movimento tocca i pesi di portafoglio (ETF XDWD/XDEM o singole posizioni) e la tenuta rispetto al PMC.
+- DIVIETO ASSOLUTO DI CHIUDERE CON DOMANDE EMOTIVE O PSICOLOGICHE ("Come ti senti", "Preferisci che prepariamo", "Come vuoi muoverti", ecc.).
+- Concludi ESCLUSIVAMENTE con il livello di guardia/target e la call to action diretta di consultazione: (es. "Scrivimi '[TICKER]' per esaminare la correlazione e i livelli tecnici.").
 
 Tutte le quotazioni RIGOROSAMENTE in Euro (€).
 {TELEGRAM_FORMATTING_RULES}
