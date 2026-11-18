@@ -157,7 +157,13 @@ class LLMReasoningService:
     def __init__(self):
         self.api_key = os.getenv("GEMINI_API_KEY", "").strip()
         self.client = None
-        self.models_to_try = ["gemini-3.1-flash-lite", "gemini-3.5-flash-lite", "gemini-3.5-flash", "gemini-3.8-flash"]
+        self.models_to_try = [
+            "gemini-flash-lite-latest",
+            "gemini-3.1-flash-lite",
+            "gemini-3.5-flash-lite",
+            "gemini-3.5-flash",
+            "gemini-3.8-flash"
+        ]
         if HAS_GENAI and self.api_key:
             try:
                 self.client = genai.Client(api_key=self.api_key)
