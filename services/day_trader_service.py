@@ -166,8 +166,15 @@ class DayTraderService:
         """
         if not symbols:
             symbols = [
+                # Mega Tech & AI High-Beta
                 "NVDA", "AAPL", "MSFT", "TSLA", "AMD", "AMZN", "META", "GOOGL",
-                "PLTR", "COIN", "MSTR", "SMCI", "AVGO", "INTC", "ASML", "ARM"
+                "PLTR", "COIN", "MSTR", "AVGO", "ARM", "CRWD",
+                # Energia, Nucleare & Commodities Momentum
+                "VST", "CEG", "CCJ", "XOM", "GLD", "SLV", "USO",
+                # Difesa & Sicurezza
+                "LMT", "RTX", "NOC",
+                # Pharma & Finanza
+                "LLY", "JPM", "GS"
             ]
 
         sym_str = ",".join(symbols)

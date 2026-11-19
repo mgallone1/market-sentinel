@@ -19,10 +19,30 @@ class AppConfig:
 
 # Watchlist di riferimento raggruppate per settore/categoria
 DEFAULT_WATCHLISTS: Dict[str, List[str]] = {
-    "Big Tech USA": ["AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "TSLA", "LLY"],
-    "Semiconduttori & AI": ["NVDA", "TSM", "AMD", "ASML", "AVGO", "QCOM", "ARM", "MRVL"],
-    "Borse Europee & Trade Republic": ["BY6.F", "RACE.MI", "UCG.MI", "ISP.MI", "ENI.MI", "SAP.DE"],
-    "ETF Core & Momentum (Trade Republic)": ["XDWD.DE", "XDEM.DE", "SPY", "QQQ", "SMH", "GLD"]
+    "Mega Tech & AI Momentum": [
+        "NVDA", "AAPL", "MSFT", "AMZN", "GOOGL", "META", "TSLA", "PLTR", "AVGO", "AMD", "ASML", "ARM"
+    ],
+    "Aerospazio, Difesa & Sicurezza": [
+        "LMT", "RTX", "NOC", "GD", "BA", "PANW", "CRWD"
+    ],
+    "Sanità, Pharma & GLP-1": [
+        "LLY", "NVO", "ISRG", "ABBV", "UNH", "PFE"
+    ],
+    "Energia, Uranio, Nucleare & Commodities": [
+        "XOM", "CVX", "CCJ", "SMR", "CEG", "VST", "GLD", "SLV", "USO"
+    ],
+    "Finanza Globale, Banche & Pagamenti": [
+        "JPM", "GS", "MS", "V", "MA", "COIN"
+    ],
+    "Industria, Consumi & Transizione": [
+        "CAT", "GE", "DE", "COST", "WMT", "RACE.MI"
+    ],
+    "Borse Europee & Trade Republic": [
+        "BY6.F", "RACE.MI", "UCG.MI", "ISP.MI", "ENI.MI", "SAP.DE", "ASML.AS", "MC.PA"
+    ],
+    "ETF Core, Fattoriali & Momentum": [
+        "XDWD.DE", "XDEM.DE", "SPY", "QQQ", "SMH", "XLE", "XLV", "XLF", "ITA"
+    ]
 }
 
 # Feed RSS Istituzionali Premium Verificati Live (Solo feed attivi in tempo reale)
