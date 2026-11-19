@@ -1832,8 +1832,13 @@ async def _handle_text_message_core(update: Update, context: ContextTypes.DEFAUL
     if long_term_mem:
         memory_context_parts.append(f"Decisioni e tesi dell'ultimo mese: {long_term_mem}")
     if recent_history:
-        recent_snippets = [f"{'Michele' if m['role'] == 'user' else 'Consulente'}: {m['content'][:800]}" for m in recent_history[-6:]]
-        memory_context_parts.append(f"Scambi recenti della conversazione:\n" + "\n".join(recent_snippets))
+        # Sanifica gli estratti della memoria recente: elimina vecchie domande retoriche o paternalismi
+        cleaned_history = []
+        for m in recent_history[-6:]:
+            speaker = 'Michele' if m['role'] == 'user' else 'Consulente'
+            txt = clean_telegram_markdown(m['content'])[:500]
+            cleaned_history.append(f"{speaker}: {txt}")
+        memory_context_parts.append("Scambi recenti della conversazione:\n" + "\n".join(cleaned_history))
     
     memory_context = "\n".join(memory_context_parts)
 

@@ -134,7 +134,7 @@ class ProactiveSentinelService:
                         f"• *Dettaglio:* {txn_summary or 'Operazione registrata'}\n"
                         f"• *Data Deposito:* {top_report.get('filed', 'recente')}\n"
                         f"• *Documento Ufficiale:* [Visualizza PDF House Clerk]({top_report.get('url')})\n\n"
-                        "💡 *Nota del CIO:* I report PTR per legge possono essere comunicati fino a 30-45 giorni dopo l'operazione. Scrivimi `/pelosi` per visualizzare la perizia completa e l'impatto sul mercato."
+                        "I report PTR per legge possono essere comunicati fino a 30-45 giorni dopo l'operazione. Usa `/pelosi` per visualizzare la perizia completa."
                     )
                     await self._broadcast_alert(app, chat_ids, msg)
                     self.alerts_sent_today += 1
@@ -161,7 +161,7 @@ class ProactiveSentinelService:
                         f"• *Oggetto:* {top_tr.get('description')}\n"
                         f"• *Data Deposito:* {top_tr.get('filed', 'recente')}\n"
                         f"• *Documento Ufficiale SEC:* [Visualizza Filing EDGAR]({top_tr.get('url')})\n\n"
-                        "💡 *Nota del CIO:* Le movimentazioni e i filing legati a Trump Media generano frequenti ondate di volatilità sistemica e flussi di speculazione. Scrivimi `/pelosi` o `DJT` per esaminare l'impatto."
+                        "Le movimentazioni societarie su Trump Media generano frequenti ondate di volatilità sistemica e flussi di speculazione."
                     )
                     await self._broadcast_alert(app, chat_ids, t_msg)
                     self.alerts_sent_today += 1
@@ -193,8 +193,7 @@ class ProactiveSentinelService:
                             f"🚨 *RADAR SENTINELLA: SHOCK GEOPOLITICO / MACRO*\n\n"
                             f"• *Evento Rilevato:* {shock.get('title')}\n"
                             f"• *Fonte:* {shock.get('source')} ({shock.get('published')})\n"
-                            f"• *Intensità:* Severità {shock.get('severity_score')}/10\n\n"
-                            f"💡 *Nota del CIO:* I mercati potrebbero registrare volatilità a breve termine. Ricorda che il portafoglio è strutturato su indici globali diversificati: evita reazioni emotive o vendite in panico. Scrivimi per monitorare l'evoluzione."
+                            f"• *Intensità:* Severità {shock.get('severity_score')}/10"
                         )
 
                     await self._broadcast_alert(app, chat_ids, alert_text)
@@ -281,14 +280,11 @@ class ProactiveSentinelService:
                         action_txt = "Finestra favorevole di accumulo per abbassare il PMC" if change_pct < 0 else "Spinta decisa al rialzo: lascia correre i profitti con ordine limite"
                         alert_msg = (
                             f"⚡ *ALERT SENTINELLA PORTAFOGLIO: {asset_name.upper()}* (`{ticker}`)\n\n"
-                            f"{direction_sym} *Movimento Anticipato Rilevato:* Variazione intraday del *{change_pct:+.2f}%* a quota *{last_price:.2f} €* (soglia sentinella: {threshold}%).\n\n"
+                            f"{direction_sym} *Movimento Anticipato Rilevato:* Variazione intraday del *{change_pct:+.2f}%* a quota *{last_price:.2f} €* (soglia: {threshold}%).\n\n"
                             f"🧭 *Scenario Quantitativo:*\n"
                             f"• *Bias Modello:* {forecast.get('bias_direction', 'In consolidamento')}\n"
                             f"• *Target Primario (TP1):* `{forecast.get('target_tp1_eur', 0.0):.2f} €`\n"
-                            f"• *Stop Loss Strutturale:* `{forecast.get('stop_loss_eur', 0.0):.2f} €`\n\n"
-                            f"💡 *Guida per Michele su Trade Republic:*\n"
-                            f"{action_txt}. Ricorda di impostare un *Ordine Limite* per neutralizzare lo spread di Lang & Schwarz.\n\n"
-                            f"Scrivimi *'{ticker}'* per consultare la perizia completa."
+                            f"• *Stop Loss Strutturale:* `{forecast.get('stop_loss_eur', 0.0):.2f} €`"
                         )
 
                     keyboard = [
@@ -383,11 +379,7 @@ class ProactiveSentinelService:
                         dir_icon = "📈" if change_pct > 0 else "📉"
                         alert_msg = (
                             f"🌍 *RADAR SENTINELLA MACRO: {ma['name'].upper()}* (`{ticker}`)\n\n"
-                            f"{dir_icon} *Anomalia Rilevata:* Movimento del *{change_pct:+.2f}%* a quota *{last_price:.2f}* (soglia reattiva: {threshold}%).\n\n"
-                            f"💡 *Cosa significa per Michele:*\n"
-                            f"Questo scostamento su un pilastro globale può influenzare la liquidità e i pesi del tuo portafoglio (in particolare l'ETF MSCI World Momentum XDEM e la componente azionaria). "
-                            f"Valuta con lucidità senza inseguire le code della volatilità.\n\n"
-                            f"Scrivimi *'{ticker}'* per esaminare la correlazione e i livelli tecnici."
+                            f"{dir_icon} *Anomalia Rilevata:* Movimento del *{change_pct:+.2f}%* a quota *{last_price:.2f}* (soglia: {threshold}%)."
                         )
 
                     keyboard = [

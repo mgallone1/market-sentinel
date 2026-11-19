@@ -152,11 +152,10 @@ class LLMReasoningService:
         self.api_key = os.getenv("GEMINI_API_KEY", "").strip()
         self.client = None
         self.models_to_try = [
-            "gemini-flash-lite-latest",
+            "gemini-2.5-flash",
             "gemini-3.1-flash-lite",
             "gemini-3.5-flash-lite",
-            "gemini-3.5-flash",
-            "gemini-3.8-flash"
+            "gemini-2.5-pro"
         ]
         if HAS_GENAI and self.api_key:
             try:
@@ -1538,7 +1537,7 @@ COMPITO DI REDAZIONE (SARTORIALE, AUTOREVOLE E IMMEDIATO):
   2. CAUSE REALI, GEOPOLITICA E CATALIZZATORI: Niente frasi fatte ("rotazione", "il mercato sconta incertezza"). Cita i fatti specifici: geopolitica (controlli chip, tensioni commerciali, audizioni), decisioni tassi/bond, dati trimestrali o notizie di settore.
   3. CORRELAZIONE E IMPATTO SU MICHELE: Come questo movimento tocca i pesi di portafoglio (ETF XDWD/XDEM o singole posizioni) e la tenuta rispetto al PMC.
 - DIVIETO ASSOLUTO DI CHIUDERE CON DOMANDE EMOTIVE O PSICOLOGICHE ("Come ti senti", "Preferisci che prepariamo", "Come vuoi muoverti", ecc.).
-- Concludi ESCLUSIVAMENTE con il livello di guardia/target e la call to action diretta di consultazione: (es. "Scrivimi '[TICKER]' per esaminare la correlazione e i livelli tecnici.").
+- Concludi con il livello di guardia/target quantitativo (supporto/resistenza in Euro) e l'indicazione tecnica netta. Zero inviti o frasi di consultazione generiche.
 
 Tutte le quotazioni RIGOROSAMENTE in Euro (€).
 {TELEGRAM_FORMATTING_RULES}
