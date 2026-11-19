@@ -47,10 +47,38 @@ class TechnicalAnalysisService:
         rolling_std = data["Close"].rolling(window=20).std()
         data["BB_Upper"] = data["SMA_20"] + (rolling_std * 2)
         data["BB_Lower"] = data["SMA_20"] - (rolling_std * 2)
+        data["BB_Width"] = (data["BB_Upper"] - data["BB_Lower"]) / data["SMA_20"].replace(0, np.nan)
 
-        # 5. Analisi Volumi (Volume SMA 20 e Spike Ratio)
+        # 5. ATR (Average True Range - 14 periodi) & Keltner Channels per Squeeze
+        high_low = data["High"] - data["Low"]
+        high_close = (data["High"] - data["Close"].shift()).abs()
+        low_close = (data["Low"] - data["Close"].shift()).abs()
+        true_range = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
+        data["ATR_14"] = true_range.rolling(window=14).mean()
+
+        # Bollinger Band vs Keltner Channel Squeeze (John Carter Squeeze)
+        # Squeeze On quando la Banda di Bollinger è interamente dentro il Canale di Keltner (1.5 * ATR)
+        keltner_upper = data["SMA_20"] + (data["ATR_14"] * 1.5)
+        keltner_lower = data["SMA_20"] - (data["ATR_14"] * 1.5)
+        data["In_Squeeze"] = (data["BB_Upper"] < keltner_upper) & (data["BB_Lower"] > keltner_lower)
+
+        # 6. Analisi Volumi (Volume SMA 20 e Spike Ratio)
         data["Volume_SMA20"] = data["Volume"].rolling(window=20).mean()
         data["Volume_Ratio"] = data["Volume"] / data["Volume_SMA20"].replace(0, np.nan)
+
+        # 7. On-Balance Volume (OBV) per accumulo/distribuzione istituzionale
+        obv = [0]
+        for i in range(1, len(data)):
+            if data["Close"].iloc[i] > data["Close"].iloc[i-1]:
+                obv.append(obv[-1] + data["Volume"].iloc[i])
+            elif data["Close"].iloc[i] < data["Close"].iloc[i-1]:
+                obv.append(obv[-1] - data["Volume"].iloc[i])
+            else:
+                obv.append(obv[-1])
+        data["OBV"] = obv
+        data["OBV_EMA20"] = pd.Series(obv, index=data.index).ewm(span=20, adjust=False).mean()
+
+        return data
 
         return data
 
@@ -80,6 +108,15 @@ class TechnicalAnalysisService:
         recent_high = float(window_60["High"].max())
         recent_low = float(window_60["Low"].min())
 
+        # Squeeze detection & BB Width
+        in_squeeze = bool(last.get("In_Squeeze", False))
+        bb_width = float(last["BB_Width"]) if "BB_Width" in last and not np.isnan(last["BB_Width"]) else None
+        atr_14 = float(last["ATR_14"]) if "ATR_14" in last and not np.isnan(last["ATR_14"]) else None
+
+        # Divergenza Volumi / Smart Money Accumulation (OBV vs Price)
+        obv_diff = (float(last["OBV"]) - float(last["OBV_EMA20"])) if ("OBV" in last and "OBV_EMA20" in last) else 0.0
+        smart_money_bias = "ACCUMULO" if obv_diff > 0 else "DISTRIBUZIONE"
+
         return {
             "current_price": round(current_price, 2),
             "prev_price": round(prev_price, 2),
@@ -90,5 +127,9 @@ class TechnicalAnalysisService:
             "sma_200": round(sma_200, 2) if sma_200 is not None else None,
             "volume_ratio": round(vol_ratio, 2),
             "recent_high": round(recent_high, 2),
-            "recent_low": round(recent_low, 2)
+            "recent_low": round(recent_low, 2),
+            "in_squeeze": in_squeeze,
+            "bb_width": round(bb_width, 4) if bb_width is not None else None,
+            "atr_14": round(atr_14, 2) if atr_14 is not None else None,
+            "smart_money_bias": smart_money_bias
         }

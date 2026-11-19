@@ -17,6 +17,7 @@ from typing import Dict, Any, List, Set, Optional
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
 from services.market_data import MarketDataService
+from services.technical_analysis import TechnicalAnalysisService
 from services.supabase_service import SupabaseService
 from services.ensemble_predictor import EnsemblePredictorEngine
 from services.day_trader_service import DayTraderService
@@ -324,13 +325,20 @@ class ProactiveSentinelService:
             {"ticker": "GOOGL", "name": "Alphabet Inc.", "threshold": 2.8, "type": "megacap"},
             {"ticker": "META", "name": "Meta Platforms", "threshold": 2.8, "type": "megacap"},
             {"ticker": "PLTR", "name": "Palantir Technologies", "threshold": 3.0, "type": "growth_leader"},
-            # Termometri Macroeconomici & Materie Prime
+            # Termometri Macroeconomici & Materie Prime (Anticipatori Sell-Off)
             {"ticker": "GC=F", "name": "Oro Spot / Gold", "threshold": 1.5, "type": "commodity"},
             {"ticker": "BZ=F", "name": "Petrolio Brent", "threshold": 2.2, "type": "commodity"},
             {"ticker": "^VIX", "name": "Indice Volatilità VIX", "threshold": 8.0, "type": "vix_spike"},
-            {"ticker": "^TNX", "name": "Rendimento US 10Y Treasury", "threshold": 2.5, "type": "yield"},
+            {"ticker": "^TNX", "name": "Rendimento US 10Y Treasury (Tassi)", "threshold": 2.0, "type": "yield_spike"},
+            {"ticker": "DX-Y.NYB", "name": "Indice Dollaro USA (DXY)", "threshold": 0.6, "type": "dollar_spike"},
             {"ticker": "^GSPC", "name": "Indice S&P 500", "threshold": 1.2, "type": "benchmark"},
-            {"ticker": "^IXIC", "name": "Indice Nasdaq Composite", "threshold": 1.2, "type": "benchmark"}
+            {"ticker": "^IXIC", "name": "Indice Nasdaq Composite", "threshold": 1.2, "type": "benchmark"},
+            # Nuovi Leader di Momentum e Difesa
+            {"ticker": "VST", "name": "Vistra Corp (AI Power)", "threshold": 3.0, "type": "growth_leader"},
+            {"ticker": "CEG", "name": "Constellation Energy", "threshold": 3.0, "type": "growth_leader"},
+            {"ticker": "CCJ", "name": "Cameco Corp (Uranio)", "threshold": 3.0, "type": "commodity"},
+            {"ticker": "LMT", "name": "Lockheed Martin (Difesa)", "threshold": 2.0, "type": "defense"},
+            {"ticker": "LLY", "name": "Eli Lilly (Pharma GLP-1)", "threshold": 2.5, "type": "pharma"}
         ]
 
         for ma in major_assets:
@@ -350,8 +358,8 @@ class ProactiveSentinelService:
                 threshold = ma["threshold"]
                 is_trigger = False
 
-                if ma.get("type") == "vix_spike":
-                    # Il VIX scatta solo su spike rialzista (impennata della paura di mercato)
+                if ma.get("type") in ["vix_spike", "yield_spike", "dollar_spike"]:
+                    # Termometri macro: scattano su balzo rialzista che drena liquidità azionaria
                     is_trigger = change_pct >= threshold
                 else:
                     is_trigger = abs(change_pct) >= threshold
@@ -400,6 +408,59 @@ class ProactiveSentinelService:
 
             except Exception as e_ma:
                 logger.warning(f"[Sentinel] Errore verifica grande asset {ticker}: {e_ma}")
+
+        # ---------------------------------------------------------
+        # 5. RADAR PREDITTIVO: SQUEEZE IMMINENTI & DIVERGENZE SMART MONEY
+        # ---------------------------------------------------------
+        # Scansiona i leader di mercato alla ricerca di compressione di volatilità (pre-esplosione)
+        predictive_candidates = ["NVDA", "TSLA", "PLTR", "VST", "AAPL", "BTC-EUR"]
+        for cand in predictive_candidates:
+            cand_last_alert = self.ticker_cooldowns.get(f"pred_{cand}", 0.0)
+            if now_ts - cand_last_alert < (self.cooldown_seconds * 2):  # Cooldown 8 ore per alert predittivi
+                continue
+
+            try:
+                df_c = MarketDataService.get_ticker_history(cand, period="3mo", interval="1d")
+                if df_c.empty or len(df_c) < 30:
+                    continue
+
+                df_ind = TechnicalAnalysisService.calculate_indicators(df_c)
+                tech_summ = TechnicalAnalysisService.get_latest_technical_summary(df_ind)
+                
+                # Squeeze Alert (Bande dentro Keltner Channels: compressione prima dell'esplosione direzionale)
+                if tech_summ.get("in_squeeze"):
+                    curr_p = tech_summ.get("current_price", 0.0)
+                    atr = tech_summ.get("atr_14", 0.0)
+                    bias = tech_summ.get("smart_money_bias", "NEUTRALE")
+                    upper_trigger = round(curr_p + (atr * 1.2), 2)
+                    lower_trigger = round(curr_p - (atr * 1.2), 2)
+
+                    pred_msg = (
+                        f"🔮 *RADAR SENTINELLA PREDITTIVO: VOLATILITY SQUEEZE*\n"
+                        f"────────────────────────\n"
+                        f"• *Asset Sotto Compressione:* `{cand}`\n"
+                        f"• *Prezzo Attuale:* `${curr_p:.2f}` (Bande compresse al minimo)\n"
+                        f"• *Flusso Smart Money (OBV):* *{bias}*\n"
+                        f"• *Escursione Statistica Attesa (ATR):* `±${atr:.2f}`\n\n"
+                        f"⚡ *ANALISI ANTICIPATORIA:*\n"
+                        f"Il titolo ha terminato lo scarico di volatilità ed è in accumulo di energia compressa. Rottura esplosiva imminente.\n"
+                        f"• *Trigger Breakout Long:* Superamento confermato di `${upper_trigger}`\n"
+                        f"• *Trigger Breakdown Short:* Rottura al ribasso di `${lower_trigger}`"
+                    )
+
+                    keyboard = [
+                        [InlineKeyboardButton(f"⚡ Simula Piano {cand}", callback_data=f"sim_{cand}")],
+                        [InlineKeyboardButton("🔄 Cicli Hurst & Elliott", callback_data=f"quant_{cand}")]
+                    ]
+                    markup = InlineKeyboardMarkup(keyboard)
+                    await self._broadcast_alert(app, chat_ids, pred_msg, reply_markup=markup)
+                    self.ticker_cooldowns[f"pred_{cand}"] = now_ts
+                    self.alerts_sent_today += 1
+                    logger.info(f"[Sentinel] Predictive Squeeze alert inviato per {cand}!")
+                    return f"predictive_squeeze_{cand}"
+
+            except Exception as e_pred:
+                logger.warning(f"[Sentinel] Errore radar predittivo per {cand}: {e_pred}")
 
         return "no_triggers"
 
