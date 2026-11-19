@@ -1750,7 +1750,15 @@ async def _handle_text_message_core(update: Update, context: ContextTypes.DEFAUL
                     "SOL/USD" if "SOL" in resolved_sym or "SOLANA" in resolved_sym else f"{resolved_sym}/USD"
                 )
             )
-            notional_amt = val_num if unit in ["$", "usd", "euro", "dollari"] else (val_num * 100.0)
+            # Se l'utente specifica un importo in valuta lo usa, altrimenti se passa un intero piccolo (es. 1 o 2 crypto) assegna sizing proporzionato di $2.500
+            if unit in ["$", "usd", "euro", "dollari"]:
+                notional_amt = val_num
+            elif unit in ["azioni", "quote", "crypto", "pezzi"] and val_num <= 10:
+                notional_amt = val_num * 2500.0  # $2.500 per quota richiesta, allineato al sizing azionario
+            else:
+                notional_amt = val_num
+
+            # Ordine a mercato 24/7 (senza overnight swap su crypto)
             res_crypto = alpaca_service.place_crypto_order(symbol=crypto_sym, notional=notional_amt, side=side)
             if "error" in res_crypto:
                 await status_order_msg.edit_text(
@@ -2607,13 +2615,14 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
             "buy_crypto_sol": "SOL/USD"
         }
         chosen_sym = sym_map[data]
-        res = alpaca_service.place_crypto_order(symbol=chosen_sym, notional=100.0, side="buy")
+        # Sizing calibrato al portafoglio: $2,500 anziché $100
+        res = alpaca_service.place_crypto_order(symbol=chosen_sym, notional=2500.0, side="buy")
         if "error" not in res:
             await query.message.reply_text(
                 f"✅ *ORDINE CRYPTO ESEGUITO SU ALPACA (24/7)!* 🚀\n"
                 f"• *Coppia:* `{chosen_sym}`\n"
-                f"• *Importo Notionale:* `$100.00`\n"
-                f"• *Tipo Ordine:* Market GTC (Crypto 24/7)\n"
+                f"• *Importo Notionale:* `$2,500.00`\n"
+                f"• *Tipo Ordine:* Market GTC (Crypto 24/7 - No Overnight Fee)\n"
                 f"• *Status:* `{res.get('status', 'inviato').upper()}`\n\n"
                 "💡 _Verifica la posizione aggiornata digitando `/alpaca`._",
                 parse_mode="Markdown"
@@ -2815,6 +2824,38 @@ async def send_scheduled_briefing(app, slot: str, force: bool = False):
     except Exception as e:
         print(f"[!] Errore critico generazione scheduled briefing: {e}")
 
+async def auto_flatten_overnight_job(application):
+    """
+    Regola tassativa Day-Trading: Flat by 21:55 CET (15:55 EST).
+    Chiude forzatamente tutte le posizioni aperte a margine (es. azioni)
+    per evitare commissioni di overnight e drawdown da gap notturni.
+    """
+    try:
+        summary = alpaca_service.get_account_summary()
+        positions = summary.get("positions", [])
+        if positions:
+            print(f"🛑 [Auto-Flatten 21:55] Rilevate {len(positions)} posizioni aperte. Liquidazione forzata anti-overnight in corso...")
+            alpaca_service.close_all_positions()
+            # Invia notifica di sicurezza
+            for user_id in AUTHORIZED_USER_IDS:
+                try:
+                    await application.bot.send_message(
+                        chat_id=user_id,
+                        text=(
+                            "🛑 *PROTEZIONE ANTI-OVERNIGHT ATTIVATA (21:55 CET)*\n"
+                            "────────────────────────\n"
+                            f"Liquidate automaticamente *{len(positions)} posizioni azionarie* aperte prima della chiusura di Wall Street.\n"
+                            "• Zero commissioni di prestito overnight a margine.\n"
+                            "• Zero rischio di gap down all'apertura successiva.\n"
+                            "Portafoglio rientrato 100% in liquidità."
+                        ),
+                        parse_mode="Markdown"
+                    )
+                except Exception:
+                    pass
+    except Exception as e:
+        print(f"[!] Errore auto_flatten_overnight_job: {e}")
+
 async def sentinel_watchdog_job(application):
     """Esegue il controllo proattivo periodico della sentinella."""
     try:
@@ -2873,6 +2914,14 @@ async def post_init(application):
             id="evening_briefing_2130",
             replace_existing=True
         )
+        # Auto-Flatten Day-Trade alle 21:55 CET (15:55 EST): stop a qualsiasi rischio/commissione overnight
+        scheduler.add_job(
+            auto_flatten_overnight_job,
+            CronTrigger(hour=21, minute=55, timezone="Europe/Rome"),
+            args=[application],
+            id="auto_flatten_2155",
+            replace_existing=True
+        )
         # Watchdog proattivo della Sentinella ogni 10 minuti (per massima reattività)
         scheduler.add_job(
             sentinel_watchdog_job,
@@ -2925,11 +2974,11 @@ async def crypto_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     keyboard = [
         [
-            InlineKeyboardButton("🟠 Compra $100 BTC", callback_data="buy_crypto_btc"),
-            InlineKeyboardButton("🔷 Compra $100 ETH", callback_data="buy_crypto_eth")
+            InlineKeyboardButton("🟠 Compra $2.500 BTC", callback_data="buy_crypto_btc"),
+            InlineKeyboardButton("🔷 Compra $2.500 ETH", callback_data="buy_crypto_eth")
         ],
         [
-            InlineKeyboardButton("🟣 Compra $100 SOL", callback_data="buy_crypto_sol"),
+            InlineKeyboardButton("🟣 Compra $2.500 SOL", callback_data="buy_crypto_sol"),
             InlineKeyboardButton("⚡ Saldo Alpaca", callback_data="alpaca_refresh")
         ]
     ]
