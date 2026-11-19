@@ -84,47 +84,66 @@ class SignalGeneratorService:
             score -= 2
             bear_factors.append("Sentiment delle ultime notizie negativo/pressione mediatica")
 
-        # 5. Determinazione Livelli Operativi
-        # Supporto dinamico (invalidazione) e Target
-        support_level = sma_50 if sma_50 and sma_50 < price else (price * 0.94)
-        # Se c'è un minimo recente vicino, usiamo quello
-        if recent_low < price and (price - recent_low) / price < 0.10:
-            support_level = recent_low * 0.98
+        # 5. Determinazione Livelli Operativi e Direzione (Long vs Short)
+        is_short = score <= -3
 
-        resistance_level = recent_high if recent_high > price else (price * 1.12)
-        # Se il target di consenso degli analisti è disponibile e coerente, consideriamolo
-        analyst_target = fundamentals.get("target_mean_price")
-        if analyst_target and analyst_target > price:
-            target_price = round(float(analyst_target), 2)
+        if is_short:
+            direction = "SHORT"
+            # Per uno short: l'invalidazione (stop loss) è sopra le resistenze
+            res_ref = sma_50 if sma_50 and sma_50 > price else (price * 1.05)
+            if recent_high > price and (recent_high - price) / price < 0.10:
+                res_ref = recent_high * 1.02
+            stop_loss = round(res_ref, 2)
+
+            # Il target è sul supporto sottostante o minimo recente
+            sup_ref = sma_200 if sma_200 and sma_200 < price else (recent_low if recent_low < price else price * 0.90)
+            target_price = round(sup_ref, 2)
+
+            risk = max(stop_loss - price, price * 0.02)
+            reward = max(price - target_price, price * 0.04)
+            rr_ratio = round(reward / risk, 2) if risk > 0 else 1.0
         else:
-            target_price = round(resistance_level, 2)
+            direction = "LONG"
+            # Supporto dinamico (invalidazione) e Target
+            support_level = sma_50 if sma_50 and sma_50 < price else (price * 0.94)
+            # Se c'è un minimo recente vicino, usiamo quello
+            if recent_low < price and (recent_low - price) / price < 0.10:
+                support_level = recent_low * 0.98
 
-        stop_loss = round(support_level, 2)
-        risk = max(price - stop_loss, price * 0.02)
-        reward = max(target_price - price, price * 0.04)
-        rr_ratio = round(reward / risk, 2) if risk > 0 else 1.0
+            resistance_level = recent_high if recent_high > price else (price * 1.12)
+            # Se il target di consenso degli analisti è disponibile e coerente, consideriamolo
+            analyst_target = fundamentals.get("target_mean_price")
+            if analyst_target and analyst_target > price:
+                target_price = round(float(analyst_target), 2)
+            else:
+                target_price = round(resistance_level, 2)
+
+            stop_loss = round(support_level, 2)
+            risk = max(price - stop_loss, price * 0.02)
+            reward = max(target_price - price, price * 0.04)
+            rr_ratio = round(reward / risk, 2) if risk > 0 else 1.0
 
         # Verdetto Finale
         if score >= 4:
             verdict = "ACCUMULO RIALZISTA (BULLISH)"
             verdict_badge = "🟢 FORTE BUY SETUP"
-            action_advice = "Impostare acquisto sulla forza o su lieve ritracciamento verso supporto."
+            action_advice = "Impostare acquisto Long sulla forza o su lieve ritracciamento verso supporto."
         elif score >= 2:
             verdict = "MODERATAMENTE POSITIVO (MILD BUY)"
             verdict_badge = "🟡 BUY SELETTIVO"
-            action_advice = "Monitorare la tenuta del supporto per ingressi frazionati."
+            action_advice = "Monitorare la tenuta del supporto per ingressi frazionati Long."
         elif score <= -4:
-            verdict = "RIBASSISTA (BEARISH / SHORT)"
-            verdict_badge = "🔴 RISCHIO ELEVATO / EVITARE"
-            action_advice = "Evitare acquisti; attendere stabilizzazione o considerare prese di profitto."
+            verdict = "BREAKDOWN RIBASSISTA (SHORT OPPORTUNITY)"
+            verdict_badge = "🔴 FORTE SHORT SETUP"
+            action_advice = "Trend strutturalmente deteriorato: impostare vendita allo scoperto (Short) con stop loss sopra la resistenza."
         elif score <= -2:
-            verdict = "MODERATAMENTE DEBOLE"
-            verdict_badge = "🟠 CAUTELA / NEUTRALE"
-            action_advice = "Consolidamento fragile o prese di beneficio in atto."
+            verdict = "DEBOLEZZA STRUTTURALE (SHORT BIAS)"
+            verdict_badge = "🟠 SHORT SELETTIVO / VENDITA"
+            action_advice = "Pressione venditrice in aumento. Considerare Short su rimbalzi falliti o chiusura posizioni Long."
         else:
             verdict = "NEUTRALE / ATTESA SETUP"
             verdict_badge = "⚪ FASE LATERALE"
-            action_advice = "Attendere la rottura di resistenze chiave o scarico dei volumi."
+            action_advice = "Attendere la rottura di resistenze/supporti chiave o scarico dei volumi."
 
         return {
             "ticker": ticker,
@@ -133,6 +152,7 @@ class SignalGeneratorService:
             "current_price": price,
             "currency": fundamentals.get("currency", "USD"),
             "score": score,
+            "direction": direction,
             "verdict": verdict,
             "verdict_badge": verdict_badge,
             "action_advice": action_advice,
