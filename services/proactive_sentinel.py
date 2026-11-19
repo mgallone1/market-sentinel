@@ -316,29 +316,68 @@ class ProactiveSentinelService:
             return "weekend_crypto_only"
         # Solo i Grandi della Terra, Zero Spazzatura
         major_assets = [
-            # Mega-Cap Tech & AI Leaders
+            # 1. Mega-Cap Tech & AI Leaders
             {"ticker": "NVDA", "name": "NVIDIA Corp.", "threshold": 2.8, "type": "megacap"},
             {"ticker": "TSLA", "name": "Tesla Inc.", "threshold": 2.8, "type": "megacap"},
-            {"ticker": "AAPL", "name": "Apple Inc.", "threshold": 2.8, "type": "megacap"},
-            {"ticker": "MSFT", "name": "Microsoft Corp.", "threshold": 2.8, "type": "megacap"},
-            {"ticker": "AMZN", "name": "Amazon.com Inc.", "threshold": 2.8, "type": "megacap"},
-            {"ticker": "GOOGL", "name": "Alphabet Inc.", "threshold": 2.8, "type": "megacap"},
+            {"ticker": "AAPL", "name": "Apple Inc.", "threshold": 2.5, "type": "megacap"},
+            {"ticker": "MSFT", "name": "Microsoft Corp.", "threshold": 2.5, "type": "megacap"},
+            {"ticker": "AMZN", "name": "Amazon.com Inc.", "threshold": 2.5, "type": "megacap"},
+            {"ticker": "GOOGL", "name": "Alphabet Inc.", "threshold": 2.5, "type": "megacap"},
             {"ticker": "META", "name": "Meta Platforms", "threshold": 2.8, "type": "megacap"},
             {"ticker": "PLTR", "name": "Palantir Technologies", "threshold": 3.0, "type": "growth_leader"},
-            # Termometri Macroeconomici & Materie Prime (Anticipatori Sell-Off)
+            {"ticker": "AVGO", "name": "Broadcom Inc.", "threshold": 2.8, "type": "growth_leader"},
+            {"ticker": "AMD", "name": "Advanced Micro Devices", "threshold": 3.0, "type": "growth_leader"},
+            {"ticker": "ASML", "name": "ASML Holding", "threshold": 2.8, "type": "growth_leader"},
+            {"ticker": "ARM", "name": "ARM Holdings", "threshold": 3.2, "type": "growth_leader"},
+            {"ticker": "COIN", "name": "Coinbase Global", "threshold": 3.5, "type": "crypto_proxy"},
+            {"ticker": "MSTR", "name": "MicroStrategy Inc.", "threshold": 4.0, "type": "crypto_proxy"},
+
+            # 2. Difesa, Aerospazio & Cyber-Security
+            {"ticker": "LMT", "name": "Lockheed Martin", "threshold": 2.0, "type": "defense"},
+            {"ticker": "RTX", "name": "RTX Corp (Raytheon)", "threshold": 2.0, "type": "defense"},
+            {"ticker": "NOC", "name": "Northrop Grumman", "threshold": 2.0, "type": "defense"},
+            {"ticker": "GD", "name": "General Dynamics", "threshold": 2.0, "type": "defense"},
+            {"ticker": "PANW", "name": "Palo Alto Networks", "threshold": 3.0, "type": "defense"},
+            {"ticker": "CRWD", "name": "CrowdStrike Holdings", "threshold": 3.2, "type": "defense"},
+
+            # 3. Energia, Uranio, Nucleare & Utilities AI
+            {"ticker": "VST", "name": "Vistra Corp (AI Power)", "threshold": 3.0, "type": "growth_leader"},
+            {"ticker": "CEG", "name": "Constellation Energy", "threshold": 3.0, "type": "growth_leader"},
+            {"ticker": "CCJ", "name": "Cameco Corp (Uranio)", "threshold": 3.0, "type": "commodity"},
+            {"ticker": "SMR", "name": "NuScale Power (SMR)", "threshold": 4.0, "type": "growth_leader"},
+            {"ticker": "XOM", "name": "ExxonMobil Corp", "threshold": 2.2, "type": "energy"},
+            {"ticker": "CVX", "name": "Chevron Corp", "threshold": 2.2, "type": "energy"},
+
+            # 4. Sanità, Pharma & GLP-1
+            {"ticker": "LLY", "name": "Eli Lilly (Pharma GLP-1)", "threshold": 2.5, "type": "pharma"},
+            {"ticker": "NVO", "name": "Novo Nordisk", "threshold": 2.5, "type": "pharma"},
+            {"ticker": "ISRG", "name": "Intuitive Surgical (Robotics)", "threshold": 2.8, "type": "pharma"},
+            {"ticker": "ABBV", "name": "AbbVie Inc", "threshold": 2.2, "type": "pharma"},
+
+            # 5. Finanza Globale, Banche d'Affari & Carte
+            {"ticker": "JPM", "name": "JPMorgan Chase", "threshold": 2.0, "type": "finance"},
+            {"ticker": "GS", "name": "Goldman Sachs Group", "threshold": 2.2, "type": "finance"},
+            {"ticker": "V", "name": "Visa Inc.", "threshold": 1.8, "type": "finance"},
+
+            # 6. Industria, Consumi Resilienti & Campioni Europei
+            {"ticker": "CAT", "name": "Caterpillar Inc.", "threshold": 2.2, "type": "industry"},
+            {"ticker": "GE", "name": "GE Aerospace", "threshold": 2.5, "type": "industry"},
+            {"ticker": "COST", "name": "Costco Wholesale", "threshold": 2.0, "type": "consumer"},
+            {"ticker": "RACE.MI", "name": "Ferrari N.V. (Milano)", "threshold": 2.0, "type": "luxury"},
+            {"ticker": "UCG.MI", "name": "UniCredit S.p.A.", "threshold": 2.2, "type": "europe"},
+            {"ticker": "SAP.DE", "name": "SAP SE (Xetra)", "threshold": 2.0, "type": "europe"},
+
+            # 7. Termometri Macroeconomici & Materie Prime (Anticipatori Sistemici)
             {"ticker": "GC=F", "name": "Oro Spot / Gold", "threshold": 1.5, "type": "commodity"},
+            {"ticker": "SI=F", "name": "Argento Spot / Silver", "threshold": 2.2, "type": "commodity"},
             {"ticker": "BZ=F", "name": "Petrolio Brent", "threshold": 2.2, "type": "commodity"},
+            {"ticker": "CL=F", "name": "Petrolio WTI", "threshold": 2.2, "type": "commodity"},
+            {"ticker": "HG=F", "name": "Rame / High Grade Copper", "threshold": 2.0, "type": "commodity"},
             {"ticker": "^VIX", "name": "Indice Volatilità VIX", "threshold": 8.0, "type": "vix_spike"},
             {"ticker": "^TNX", "name": "Rendimento US 10Y Treasury (Tassi)", "threshold": 2.0, "type": "yield_spike"},
             {"ticker": "DX-Y.NYB", "name": "Indice Dollaro USA (DXY)", "threshold": 0.6, "type": "dollar_spike"},
             {"ticker": "^GSPC", "name": "Indice S&P 500", "threshold": 1.2, "type": "benchmark"},
-            {"ticker": "^IXIC", "name": "Indice Nasdaq Composite", "threshold": 1.2, "type": "benchmark"},
-            # Nuovi Leader di Momentum e Difesa
-            {"ticker": "VST", "name": "Vistra Corp (AI Power)", "threshold": 3.0, "type": "growth_leader"},
-            {"ticker": "CEG", "name": "Constellation Energy", "threshold": 3.0, "type": "growth_leader"},
-            {"ticker": "CCJ", "name": "Cameco Corp (Uranio)", "threshold": 3.0, "type": "commodity"},
-            {"ticker": "LMT", "name": "Lockheed Martin (Difesa)", "threshold": 2.0, "type": "defense"},
-            {"ticker": "LLY", "name": "Eli Lilly (Pharma GLP-1)", "threshold": 2.5, "type": "pharma"}
+            {"ticker": "^IXIC", "name": "Indice Nasdaq Composite", "threshold": 1.2, "type": "benchmark"}
         ]
 
         for ma in major_assets:
@@ -413,7 +452,10 @@ class ProactiveSentinelService:
         # 5. RADAR PREDITTIVO: SQUEEZE IMMINENTI & DIVERGENZE SMART MONEY
         # ---------------------------------------------------------
         # Scansiona i leader di mercato alla ricerca di compressione di volatilità (pre-esplosione)
-        predictive_candidates = ["NVDA", "TSLA", "PLTR", "VST", "AAPL", "BTC-EUR"]
+        predictive_candidates = [
+            "NVDA", "TSLA", "PLTR", "VST", "AAPL", "AMD", "AVGO", "COIN",
+            "LMT", "LLY", "CCJ", "XOM", "GC=F", "CL=F", "BTC-EUR", "SOL-EUR"
+        ]
         for cand in predictive_candidates:
             cand_last_alert = self.ticker_cooldowns.get(f"pred_{cand}", 0.0)
             if now_ts - cand_last_alert < (self.cooldown_seconds * 2):  # Cooldown 8 ore per alert predittivi
