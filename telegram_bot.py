@@ -2438,7 +2438,29 @@ async def _handle_text_message_core(update: Update, context: ContextTypes.DEFAUL
                 except Exception:
                     pass
 
-            await update.message.reply_text(f"⚠️ Dati storici non sufficienti per il titolo `{ticker}`.", parse_mode="Markdown")
+            # Se non ci sono dati di borsa (es. società non quotata come Anthropic o OpenAI, oppure query discorsiva)
+            # passa la palla ad answer_general_query per non bloccare la risposta
+            status_msg = await update.message.reply_text("💬 *Analizzo il contesto societario e macroeconomico...*", parse_mode="Markdown")
+            ai_answer = llm_svc.answer_general_query(raw_text, memory_context=memory_context)
+            if status_msg:
+                try:
+                    await status_msg.delete()
+                except Exception:
+                    pass
+
+            if ai_answer:
+                keyboard = [
+                    [
+                        InlineKeyboardButton("💼 Diagnosi Portafoglio", callback_data="cmd_portfolio"),
+                        InlineKeyboardButton("💎 Top Occasioni a Sconto", callback_data="cmd_occasioni")
+                    ]
+                ]
+                reply_markup = InlineKeyboardMarkup(keyboard)
+                supabase_svc.log_message(user_id, "user", raw_text)
+                supabase_svc.log_message(user_id, "assistant", ai_answer)
+                await send_safe_text(update, ai_answer, reply_markup=reply_markup)
+            else:
+                await update.message.reply_text(f"⚠️ Dati storici non sufficienti per il titolo `{ticker}`.", parse_mode="Markdown")
             return
 
     # 4. Domanda conversazionale / aperta
