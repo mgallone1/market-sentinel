@@ -1703,17 +1703,31 @@ async def _handle_text_message_core(update: Update, context: ContextTypes.DEFAUL
     supabase_svc.log_message(user_id, "user", raw_text)
 
     # --- 0.0 INTERCETTAZIONE RAPIDA COMANDI CHAT SENZA SLASH ---
-    if raw_text.strip().lower() in ["alpaca", "trade", "trading", "saldo", "conto"]:
+    lower_raw = raw_text.strip().lower()
+    if lower_raw in ["alpaca", "trade", "trading", "saldo", "conto"] or (
+        "alpaca" in lower_raw and any(k in lower_raw for k in ["come sta andando", "come va", "andando con", "andando su", "perso", "guadagnato", "stato", "saldo", "posizioni", "portafoglio alpaca"])
+    ):
         await alpaca_cmd(update, context)
         return
 
     # --- 0.1 INTERCETTAZIONE ORDINI IN TEMPO REALE SU ALPACA ---
-    # Riconosce ordini vocali/testuali tipo: "compra 5 azioni di NVDA", "vendi TSLA", "fai un trade su AAPL", "compra 100$ di NVDA"
-    order_pattern = re.search(r'\b(compra|acquista|long|short|vendi)\s+(\d+(?:\.\d+)?)\s*(azioni|pezzi|quote|\$|euro|usd)?\s*(?:di|su)?\s*([A-Za-z0-9\.\-\/]+)', raw_text, re.IGNORECASE)
+    # Riconosce ordini vocali/testuali tipo: "compra 5 azioni di NVDA", "vai short su Nvidia con 50 quote", "vendi TSLA", "fai un trade su AAPL", "compra 100$ di NVDA"
+    order_pattern = re.search(r'\b(?:vai\s+)?(compra|acquista|long|short|vendi)\s+(\d+(?:\.\d+)?)\s*(azioni|pezzi|quote|\$|euro|usd)?\s*(?:di|su)?\s*([A-Za-z0-9\.\-\/]+)', raw_text, re.IGNORECASE)
     if not order_pattern:
-        order_pattern = re.search(r'\b(compra|acquista|long|short|vendi)\s+([A-Za-z0-9\.\-\/]+)\s*(?:per\s+)?(\d+(?:\.\d+)?)\s*(\$|euro|usd|azioni|quote)?', raw_text, re.IGNORECASE)
+        # Es. "vai short su Nvidia con 50 quote"
+        order_pattern_alt = re.search(r'\b(?:vai\s+)?(compra|acquista|long|short|vendi)\s+(?:su\s+|di\s+)?([A-Za-z0-9\.\-\/]+)\s+(?:con\s+|per\s+)?(\d+(?:\.\d+)?)\s*(azioni|pezzi|quote|\$|euro|usd)?', raw_text, re.IGNORECASE)
+        if order_pattern_alt:
+            g = order_pattern_alt.groups()
+            action = g[0].lower()
+            side = "sell" if action in ["short", "vendi"] else "buy"
+            sym = g[1].upper()
+            val_num = float(g[2]) if g[2] else 1.0
+            unit = (g[3] or "azioni").lower()
+            order_pattern = True
+        else:
+            order_pattern = re.search(r'\b(?:vai\s+)?(compra|acquista|long|short|vendi)\s+([A-Za-z0-9\.\-\/]+)\s*(?:per\s+)?(\d+(?:\.\d+)?)\s*(\$|euro|usd|azioni|quote)?', raw_text, re.IGNORECASE)
 
-    if order_pattern:
+    if order_pattern and order_pattern is not True:
         groups = order_pattern.groups()
         # Normalizza i campi
         action = groups[0].lower()
@@ -1994,6 +2008,11 @@ async def _handle_text_message_core(update: Update, context: ContextTypes.DEFAUL
 
         supabase_svc.log_message(user_id, "assistant", resp_text)
         await send_safe_text(update, resp_text, reply_markup=reply_markup)
+        return
+
+    # Se l'utente chiede lo stato di Alpaca o del trading paper
+    if intent == "alpaca_status":
+        await alpaca_cmd(update, context)
         return
 
     # 1. Se l'utente chiede le migliori occasioni o idee di trading

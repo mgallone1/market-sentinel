@@ -223,12 +223,16 @@ DISTINZIONE DEGLI INTENTI:
    - Se l'utente chiede esplicitamente previsioni, stime probabilistiche future, target price o fa una domanda di follow-up su una previsione precedente con nuovi parametri/budget (es. "che previsioni hai su bitcoin?", "previsione nvidia", "dove vedi apple nei prossimi giorni?", "qual è il target di xdem?", "e se invece volessi entrare con 2000€?", "e con orizzonte breve?").
 12. "sentinel_status":
    - Se l'utente chiede lo stato del radar di sorveglianza proattiva, i titoli monitorati o gli alert sentinella attivi (es. "stato sentinella", "radar", "cosa stai monitorando?", "alert attivi", "/sentinel").
-13. "general_chat":
+13. "alpaca_status":
+   - TASSATIVO: Se l'utente chiede come sta andando il trading su Alpaca, lo stato del conto broker, le posizioni aperte a margine, il saldo di Alpaca o esprime riflessioni/domande sul conto di trading live (es. "come sta andando su alpaca?", "come sta andando con alpaca?", "ho visto che ha perso ancora oggi", "saldo alpaca", "conto paper", "cosa abbiamo a mercato su alpaca?", "conto alpaca"). In questo caso ticker DEVE essere null.
+14. "alpaca_order":
+   - TASSATIVO: Se l'utente chiede o ordina di comprare, vendere o andare short/long su un titolo (es. "vai short su nvidia con 50 quote", "shorta 20 quote di apple", "compra 30 azioni tesla", "vendi nvda").
+15. "general_chat":
    - Conversazione generale, saluti o riflessioni teoriche non ancorate a un titolo specifico.
 
 Restituisci ESCLUSIVAMENTE un JSON valido:
 {{
-  "intent": "update_memory_or_profile" | "technical_explanation" | "ticker_analysis" | "opportunities" | "update_portfolio_ticker" | "portfolio" | "market_briefing" | "market_explanation" | "congress_trades" | "market_scanner" | "forecast_prediction" | "sentinel_status" | "general_chat",
+  "intent": "update_memory_or_profile" | "technical_explanation" | "ticker_analysis" | "opportunities" | "update_portfolio_ticker" | "portfolio" | "market_briefing" | "market_explanation" | "congress_trades" | "market_scanner" | "forecast_prediction" | "sentinel_status" | "alpaca_status" | "alpaca_order" | "general_chat",
   "ticker": "SIMBOLO_TICKER" o null,
   "replacements": [
      {{"old_ticker_or_name": "...", "new_ticker": "..."}}
