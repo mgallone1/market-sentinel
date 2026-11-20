@@ -2551,50 +2551,12 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
     if data == "alpaca_refresh":
         summary = alpaca_service.get_account_summary()
         acc = summary.get("account", {})
-        clock = summary.get("clock", {})
-        positions = summary.get("positions", [])
-        is_open = "APERTA 🟢" if clock.get("is_open") else "CHIUSA 🔴"
-        now_rome = datetime.now(ZoneInfo("Europe/Rome"))
-        is_weekend = now_rome.weekday() >= 5
-        market_note = ""
-        if is_weekend:
-            market_note = "\n⚠️ *Weekend: I mercati azionari sono CHIUSI, ma il mercato Crypto è ATTIVO 24/7!*\nPuoi negoziare BTC, ETH e SOL senza interruzioni.\n"
+        if "error" in acc:
+            await query.message.edit_text(f"⚠️ Errore connessione Alpaca: {acc['error']}")
+            return
 
-        val = float(acc.get("portfolio_value", 0))
-        cash = float(acc.get("cash", 0))
-        buying_power = float(acc.get("buying_power", 0))
-        
-        msg = (
-            "⚡ *ALPACA EXECUTION & DAY TRADER*\n"
-            "────────────────────────\n"
-            f"• *Stato Borsa USA:* {is_open}\n"
-            f"• *Valore Portafoglio:* `${val:,.2f}`\n"
-            f"• *Liquidità Libera (Cash):* `${cash:,.2f}`\n"
-            f"• *Buying Power:* `${buying_power:,.2f}`\n"
-            f"{market_note}\n"
-        )
-        keyboard = []
-        if positions:
-            msg += f"📈 *POSIZIONI ATTIVE ({len(positions)}):*\n"
-            for p in positions:
-                sym = p['symbol']
-                side = p['side'].upper()
-                qty = p['qty']
-                pl = float(p['unrealized_pl'])
-                plpc = float(p['unrealized_plpc']) * 100
-                curr = float(p['current_price'])
-                sign = "🟢 +" if pl >= 0 else "🔴 "
-                msg += f"  • `{sym}` ({side} x{qty}): `${curr:.2f}` | P&L: {sign}${pl:.2f} ({plpc:+.2f}%)\n"
-            keyboard.append([InlineKeyboardButton("🚨 Chiudi Tutte le Posizioni", callback_data="alpaca_close_all")])
-        else:
-            msg += "💤 *Nessuna posizione a mercato.* Portafoglio 100% in contanti.\n"
-            
-        if is_weekend:
-            keyboard.append([InlineKeyboardButton("🪙 Crypto Trading 24/7", callback_data="cmd_crypto")])
-        else:
-            keyboard.append([InlineKeyboardButton("⚡ Esegui Scanner Day-Trade", callback_data="alpaca_run_scanner")])
-        keyboard.append([InlineKeyboardButton("🔄 Aggiorna Saldo", callback_data="alpaca_refresh")])
-        await query.message.edit_text(msg, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
+        msg, markup = build_alpaca_dashboard_text(summary)
+        await query.message.edit_text(msg, parse_mode="Markdown", reply_markup=markup)
         return
 
     if data == "alpaca_close_all":
@@ -3048,92 +3010,96 @@ async def commodities_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     reply_markup = InlineKeyboardMarkup(keyboard)
     await status_msg.edit_text("\n".join(lines), parse_mode="Markdown", reply_markup=reply_markup)
 
+def build_alpaca_dashboard_text(summary: Dict[str, Any]) -> Tuple[str, InlineKeyboardMarkup]:
+    """Genera in modo unificato il messaggio e la tastiera per la dashboard di Alpaca con posizioni e movimenti odierni."""
+    acc = summary.get("account", {})
+    clock = summary.get("clock", {})
+    positions = summary.get("positions", [])
+    closed_trades = summary.get("today_closed_trades", [])
+
+    is_open = "APERTA 🟢" if clock.get("is_open") else "CHIUSA 🔴"
+    now_rome = datetime.now(ZoneInfo("Europe/Rome"))
+    is_weekend = now_rome.weekday() >= 5
+    market_note = ""
+    if is_weekend:
+        market_note = "\n⚠️ *Weekend: I mercati azionari sono CHIUSI, ma il mercato Crypto è ATTIVO 24/7!*\nPuoi negoziare BTC, ETH e SOL senza interruzioni.\n"
+
+    val = float(acc.get("portfolio_value", 0))
+    cash = float(acc.get("cash", 0))
+    buying_power = float(acc.get("buying_power", 0))
+
+    msg = (
+        "⚡ *ALPACA EXECUTION & DAY TRADER*\n"
+        "────────────────────────\n"
+        f"• *Stato Borsa USA:* {is_open}\n"
+        f"• *Valore Portafoglio:* `${val:,.2f}`\n"
+        f"• *Liquidità Libera (Cash):* `${cash:,.2f}`\n"
+        f"• *Buying Power:* `${buying_power:,.2f}`\n"
+        f"{market_note}\n"
+    )
+
+    keyboard = []
+    if positions:
+        msg += f"📈 *POSIZIONI ATTIVE A MERCATO ({len(positions)}):*\n"
+        for p in positions:
+            sym = p['symbol']
+            side = p['side'].upper()
+            qty = p['qty']
+            pl = float(p['unrealized_pl'])
+            plpc = float(p['unrealized_plpc']) * 100
+            curr = float(p['current_price'])
+            entry_p = float(p.get('avg_entry_price', 0))
+            sign = "🟢 +" if pl >= 0 else "🔴 "
+            msg += f"  • `{sym}` ({side} x{qty}): Carico `${entry_p:.2f}` -> Attuale `${curr:.2f}` | P&L: {sign}${pl:.2f} ({plpc:+.2f}%)\n"
+        keyboard.append([InlineKeyboardButton("🚨 Chiudi Tutte le Posizioni", callback_data="alpaca_close_all")])
+    else:
+        msg += "💤 *Nessuna posizione attualmente a mercato.*\n"
+
+    # Sezione Movimenti e Trade Chiusi della Giornata
+    if closed_trades:
+        from collections import defaultdict
+        grouped = defaultdict(lambda: {"qty": 0.0, "pnl": 0.0, "entry_sum": 0.0, "exit_sum": 0.0, "side": "", "time": ""})
+        for ct in closed_trades:
+            key = (ct["symbol"], ct["side"], ct.get("close_time", ""))
+            grouped[key]["qty"] += ct["qty"]
+            grouped[key]["pnl"] += ct["pnl"]
+            grouped[key]["entry_sum"] += (ct["entry_price"] * ct["qty"])
+            grouped[key]["exit_sum"] += (ct["exit_price"] * ct["qty"])
+            grouped[key]["side"] = ct["side"]
+            grouped[key]["time"] = ct.get("close_time", "")
+
+        tot_today_pnl = sum(v["pnl"] for v in grouped.values())
+        sign_tot = "🟢 +" if tot_today_pnl >= 0 else "🔴 "
+        msg += f"\n📋 *MOVIMENTI & TRADE CHIUSI OGGI:* (Realizzato: {sign_tot}${tot_today_pnl:,.2f})\n"
+        for (sym, s_side, c_time), v in grouped.items():
+            avg_in = v["entry_sum"] / v["qty"] if v["qty"] else 0.0
+            avg_out = v["exit_sum"] / v["qty"] if v["qty"] else 0.0
+            pnl = v["pnl"]
+            sign_p = "🟢 +" if pnl >= 0 else "🔴 "
+            pnl_pct = ((avg_in - avg_out) / avg_in * 100) if s_side == "SHORT" and avg_in else (((avg_out - avg_in) / avg_in * 100) if avg_in else 0.0)
+            time_str = f" ore {c_time}" if c_time else ""
+            msg += f"  • `{sym}` [{s_side} x{v['qty']:.0f}]: In `${avg_in:.2f}` -> Out `${avg_out:.2f}` | *{sign_p}${pnl:.2f}* ({pnl_pct:+.2f}%){time_str}\n"
+
+    if is_weekend:
+        keyboard.append([InlineKeyboardButton("🪙 Crypto Trading 24/7", callback_data="cmd_crypto")])
+    else:
+        keyboard.append([InlineKeyboardButton("⚡ Esegui Scanner Day-Trade", callback_data="alpaca_run_scanner")])
+    keyboard.append([InlineKeyboardButton("🔄 Aggiorna Saldo", callback_data="alpaca_refresh")])
+
+    return msg, InlineKeyboardMarkup(keyboard)
+
 async def alpaca_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Comando per visualizzare lo stato di Alpaca Trading e gestire le posizioni."""
     target_msg = get_target_msg(update)
     try:
         summary = alpaca_service.get_account_summary()
         acc = summary.get("account", {})
-        clock = summary.get("clock", {})
-        positions = summary.get("positions", [])
-        closed_trades = summary.get("today_closed_trades", [])
-        
         if "error" in acc:
             await send_safe_text(update, f"⚠️ Errore connessione Alpaca: {acc['error']}")
             return
-            
-        is_open = "APERTA 🟢" if clock.get("is_open") else "CHIUSA 🔴"
-        now_rome = datetime.now(ZoneInfo("Europe/Rome"))
-        is_weekend = now_rome.weekday() >= 5
-        market_note = ""
-        if is_weekend:
-            market_note = "\n⚠️ *Weekend: I mercati azionari sono CHIUSI, ma il mercato Crypto è ATTIVO 24/7!*\nPuoi negoziare BTC, ETH e SOL senza interruzioni.\n"
 
-        val = float(acc.get("portfolio_value", 0))
-        cash = float(acc.get("cash", 0))
-        buying_power = float(acc.get("buying_power", 0))
-        
-        msg = (
-            "⚡ *ALPACA EXECUTION & DAY TRADER*\n"
-            "────────────────────────\n"
-            f"• *Stato Borsa USA:* {is_open}\n"
-            f"• *Valore Portafoglio:* `${val:,.2f}`\n"
-            f"• *Liquidità Libera (Cash):* `${cash:,.2f}`\n"
-            f"• *Buying Power:* `${buying_power:,.2f}`\n"
-            f"{market_note}\n"
-        )
-        
-        keyboard = []
-        if positions:
-            msg += f"📈 *POSIZIONI ATTIVE A MERCATO ({len(positions)}):*\n"
-            for p in positions:
-                sym = p['symbol']
-                side = p['side'].upper()
-                qty = p['qty']
-                pl = float(p['unrealized_pl'])
-                plpc = float(p['unrealized_plpc']) * 100
-                curr = float(p['current_price'])
-                entry_p = float(p.get('avg_entry_price', 0))
-                sign = "🟢 +" if pl >= 0 else "🔴 "
-                msg += f"  • `{sym}` ({side} x{qty}): Carico `${entry_p:.2f}` -> Attuale `${curr:.2f}` | P&L: {sign}${pl:.2f} ({plpc:+.2f}%)\n"
-            keyboard.append([InlineKeyboardButton("🚨 Chiudi Tutte le Posizioni", callback_data="alpaca_close_all")])
-        else:
-            msg += "💤 *Nessuna posizione attualmente a mercato.*\n"
-
-        # Sezione Movimenti e Trade Chiusi della Giornata
-        if closed_trades:
-            # Consolida i sub-fills dello stesso ticker e orario
-            from collections import defaultdict
-            grouped = defaultdict(lambda: {"qty": 0.0, "pnl": 0.0, "entry_sum": 0.0, "exit_sum": 0.0, "side": "", "time": ""})
-            for ct in closed_trades:
-                key = (ct["symbol"], ct["side"], ct.get("close_time", ""))
-                grouped[key]["qty"] += ct["qty"]
-                grouped[key]["pnl"] += ct["pnl"]
-                grouped[key]["entry_sum"] += (ct["entry_price"] * ct["qty"])
-                grouped[key]["exit_sum"] += (ct["exit_price"] * ct["qty"])
-                grouped[key]["side"] = ct["side"]
-                grouped[key]["time"] = ct.get("close_time", "")
-
-            tot_today_pnl = sum(v["pnl"] for v in grouped.values())
-            sign_tot = "🟢 +" if tot_today_pnl >= 0 else "🔴 "
-            msg += f"\n📋 *MOVIMENTI & TRADE CHIUSI OGGI:* (Realizzato: {sign_tot}${tot_today_pnl:,.2f})\n"
-            for (sym, s_side, c_time), v in grouped.items():
-                avg_in = v["entry_sum"] / v["qty"] if v["qty"] else 0.0
-                avg_out = v["exit_sum"] / v["qty"] if v["qty"] else 0.0
-                pnl = v["pnl"]
-                sign_p = "🟢 +" if pnl >= 0 else "🔴 "
-                pnl_pct = ((avg_in - avg_out) / avg_in * 100) if s_side == "SHORT" and avg_in else (((avg_out - avg_in) / avg_in * 100) if avg_in else 0.0)
-                time_str = f" ore {c_time}" if c_time else ""
-                msg += f"  • `{sym}` [{s_side} x{v['qty']:.0f}]: In `${avg_in:.2f}` -> Out `${avg_out:.2f}` | *{sign_p}${pnl:.2f}* ({pnl_pct:+.2f}%){time_str}\n"
-            
-        if is_weekend:
-            keyboard.append([InlineKeyboardButton("🪙 Crypto Trading 24/7", callback_data="cmd_crypto")])
-        else:
-            keyboard.append([InlineKeyboardButton("⚡ Esegui Scanner Day-Trade", callback_data="alpaca_run_scanner")])
-        keyboard.append([InlineKeyboardButton("🔄 Aggiorna Saldo", callback_data="alpaca_refresh")])
-        
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        await send_safe_text(update, msg, parse_mode="Markdown", reply_markup=reply_markup)
+        msg, markup = build_alpaca_dashboard_text(summary)
+        await send_safe_text(update, msg, parse_mode="Markdown", reply_markup=markup)
     except Exception as e:
         print(f"[!] Errore alpaca_cmd: {e}")
         await send_safe_text(update, f"⚠️ Errore consultazione Alpaca: {str(e)}")
