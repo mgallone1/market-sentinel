@@ -70,12 +70,123 @@ class AlpacaExecutionService:
         acc = self._api_request("account")
         clock = self._api_request("clock")
         positions = self._api_request("positions")
+        today_trades = self.get_today_closed_trades()
         
         return {
             "account": acc,
             "clock": clock,
-            "positions": positions if isinstance(positions, list) else []
+            "positions": positions if isinstance(positions, list) else [],
+            "today_closed_trades": today_trades
         }
+
+    def get_today_closed_trades(self) -> List[Dict[str, Any]]:
+        """
+        Recupera e calcola con logica FIFO i round-trip completati nella giornata odierna,
+        restituendo per ciascuno il profitto/perdita realizzato e l'orario di chiusura.
+        """
+        try:
+            import datetime
+            from zoneinfo import ZoneInfo
+            from collections import defaultdict
+
+            all_acts = []
+            page_token = None
+            while True:
+                endpoint = "account/activities/FILL?direction=asc&page_size=100"
+                if page_token:
+                    endpoint += f"&page_token={page_token}"
+                data = self._api_request(endpoint)
+                if not data or not isinstance(data, list):
+                    break
+                all_acts.extend(data)
+                if len(data) < 100:
+                    break
+                page_token = data[-1].get('id')
+
+            today_rome_str = datetime.datetime.now(ZoneInfo("Europe/Rome")).strftime("%Y-%m-%d")
+            sym_fills = defaultdict(list)
+            for a in all_acts:
+                sym_fills[a.get('symbol')].append({
+                    'side': a.get('side'),
+                    'qty': float(a.get('qty', 0)),
+                    'price': float(a.get('price', 0)),
+                    'time': a.get('transaction_time', '')
+                })
+
+            closed_today = []
+            for sym, fills in sym_fills.items():
+                long_queue = []
+                short_queue = []
+                for f in fills:
+                    side = f['side']
+                    qty = f['qty']
+                    price = f['price']
+                    t = f['time']
+                    try:
+                        dt_utc = datetime.datetime.fromisoformat(t.replace('Z', '+00:00'))
+                        dt_rome = dt_utc.astimezone(ZoneInfo("Europe/Rome"))
+                        is_today = dt_rome.strftime("%Y-%m-%d") == today_rome_str
+                        close_time_str = dt_rome.strftime("%H:%M")
+                    except Exception:
+                        is_today = False
+                        close_time_str = ""
+
+                    if side in ['buy']:
+                        while qty > 1e-6 and short_queue:
+                            sqty, sprice, stime = short_queue[0]
+                            m_qty = min(qty, sqty)
+                            pnl = (sprice - price) * m_qty
+                            if is_today:
+                                closed_today.append({
+                                    'symbol': sym,
+                                    'side': 'SHORT',
+                                    'qty': m_qty,
+                                    'entry_price': sprice,
+                                    'exit_price': price,
+                                    'pnl': pnl,
+                                    'pnl_pct': ((sprice - price) / sprice) * 100 if sprice else 0.0,
+                                    'close_time': close_time_str
+                                })
+                            qty -= m_qty
+                            if sqty - m_qty > 1e-6:
+                                short_queue[0] = (sqty - m_qty, sprice, stime)
+                            else:
+                                short_queue.pop(0)
+                        if qty > 1e-6:
+                            long_queue.append((qty, price, t))
+
+                    elif side in ['sell', 'sell_short']:
+                        while qty > 1e-6 and long_queue:
+                            bqty, bprice, btime = long_queue[0]
+                            m_qty = min(qty, bqty)
+                            pnl = (price - bprice) * m_qty
+                            if is_today:
+                                closed_today.append({
+                                    'symbol': sym,
+                                    'side': 'LONG',
+                                    'qty': m_qty,
+                                    'entry_price': bprice,
+                                    'exit_price': price,
+                                    'pnl': pnl,
+                                    'pnl_pct': ((price - bprice) / bprice) * 100 if bprice else 0.0,
+                                    'close_time': close_time_str
+                                })
+                            qty -= m_qty
+                            if bqty - m_qty > 1e-6:
+                                long_queue[0] = (bqty - m_qty, bprice, btime)
+                            else:
+                                long_queue.pop(0)
+                        if qty > 1e-6:
+                            short_queue.append((qty, price, t))
+
+            # Raggruppa per simbolo e direzione se eseguiti allo stesso orario
+            consolidated = []
+            for ct in closed_today:
+                consolidated.append(ct)
+            return consolidated
+        except Exception as e:
+            logger.error(f"Errore calcolo today_closed_trades: {e}")
+            return []
 
     def place_bracket_order(
         self,

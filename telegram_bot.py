@@ -3056,6 +3056,7 @@ async def alpaca_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         acc = summary.get("account", {})
         clock = summary.get("clock", {})
         positions = summary.get("positions", [])
+        closed_trades = summary.get("today_closed_trades", [])
         
         if "error" in acc:
             await send_safe_text(update, f"⚠️ Errore connessione Alpaca: {acc['error']}")
@@ -3084,7 +3085,7 @@ async def alpaca_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         keyboard = []
         if positions:
-            msg += f"📈 *POSIZIONI ATTIVE ({len(positions)}):*\n"
+            msg += f"📈 *POSIZIONI ATTIVE A MERCATO ({len(positions)}):*\n"
             for p in positions:
                 sym = p['symbol']
                 side = p['side'].upper()
@@ -3092,11 +3093,38 @@ async def alpaca_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 pl = float(p['unrealized_pl'])
                 plpc = float(p['unrealized_plpc']) * 100
                 curr = float(p['current_price'])
+                entry_p = float(p.get('avg_entry_price', 0))
                 sign = "🟢 +" if pl >= 0 else "🔴 "
-                msg += f"  • `{sym}` ({side} x{qty}): `${curr:.2f}` | P&L: {sign}${pl:.2f} ({plpc:+.2f}%)\n"
+                msg += f"  • `{sym}` ({side} x{qty}): Carico `${entry_p:.2f}` -> Attuale `${curr:.2f}` | P&L: {sign}${pl:.2f} ({plpc:+.2f}%)\n"
             keyboard.append([InlineKeyboardButton("🚨 Chiudi Tutte le Posizioni", callback_data="alpaca_close_all")])
         else:
-            msg += "💤 *Nessuna posizione a mercato.* Portafoglio 100% in contanti.\n"
+            msg += "💤 *Nessuna posizione attualmente a mercato.*\n"
+
+        # Sezione Movimenti e Trade Chiusi della Giornata
+        if closed_trades:
+            # Consolida i sub-fills dello stesso ticker e orario
+            from collections import defaultdict
+            grouped = defaultdict(lambda: {"qty": 0.0, "pnl": 0.0, "entry_sum": 0.0, "exit_sum": 0.0, "side": "", "time": ""})
+            for ct in closed_trades:
+                key = (ct["symbol"], ct["side"], ct.get("close_time", ""))
+                grouped[key]["qty"] += ct["qty"]
+                grouped[key]["pnl"] += ct["pnl"]
+                grouped[key]["entry_sum"] += (ct["entry_price"] * ct["qty"])
+                grouped[key]["exit_sum"] += (ct["exit_price"] * ct["qty"])
+                grouped[key]["side"] = ct["side"]
+                grouped[key]["time"] = ct.get("close_time", "")
+
+            tot_today_pnl = sum(v["pnl"] for v in grouped.values())
+            sign_tot = "🟢 +" if tot_today_pnl >= 0 else "🔴 "
+            msg += f"\n📋 *MOVIMENTI & TRADE CHIUSI OGGI:* (Realizzato: {sign_tot}${tot_today_pnl:,.2f})\n"
+            for (sym, s_side, c_time), v in grouped.items():
+                avg_in = v["entry_sum"] / v["qty"] if v["qty"] else 0.0
+                avg_out = v["exit_sum"] / v["qty"] if v["qty"] else 0.0
+                pnl = v["pnl"]
+                sign_p = "🟢 +" if pnl >= 0 else "🔴 "
+                pnl_pct = ((avg_in - avg_out) / avg_in * 100) if s_side == "SHORT" and avg_in else (((avg_out - avg_in) / avg_in * 100) if avg_in else 0.0)
+                time_str = f" ore {c_time}" if c_time else ""
+                msg += f"  • `{sym}` [{s_side} x{v['qty']:.0f}]: In `${avg_in:.2f}` -> Out `${avg_out:.2f}` | *{sign_p}${pnl:.2f}* ({pnl_pct:+.2f}%){time_str}\n"
             
         if is_weekend:
             keyboard.append([InlineKeyboardButton("🪙 Crypto Trading 24/7", callback_data="cmd_crypto")])
