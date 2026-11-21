@@ -15,9 +15,15 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copia il codice sorgente
 COPY . .
 
+# Pre-flight check: compila i sorgenti Python per bloccare a monte errori di sintassi/import
+RUN python -m py_compile telegram_bot.py config.py services/*.py
+
+# Rendi eseguibile l'entrypoint supervisor
+RUN chmod +x entrypoint.sh
+
 # Variabili d'ambiente per Python
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONPATH=/app
 
-# Avvio del bot
-CMD ["python", "telegram_bot.py"]
+# Avvio con Supervisor auto-restart
+CMD ["./entrypoint.sh"]
