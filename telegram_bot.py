@@ -290,20 +290,17 @@ async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     ACTIVE_CHAT_IDS.add(user_id)
     msg = (
-        "👋 *Ciao! Sono il tuo Financial Strategist & Chief Investment Officer (CIO) personale.*\n\n"
-        "Parliamo in italiano, con tutte le quotazioni e i calcoli convertiti rigorosamente in *Euro (€)*, pronti per le tue operazioni su Trade Republic.\n\n"
-        "Ecco le funzioni di consulenza patrimoniale attive:\n\n"
-        "🧭 *Consulenza Titolo con Tesi del CIO:* Scrivi semplicemente il nome o ticker (es. `XDEM`, `XDWD`, `NVIDIA`, `TSMC`, `BYD`) per ricevere una vera consulenza strategica, con giudizio chiaro e piano d'azione in Euro.\n"
-        "💼 *Diagnosi Globale di Portafoglio:* Digita `/portafoglio` o inviami uno screenshot per visualizzare la diagnosi patrimoniale, i pesi di allocazione e il consiglio di ribilanciamento.\n"
-        "👤 *Profilo Investitore & PAC:* Digita `/profilo` per vedere o aggiornare i tuoi obiettivi, il budget mensile e l'orizzonte temporale.\n"
-        "💎 *Opportunity Hunter:* Digita `/occasioni` per scansionare all'istante l'intero mercato e trovare i titoli a forte sconto statistico con approfondimento discorsivo del CIO.\n"
-        "🔮 *Previsioni Quantitative d'Insieme:* Digita `/previsione TICKER` (es. `/previsione NVDA`, `/previsione BTC`) per il modello predittivo a 10.000 iterazioni Monte Carlo, Cicli Hurst ed Elliott.\n"
-        "🛡️ *Sentinella Proattiva & Radar:* Digita `/sentinel` (o `/radar`) per verificare la sorveglianza autonoma 24/7 su anomalie, breakout e disclosure.\n"
-        "⚡ *Day Trader Chart Scanner:* Digita `/scanner` (o `/daytrade`) per individuare breakout a 20 giorni, bull flags e rimbalzi tecnici da ipervenduto.\n"
-        "🏛️ *Capitol Hill & Pelosi Tracker:* Digita `/pelosi` (o `/congresso`) per consultare gli ultimi disclosure ufficiali (PTR) depositati al Congresso USA.\n"
-        "🧮 *Simulatore Ordini Trade Republic:* Digita `/simula TICKER BUDGET` (es. `/simula XDEM 500`) per calcolare quote esatte e prezzo limite anti-spread.\n"
-        "🌅 *Briefing di Mercato:* Digita `/briefing` per il resoconto completo su Wall Street, Europa e geopolitica (erogato in automatico alle *07:00* e *15:00 CET*).\n"
-        "🎬 *Visione Video & Social:* Mandami un video o incolla un link da YouTube Shorts, TikTok, Instagram Reel o X per una decodifica approfondita di parlato e grafici con fact-checking del CIO."
+        "👋 *Ciao! Sono il tuo Market Sentinel & Financial Copilot personale.*\n\n"
+        "Comandi rapidi disponibili:\n\n"
+        "⚡ `/alpaca` — Pannello trading live: saldo, posizioni aperte, movimenti odierni e chiusure\n"
+        "🪙 `/crypto` — Trading Crypto 24/7 (Bitcoin, Ethereum, Solana con quotazioni in EUR e ordini 1-click)\n"
+        "💼 `/portafoglio` — Diagnosi del portafoglio titoli Trade Republic e pesi di allocazione\n"
+        "🌅 `/briefing` — Quadro di mercato macro, indici Wall Street ed Europa e breaking news\n"
+        "⚡ `/scanner` — Day trader chart scanner per breakout a 20 giorni, bull flags e rimbalzi\n"
+        "🏛️ `/pelosi` — Tracker dei disclosure ufficiali (PTR) del Congresso USA e di Capitol Hill\n"
+        "💎 `/occasioni` — Top opportunità e titoli a forte sconto statistico\n"
+        "🛡️ `/sentinel` — Stato del radar di sorveglianza proattiva continua\n\n"
+        "💡 *Interazione Libera:* Puoi sempre scrivermi in chat naturale (es. _\"Come va su Alpaca?\"_, _\"Shorta Nvidia\"_, _\"Compra 2500$ di Solana\"_ o mandarmi uno screenshot di Trade Republic)."
     )
     await send_safe_text(update, msg)
 
@@ -2940,23 +2937,17 @@ async def sentinel_watchdog_job(application):
         print(f"[!] Errore sentinel_watchdog_job: {e}")
 
 async def post_init(application):
-    """Configura il menu dei comandi nativo di Telegram e avvia lo scheduler dei briefing e della sentinella proattiva."""
+    """Configura il menu dei comandi nativo di Telegram con i soli comandi effettivamente usati e pertinenti."""
     bot_commands = [
-        BotCommand("portafoglio", "💼 Diagnosi del portafoglio e asset allocation"),
-        BotCommand("alpaca", "⚡ Trading live: saldo, posizioni e chiusura"),
-        BotCommand("materieprime", "🛢️ Metalli e Petrolio: Oro, Argento, WTI, Gas"),
-        BotCommand("previsione", "🔮 Previsione ensemble (Monte Carlo, Hurst & Z-Score)"),
+        BotCommand("alpaca", "⚡ Trading live: saldo, posizioni attive e chiuse"),
+        BotCommand("portafoglio", "💼 Diagnosi del portafoglio titoli Trade Republic"),
+        BotCommand("briefing", "🌅 Quadro di mercato Wall Street ed Europa"),
+        BotCommand("crypto", "🪙 Crypto trading 24/7 (BTC, ETH, SOL)"),
+        BotCommand("scanner", "⚡ Day trader chart scanner (breakout & setup)"),
+        BotCommand("pelosi", "🏛️ Trades Capitol Hill & Congress Tracker"),
+        BotCommand("occasioni", "💎 Top occasioni a forte sconto"),
         BotCommand("sentinel", "🛡️ Stato radar sentinella proattiva 24/7"),
-        BotCommand("scanner", "⚡ Day trader chart scanner (breakout & ipervenduto)"),
-        BotCommand("pelosi", "🏛️ Trades Capitol Hill & Donald Trump Network"),
-        BotCommand("profilo", "👤 Profilo investitore, PAC e orizzonte temporale"),
-        BotCommand("briefing", "🌅 Quadro di mercato, Wall Street ed Europa"),
-        BotCommand("occasioni", "💎 Top 10 occasioni a sconto con tesi del CIO"),
-        BotCommand("cicli", "🔄 Radar ciclico Hurst & Battleplan"),
-        BotCommand("simula", "🧮 Simula piano d'ordine su Trade Republic"),
-        BotCommand("memoria", "🧠 Visualizza la memoria a lungo termine"),
-        BotCommand("add", "➕ Aggiungi manualmente una posizione"),
-        BotCommand("help", "ℹ️ Mostra la guida all'uso del bot")
+        BotCommand("help", "ℹ️ Guida alle funzioni e comandi del bot")
     ]
     try:
         await application.bot.set_my_commands(bot_commands)
