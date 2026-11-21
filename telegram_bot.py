@@ -2837,6 +2837,46 @@ async def auto_flatten_overnight_job(application):
     except Exception as e:
         print(f"[!] Errore auto_flatten_overnight_job: {e}")
 
+async def crypto_auto_risk_manager_job(application):
+    """
+    Monitor attivo 24/7 sulle posizioni Crypto aperte:
+    Se la posizione tocca il Take Profit (+2.5%) o lo Stop Loss (-1.5%),
+    la chiude automaticamente a mercato e notifica Michele su Telegram.
+    """
+    try:
+        summary = alpaca_service.get_account_summary()
+        positions = summary.get("positions", [])
+        for p in positions:
+            sym = p.get("symbol", "")
+            if "/" in sym or "USD" in sym and sym.startswith(("BTC", "ETH", "SOL", "ADA", "XRP", "DOGE")):
+                plpc = float(p.get("unrealized_plpc", 0.0)) * 100
+                qty = float(p.get("qty", 0.0))
+                pl = float(p.get("unrealized_pl", 0.0))
+                curr_p = float(p.get("current_price", 0.0))
+
+                # Trigger Take Profit (+2.5%) o Stop Loss (-1.5%)
+                if plpc >= 2.5 or plpc <= -1.5:
+                    alpaca_service.close_position(sym)
+                    action_label = "🎯 *TAKE PROFIT RAGGIUNTO (+2.5%)*" if plpc >= 2.5 else "🛑 *STOP LOSS PROTETTIVO ESEGUITO (-1.5%)*"
+                    for uid in AUTHORIZED_USER_IDS:
+                        try:
+                            await application.bot.send_message(
+                                chat_id=uid,
+                                text=(
+                                    f"{action_label}\n"
+                                    f"────────────────────────\n"
+                                    f"• *Asset Chiuso:* `{sym}`\n"
+                                    f"• *Prezzo Esecuzione:* `${curr_p:.2f}`\n"
+                                    f"• *Risultato Netto:* `${pl:+.2f}` ({plpc:+.2f}%)\n"
+                                    f"Posizione liquidata con successo sul conto Alpaca."
+                                ),
+                                parse_mode="Markdown"
+                            )
+                        except Exception:
+                            pass
+    except Exception as e:
+        print(f"[!] Errore crypto_auto_risk_manager_job: {e}")
+
 async def sentinel_watchdog_job(application):
     """Esegue il controllo proattivo periodico della sentinella."""
     try:
@@ -2909,6 +2949,14 @@ async def post_init(application):
             CronTrigger(minute="*/10", timezone="Europe/Rome"),
             args=[application],
             id="sentinel_watchdog_10min",
+            replace_existing=True
+        )
+        # Monitor Risk Management Crypto 24/7 (TP +2.5% / SL -1.5% ogni 5 minuti)
+        scheduler.add_job(
+            crypto_auto_risk_manager_job,
+            CronTrigger(minute="*/5", timezone="Europe/Rome"),
+            args=[application],
+            id="crypto_risk_mgr_5min",
             replace_existing=True
         )
         scheduler.start()
