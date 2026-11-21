@@ -3015,7 +3015,7 @@ def build_alpaca_dashboard_text(summary: Dict[str, Any]) -> Tuple[str, InlineKey
     acc = summary.get("account", {})
     clock = summary.get("clock", {})
     positions = summary.get("positions", [])
-    closed_trades = summary.get("today_closed_trades", [])
+    recent_closed = summary.get("recent_closed_trades", [])
 
     is_open = "APERTA 🟢" if clock.get("is_open") else "CHIUSA 🔴"
     now_rome = datetime.now(ZoneInfo("Europe/Rome"))
@@ -3055,30 +3055,31 @@ def build_alpaca_dashboard_text(summary: Dict[str, Any]) -> Tuple[str, InlineKey
     else:
         msg += "💤 *Nessuna posizione attualmente a mercato.*\n"
 
-    # Sezione Movimenti e Trade Chiusi della Giornata
-    if closed_trades:
+    # Sezione Movimenti e Trade Chiusi Recenti (Ultime sessioni / Giornata)
+    if recent_closed:
         from collections import defaultdict
-        grouped = defaultdict(lambda: {"qty": 0.0, "pnl": 0.0, "entry_sum": 0.0, "exit_sum": 0.0, "side": "", "time": ""})
-        for ct in closed_trades:
-            key = (ct["symbol"], ct["side"], ct.get("close_time", ""))
+        grouped = defaultdict(lambda: {"qty": 0.0, "pnl": 0.0, "entry_sum": 0.0, "exit_sum": 0.0, "side": "", "date": "", "time": ""})
+        for ct in recent_closed:
+            key = (ct["symbol"], ct["side"], ct.get("date", ""), ct.get("time", ""))
             grouped[key]["qty"] += ct["qty"]
             grouped[key]["pnl"] += ct["pnl"]
             grouped[key]["entry_sum"] += (ct["entry_price"] * ct["qty"])
             grouped[key]["exit_sum"] += (ct["exit_price"] * ct["qty"])
             grouped[key]["side"] = ct["side"]
-            grouped[key]["time"] = ct.get("close_time", "")
+            grouped[key]["date"] = ct.get("date", "")
+            grouped[key]["time"] = ct.get("time", "")
 
-        tot_today_pnl = sum(v["pnl"] for v in grouped.values())
-        sign_tot = "🟢 +" if tot_today_pnl >= 0 else "🔴 "
-        msg += f"\n📋 *MOVIMENTI & TRADE CHIUSI OGGI:* (Realizzato: {sign_tot}${tot_today_pnl:,.2f})\n"
-        for (sym, s_side, c_time), v in grouped.items():
+        tot_pnl = sum(v["pnl"] for v in grouped.values())
+        sign_tot = "🟢 +" if tot_pnl >= 0 else "🔴 "
+        msg += f"\n📋 *MOVIMENTI & ULTIMI TRADE CHIUSI:* (Realizzato: {sign_tot}${tot_pnl:,.2f})\n"
+        for (sym, s_side, c_date, c_time), v in grouped.items():
             avg_in = v["entry_sum"] / v["qty"] if v["qty"] else 0.0
             avg_out = v["exit_sum"] / v["qty"] if v["qty"] else 0.0
             pnl = v["pnl"]
             sign_p = "🟢 +" if pnl >= 0 else "🔴 "
             pnl_pct = ((avg_in - avg_out) / avg_in * 100) if s_side == "SHORT" and avg_in else (((avg_out - avg_in) / avg_in * 100) if avg_in else 0.0)
-            time_str = f" ore {c_time}" if c_time else ""
-            msg += f"  • `{sym}` [{s_side} x{v['qty']:.0f}]: In `${avg_in:.2f}` -> Out `${avg_out:.2f}` | *{sign_p}${pnl:.2f}* ({pnl_pct:+.2f}%){time_str}\n"
+            date_label = f" [{c_date} {c_time}]" if c_date and c_time else ""
+            msg += f"  • `{sym}` [{s_side} x{v['qty']:.0f}]: In `${avg_in:.2f}` -> Out `${avg_out:.2f}` | *{sign_p}${pnl:.2f}* ({pnl_pct:+.2f}%){date_label}\n"
 
     if is_weekend:
         keyboard.append([InlineKeyboardButton("🪙 Crypto Trading 24/7", callback_data="cmd_crypto")])

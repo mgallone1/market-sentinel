@@ -70,19 +70,20 @@ class AlpacaExecutionService:
         acc = self._api_request("account")
         clock = self._api_request("clock")
         positions = self._api_request("positions")
-        today_trades = self.get_today_closed_trades()
+        recent_closed = self.get_recent_closed_trades(limit_days=3)
         
         return {
             "account": acc,
             "clock": clock,
             "positions": positions if isinstance(positions, list) else [],
-            "today_closed_trades": today_trades
+            "recent_closed_trades": recent_closed
         }
 
-    def get_today_closed_trades(self) -> List[Dict[str, Any]]:
+    def get_recent_closed_trades(self, limit_days: int = 3) -> List[Dict[str, Any]]:
         """
-        Recupera e calcola con logica FIFO i round-trip completati nella giornata odierna,
-        restituendo per ciascuno il profitto/perdita realizzato e l'orario di chiusura.
+        Recupera e calcola con logica FIFO i round-trip completati nelle ultime sessioni
+        (default 3 giorni, coprendo weekend e sessione precedente),
+        restituendo per ciascuno il profitto/perdita realizzato, la data e l'orario di chiusura.
         """
         try:
             import datetime
@@ -103,7 +104,10 @@ class AlpacaExecutionService:
                     break
                 page_token = data[-1].get('id')
 
-            today_rome_str = datetime.datetime.now(ZoneInfo("Europe/Rome")).strftime("%Y-%m-%d")
+            rome_tz = ZoneInfo("Europe/Rome")
+            now_rome = datetime.datetime.now(rome_tz)
+            cutoff_date = (now_rome - datetime.timedelta(days=limit_days)).strftime("%Y-%m-%d")
+
             sym_fills = defaultdict(list)
             for a in all_acts:
                 sym_fills[a.get('symbol')].append({
@@ -113,7 +117,7 @@ class AlpacaExecutionService:
                     'time': a.get('transaction_time', '')
                 })
 
-            closed_today = []
+            closed_trades = []
             for sym, fills in sym_fills.items():
                 long_queue = []
                 short_queue = []
@@ -124,20 +128,22 @@ class AlpacaExecutionService:
                     t = f['time']
                     try:
                         dt_utc = datetime.datetime.fromisoformat(t.replace('Z', '+00:00'))
-                        dt_rome = dt_utc.astimezone(ZoneInfo("Europe/Rome"))
-                        is_today = dt_rome.strftime("%Y-%m-%d") == today_rome_str
-                        close_time_str = dt_rome.strftime("%H:%M")
+                        dt_rome = dt_utc.astimezone(rome_tz)
+                        trade_date_str = dt_rome.strftime("%Y-%m-%d")
+                        trade_time_str = dt_rome.strftime("%H:%M")
+                        is_in_range = trade_date_str >= cutoff_date
                     except Exception:
-                        is_today = False
-                        close_time_str = ""
+                        is_in_range = False
+                        trade_date_str = ""
+                        trade_time_str = ""
 
                     if side in ['buy']:
                         while qty > 1e-6 and short_queue:
                             sqty, sprice, stime = short_queue[0]
                             m_qty = min(qty, sqty)
                             pnl = (sprice - price) * m_qty
-                            if is_today:
-                                closed_today.append({
+                            if is_in_range:
+                                closed_trades.append({
                                     'symbol': sym,
                                     'side': 'SHORT',
                                     'qty': m_qty,
@@ -145,7 +151,9 @@ class AlpacaExecutionService:
                                     'exit_price': price,
                                     'pnl': pnl,
                                     'pnl_pct': ((sprice - price) / sprice) * 100 if sprice else 0.0,
-                                    'close_time': close_time_str
+                                    'date': trade_date_str,
+                                    'time': trade_time_str,
+                                    'raw_time': t
                                 })
                             qty -= m_qty
                             if sqty - m_qty > 1e-6:
@@ -160,8 +168,8 @@ class AlpacaExecutionService:
                             bqty, bprice, btime = long_queue[0]
                             m_qty = min(qty, bqty)
                             pnl = (price - bprice) * m_qty
-                            if is_today:
-                                closed_today.append({
+                            if is_in_range:
+                                closed_trades.append({
                                     'symbol': sym,
                                     'side': 'LONG',
                                     'qty': m_qty,
@@ -169,7 +177,9 @@ class AlpacaExecutionService:
                                     'exit_price': price,
                                     'pnl': pnl,
                                     'pnl_pct': ((price - bprice) / bprice) * 100 if bprice else 0.0,
-                                    'close_time': close_time_str
+                                    'date': trade_date_str,
+                                    'time': trade_time_str,
+                                    'raw_time': t
                                 })
                             qty -= m_qty
                             if bqty - m_qty > 1e-6:
@@ -179,13 +189,11 @@ class AlpacaExecutionService:
                         if qty > 1e-6:
                             short_queue.append((qty, price, t))
 
-            # Raggruppa per simbolo e direzione se eseguiti allo stesso orario
-            consolidated = []
-            for ct in closed_today:
-                consolidated.append(ct)
-            return consolidated
+            # Ordina dal più recente al più vecchio
+            closed_trades.sort(key=lambda x: x.get('raw_time', ''), reverse=True)
+            return closed_trades
         except Exception as e:
-            logger.error(f"Errore calcolo today_closed_trades: {e}")
+            logger.error(f"Errore calcolo get_recent_closed_trades: {e}")
             return []
 
     def place_bracket_order(
