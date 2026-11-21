@@ -1794,7 +1794,8 @@ async def _handle_text_message_core(update: Update, context: ContextTypes.DEFAUL
 
         try:
             # Recupera ultimo prezzo
-            last_p = mkt_svc.get_current_price(resolved_sym)
+            quote = MarketDataService.get_realtime_quote(resolved_sym)
+            last_p = quote.get("price") if quote else None
             if not last_p or last_p <= 0:
                 last_p = 100.0 # fallback
 
@@ -2566,7 +2567,7 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
     if data == "cmd_crypto":
         # Invia direttamente il pannello Crypto 24/7 modificando il messaggio del bot
         bars = alpaca_service.get_crypto_latest_bars(["BTC/USD", "ETH/USD", "SOL/USD"])
-        eur_usd = mkt_svc.get_eur_usd_rate() or 1.08
+        eur_usd = MarketDataService.get_eur_usd_rate() or 1.08
 
         lines = [
             "🪙 *ALPACA CRYPTO TRADING 24/7*",
@@ -2622,7 +2623,8 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
     if data in ["buy_gld", "buy_uso", "buy_slv"]:
         sym_map = {"buy_gld": "GLD", "buy_uso": "USO", "buy_slv": "SLV"}
         chosen_sym = sym_map[data]
-        curr_p = mkt_svc.get_current_price(chosen_sym) or 100.0
+        quote = MarketDataService.get_realtime_quote(chosen_sym)
+        curr_p = (quote.get("price") if quote else None) or 100.0
         shares = max(1, int(1000.0 / curr_p)) # ~1,000$ di ordine
         stop_p = round(curr_p * 0.985, 2)
         target_p = round(curr_p * 1.03, 2)
@@ -3022,7 +3024,7 @@ async def crypto_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     status_msg = await target_msg.reply_text("🪙 *Interrogo il book di negoziazione Crypto 24/7 di Alpaca...*", parse_mode="Markdown")
 
     bars = alpaca_service.get_crypto_latest_bars(["BTC/USD", "ETH/USD", "SOL/USD"])
-    eur_usd = mkt_svc.get_eur_usd_rate() or 1.08
+    eur_usd = MarketDataService.get_eur_usd_rate() or 1.08
 
     lines = [
         "🪙 *ALPACA CRYPTO TRADING 24/7*",
@@ -3087,7 +3089,8 @@ async def commodities_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     keyboard = []
     for sym, name in assets:
-        p = mkt_svc.get_current_price(sym)
+        quote = MarketDataService.get_realtime_quote(sym)
+        p = quote.get("price") if quote else None
         p_str = f"${p:.2f}" if p else "N/D"
         lines.append(f"• *{name}* (`{sym}`): `{p_str}`")
 
