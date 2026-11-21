@@ -16,7 +16,7 @@ import time
 import asyncio
 import pypdf
 from pathlib import Path
-from typing import Dict, Any, Optional, Set
+from typing import Dict, Any, Optional, Set, Tuple, List
 from dotenv import load_dotenv
 
 ENV_PATH = Path(__file__).parent / ".env"
