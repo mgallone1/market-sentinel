@@ -926,6 +926,35 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 </div>
             </div>
 
+            <!-- Card 6: Mini-Sparklines & Target R:R Progress -->
+            <div class="acc-cell" style="padding: 14px; text-align: left;">
+                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
+                    <strong style="color: var(--text-main); font-size: 13px;">6. Mini-Sparklines &amp; Barra Progresso R:R 1:3</strong>
+                    <span class="badge mono" style="background: var(--blue); color: #fff; font-size: 9px; padding: 2px 6px; border-radius: 3px;">REAL-TIME</span>
+                </div>
+                <div style="font-size: 11px; color: var(--text-muted); line-height: 1.45;">
+                    Sotto ogni posizione aperta è presente un box tecnico grafico ad alta densità:<br>
+                    <strong>• Mini-Sparkline (15m):</strong> Mostra il trend a 15 minuti del sottostante con il punto live del prezzo corrente.<br>
+                    <strong>• Livelli Prezzo TP &amp; SL:</strong> Riporta a schermo il valore esatto in dollari di Take Profit (+3.60%) e Stop Loss (-1.20%).<br>
+                    <strong>• Barra di Progresso:</strong> Indica visivamente la percentuale di completamento verso il profitto netto target e la distanza rimanente.
+                </div>
+            </div>
+
+            <!-- Card 7: Notifiche Push Telegram Smart -->
+            <div class="acc-cell" style="padding: 14px; text-align: left;">
+                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
+                    <strong style="color: var(--text-main); font-size: 13px;">7. Notifiche Push Telegram Intelligenti (Zero Spam)</strong>
+                    <span class="badge mono" style="background: var(--green); color: #fff; font-size: 9px; padding: 2px 6px; border-radius: 3px;">ALERT 24/7</span>
+                </div>
+                <div style="font-size: 11px; color: var(--text-muted); line-height: 1.45;">
+                    Il bot comunica su Telegram esclusivamente nei momenti chiave di transizione del rischio:<br>
+                    <strong>• Inversione Macro BTC 4H:</strong> Notifica quando il trend generale passa da Bullish a Bearish.<br>
+                    <strong>• Break-Even Safe (+0.80%):</strong> Avviso quando lo stop viene alzato sopra l'ingresso a rischio zero.<br>
+                    <strong>• Trailing Profit Lock (+1.60%):</strong> Avviso quando viene garantito l'incasso di almeno il +1.00% netto.<br>
+                    <strong>• Chiusura TP (+3.60%) / SL (-1.20%):</strong> Riepilogo immediato con dollari incassati e PnL percentuale.
+                </div>
+            </div>
+
         </div>
     </div>
 
