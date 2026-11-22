@@ -1,11 +1,11 @@
 """
 Web Dashboard Service for Market Sentinel.
-Design: PURE FINANCIAL TERMINAL (Anti-AI-Slop assoluto, zero decorazioni, zero fuffa).
-Ispirato a: IBKR Mobile, TradingView watchlist e terminale Bloomberg.
-- Nessun box colorato giocattolo, nessun gradiente, nessun effetto glow, nessun badge finto.
-- Sfondo nero puro (#000000) come le app di trading professionali su iPhone OLED.
-- Tipografia di sistema iOS (-apple-system / SF Pro) con numeri monospazio tabulari (SF Mono / Courier / monospace).
-- Struttura ultra-compatta: lista ticker a riga singola con prezzi, PnL e stop chiari, esattamente come l'app di un broker reale.
+Design: PURE FINANCIAL TERMINAL (Broker Grade, Apple Dark OLED).
+Features:
+- Monitor multi-timeframe dinamico per Variazioni: 3s, 1m, 1h, 1d, 1w, 1M
+- Pulsantiere rapide per switch del grafico tra i timeframe (3s, 1m, 1h, 1d, 1w, 1M)
+- Delta assoluto ($) e percentuale (%) aggiornati in tempo reale
+- Struttura ottimizzata 100% per iPhone e Desktop
 """
 
 import json
@@ -64,7 +64,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             overflow-x: hidden;
         }
         .mono {
-            font-family: "SF Mono", Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+            font-family: "SF Mono", Menlo, Monaco, Consolas, monospace;
             font-feature-settings: "tnum" 1;
         }
 
@@ -83,7 +83,6 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         .topbar-title {
             font-weight: 700;
             font-size: 14px;
-            letter-spacing: 0.5px;
             color: #fff;
             display: flex;
             align-items: center;
@@ -107,9 +106,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             cursor: pointer;
             font-family: inherit;
         }
-        .refresh-btn:active {
-            background: #222;
-        }
+        .refresh-btn:active { background: #222; }
 
         /* Section Container */
         .section {
@@ -163,11 +160,71 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             margin-top: 2px;
         }
 
-        /* Minimal Financial Chart */
+        /* MULTI-TIMEFRAME VARIATION STRIP */
+        .tf-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 6px;
+            margin-top: 4px;
+        }
+        @media (min-width: 640px) {
+            .tf-grid { grid-template-columns: repeat(6, 1fr); }
+        }
+        .tf-card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            padding: 8px;
+            border-radius: 4px;
+            text-align: center;
+            cursor: pointer;
+            transition: border-color 0.15s ease;
+        }
+        .tf-card.active {
+            border-color: #444;
+            background: #121212;
+        }
+        .tf-header {
+            font-size: 10px;
+            font-weight: 700;
+            color: var(--text-muted);
+            text-transform: uppercase;
+        }
+        .tf-delta {
+            font-size: 13px;
+            font-weight: 700;
+            margin-top: 2px;
+        }
+        .tf-pct {
+            font-size: 10px;
+            font-weight: 600;
+        }
+
+        /* Chart Controls & Container */
+        .chart-controls {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+        .tf-btn {
+            background: #111;
+            border: 1px solid #222;
+            color: #888;
+            font-size: 10px;
+            font-weight: 700;
+            padding: 3px 8px;
+            border-radius: 3px;
+            cursor: pointer;
+            font-family: inherit;
+        }
+        .tf-btn.active {
+            background: #262626;
+            color: #fff;
+            border-color: #444;
+        }
         .chart-wrap {
             height: 180px;
             position: relative;
-            margin-top: 4px;
+            margin-top: 8px;
         }
         .metrics-bar {
             display: flex;
@@ -177,15 +234,10 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             border-top: 1px solid var(--border-subtle);
             font-size: 11px;
         }
-        .metric-item span {
-            color: var(--text-muted);
-            margin-right: 4px;
-        }
-        .metric-item strong {
-            color: #fff;
-        }
+        .metric-item span { color: var(--text-muted); margin-right: 4px; }
+        .metric-item strong { color: #fff; }
 
-        /* Watchlist / Positions Table Style */
+        /* Watchlist Row */
         .trade-row {
             background: var(--surface);
             border: 1px solid var(--border);
@@ -196,24 +248,10 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             justify-content: space-between;
             align-items: center;
         }
-        .trade-row:active {
-            background: #141414;
-        }
-        .trade-left {
-            display: flex;
-            flex-direction: column;
-            gap: 2px;
-        }
-        .trade-symbol-row {
-            display: flex;
-            align-items: center;
-            gap: 6px;
-        }
-        .trade-symbol {
-            font-size: 14px;
-            font-weight: 700;
-            color: #fff;
-        }
+        .trade-row:active { background: #141414; }
+        .trade-left { display: flex; flex-direction: column; gap: 2px; }
+        .trade-symbol-row { display: flex; align-items: center; gap: 6px; }
+        .trade-symbol { font-size: 14px; font-weight: 700; color: #fff; }
         .trade-side-long {
             font-size: 9px;
             font-weight: 800;
@@ -230,10 +268,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             padding: 1px 4px;
             border-radius: 2px;
         }
-        .trade-detail {
-            font-size: 11px;
-            color: var(--text-muted);
-        }
+        .trade-detail { font-size: 11px; color: var(--text-muted); }
         .trade-right {
             text-align: right;
             display: flex;
@@ -241,10 +276,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             align-items: flex-end;
             gap: 2px;
         }
-        .trade-pnl {
-            font-size: 14px;
-            font-weight: 700;
-        }
+        .trade-pnl { font-size: 14px; font-weight: 700; }
         .trade-guard {
             font-size: 10px;
             padding: 2px 6px;
@@ -291,9 +323,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             background: none;
             font-family: inherit;
         }
-        .tab-item.active {
-            color: #ffffff;
-        }
+        .tab-item.active { color: #ffffff; }
         .tab-item span.dot {
             width: 4px;
             height: 4px;
@@ -301,11 +331,8 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             background: transparent;
             margin-top: 3px;
         }
-        .tab-item.active span.dot {
-            background: var(--green);
-        }
+        .tab-item.active span.dot { background: var(--green); }
 
-        /* Generic Table for History & Alpaca */
         .clean-table {
             width: 100%;
             border-collapse: collapse;
@@ -327,6 +354,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         }
         .val-up { color: var(--green) !important; font-weight: 600; }
         .val-down { color: var(--red) !important; font-weight: 600; }
+        .val-neutral { color: var(--text-muted) !important; }
         .hidden { display: none !important; }
     </style>
 </head>
@@ -363,16 +391,63 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             <div class="acc-cell">
                 <div class="acc-label">PnL Non Realizzato</div>
                 <div class="acc-val" id="total-unrealized">$0.00</div>
-                <div class="acc-sub" id="active-positions-count">0 posizioni aperte</div>
+                <div class="acc-sub" id="active-positions-count">0 posizioni</div>
             </div>
         </div>
     </div>
 
-    <!-- 2. EQUITY & REALIZED PNL TRAJECTORY -->
+    <!-- 2. MULTI-TIMEFRAME VARIATIONS STRIP (3s, 1m, 1h, 1d, 1w, 1M) -->
     <div class="section">
         <div class="section-header">
-            <span class="section-title">Andamento Equity &amp; Volume</span>
-            <span class="mono" style="font-size: 10px; color: var(--text-dim);" id="last-snapshot-time">LIVE DB</span>
+            <span class="section-title">Variazione Rendimento Portfolio</span>
+            <span class="mono" style="font-size: 10px; color: var(--text-dim);">LIVE DELTA</span>
+        </div>
+        <div class="tf-grid mono">
+            <div class="tf-card active" onclick="setTimeframe('3s')">
+                <div class="tf-header">Ogni 3s</div>
+                <div class="tf-delta" id="delta-3s-val">$0.00</div>
+                <div class="tf-pct" id="delta-3s-pct">0.00%</div>
+            </div>
+            <div class="tf-card" onclick="setTimeframe('1m')">
+                <div class="tf-header">1 Minuto</div>
+                <div class="tf-delta" id="delta-1m-val">$0.00</div>
+                <div class="tf-pct" id="delta-1m-pct">0.00%</div>
+            </div>
+            <div class="tf-card" onclick="setTimeframe('1h')">
+                <div class="tf-header">1 Ora</div>
+                <div class="tf-delta" id="delta-1h-val">$0.00</div>
+                <div class="tf-pct" id="delta-1h-pct">0.00%</div>
+            </div>
+            <div class="tf-card" onclick="setTimeframe('1d')">
+                <div class="tf-header">1 Giorno (24h)</div>
+                <div class="tf-delta" id="delta-1d-val">$0.00</div>
+                <div class="tf-pct" id="delta-1d-pct">0.00%</div>
+            </div>
+            <div class="tf-card" onclick="setTimeframe('1w')">
+                <div class="tf-header">1 Settimana</div>
+                <div class="tf-delta" id="delta-1w-val">$0.00</div>
+                <div class="tf-pct" id="delta-1w-pct">0.00%</div>
+            </div>
+            <div class="tf-card" onclick="setTimeframe('1M')">
+                <div class="tf-header">1 Mese (30d)</div>
+                <div class="tf-delta" id="delta-1M-val">$0.00</div>
+                <div class="tf-pct" id="delta-1M-pct">0.00%</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 3. INTERACTIVE CHART CON CONTROLLO TIMEFRAME -->
+    <div class="section">
+        <div class="section-header">
+            <span class="section-title">Traiettoria Grafico</span>
+            <div class="chart-controls mono">
+                <button class="tf-btn active" id="btn-tf-3s" onclick="setTimeframe('3s')">3S</button>
+                <button class="tf-btn" id="btn-tf-1m" onclick="setTimeframe('1m')">1M</button>
+                <button class="tf-btn" id="btn-tf-1h" onclick="setTimeframe('1h')">1H</button>
+                <button class="tf-btn" id="btn-tf-1d" onclick="setTimeframe('1d')">1D</button>
+                <button class="tf-btn" id="btn-tf-1w" onclick="setTimeframe('1w')">1W</button>
+                <button class="tf-btn" id="btn-tf-1M" onclick="setTimeframe('1M')">1MO</button>
+            </div>
         </div>
         <div class="chart-wrap">
             <canvas id="perfChart"></canvas>
@@ -384,7 +459,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         </div>
     </div>
 
-    <!-- 3. TAB 1: BYBIT POSITIONS (DEFAULT) -->
+    <!-- 4. TAB 1: BYBIT POSITIONS (DEFAULT) -->
     <div class="section" id="view-bybit">
         <div class="section-header">
             <span class="section-title">Posizioni Attive Bybit (Futures 24/7)</span>
@@ -397,7 +472,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         </div>
     </div>
 
-    <!-- 4. TAB 2: ALPACA EQUITIES -->
+    <!-- 5. TAB 2: ALPACA EQUITIES -->
     <div class="section hidden" id="view-alpaca">
         <div class="section-header">
             <span class="section-title">Alpaca Wall Street (NYSE / NASDAQ)</span>
@@ -424,7 +499,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         </table>
     </div>
 
-    <!-- 5. TAB 3: STORICO CHIUSI -->
+    <!-- 6. TAB 3: STORICO CHIUSI -->
     <div class="section hidden" id="view-history">
         <div class="section-header">
             <span class="section-title">Storico Trade Chiusi (Bybit)</span>
@@ -451,7 +526,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         </table>
     </div>
 
-    <!-- 6. TAB 4: REGOLE TRADING -->
+    <!-- 7. TAB 4: REGOLE TRADING -->
     <div class="section hidden" id="view-rules">
         <div class="section-header">
             <span class="section-title">Parametri di Esecuzione Quantitativa</span>
@@ -494,6 +569,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 
     <script>
         let chartInstance = null;
+        let currentTimeframe = '3s';
 
         function showTab(tabName) {
             ['bybit', 'alpaca', 'history', 'rules'].forEach(t => {
@@ -509,6 +585,18 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             });
         }
 
+        function setTimeframe(tf) {
+            currentTimeframe = tf;
+            ['3s', '1m', '1h', '1d', '1w', '1M'].forEach(t => {
+                const btn = document.getElementById('btn-tf-' + t);
+                if (btn) {
+                    if (t === tf) btn.classList.add('active');
+                    else btn.classList.remove('active');
+                }
+            });
+            fetchData();
+        }
+
         function updateClock() {
             const now = new Date();
             document.getElementById('top-clock').innerText = now.toLocaleTimeString('it-IT');
@@ -520,7 +608,10 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             const ctx = document.getElementById('perfChart').getContext('2d');
             const labels = snapshots.map(s => {
                 const d = new Date(s.epoch * 1000);
-                return d.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' });
+                if (currentTimeframe === '1d' || currentTimeframe === '1w' || currentTimeframe === '1M') {
+                    return d.toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit' }) + ' ' + d.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' });
+                }
+                return d.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit', second: (currentTimeframe === '3s' ? '2-digit' : undefined) });
             });
             const equity = snapshots.map(s => s.total_equity);
             const pnl = snapshots.map(s => s.cumulative_realized_pnl);
@@ -602,7 +693,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             try {
                 const controller = new AbortController();
                 const timeoutId = setTimeout(() => controller.abort(), 4000);
-                const res = await fetch('/api/dashboard', { cache: 'no-store', signal: controller.signal });
+                const res = await fetch(`/api/dashboard?tf=${currentTimeframe}`, { cache: 'no-store', signal: controller.signal });
                 clearTimeout(timeoutId);
                 
                 if (!res.ok) throw new Error('HTTP ' + res.status);
@@ -614,7 +705,6 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 console.error("Dashboard sync error:", e);
                 consecutiveErrors++;
                 document.querySelector('.status-dot').style.background = 'var(--red)';
-                // Se la connessione cade, tenta un re-sync istantaneo dopo 1.5s
                 if (consecutiveErrors <= 3) {
                     setTimeout(fetchData, 1500);
                 }
@@ -630,6 +720,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             const aAcc = alpaca.account || {};
             const aPositions = alpaca.positions || [];
             const history = data.perf_history || [];
+            const variations = data.variations || {};
 
             // 1. Acc Summary
             const bEq = bWallet.total_equity || 0;
@@ -652,9 +743,25 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             const sign = totPnl >= 0 ? '+' : '';
             pnlEl.innerText = `${sign}$${totPnl.toFixed(2)}`;
             pnlEl.className = 'acc-val ' + (totPnl >= 0 ? 'val-up' : 'val-down');
-            document.getElementById('active-positions-count').innerText = `${bPositions.length} posizioni aperte`;
+            document.getElementById('active-positions-count').innerText = `${bPositions.length} posizioni`;
 
-            // 2. Metrics & Chart
+            // 2. Variazioni Multi-Timeframe (3s, 1m, 1h, 1d, 1w, 1M)
+            ['3s', '1m', '1h', '1d', '1w', '1M'].forEach(tf => {
+                const v = variations[tf] || { delta_equity: 0, delta_equity_pct: 0 };
+                const vVal = document.getElementById(`delta-${tf}-val`);
+                const vPct = document.getElementById(`delta-${tf}-pct`);
+                if (vVal && vPct) {
+                    const dSign = v.delta_equity >= 0 ? '+' : '';
+                    vVal.innerText = `${dSign}$${v.delta_equity.toFixed(2)}`;
+                    vPct.innerText = `${dSign}${v.delta_equity_pct.toFixed(2)}%`;
+
+                    const vClass = v.delta_equity > 0 ? 'val-up' : (v.delta_equity < 0 ? 'val-down' : 'val-neutral');
+                    vVal.className = `tf-delta ${vClass}`;
+                    vPct.className = `tf-pct ${vClass}`;
+                }
+            });
+
+            // 3. Metrics & Chart
             let cumVol = 0;
             let cumPnl = 0;
             let wins = 0;
@@ -676,7 +783,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 initChart(history);
             }
 
-            // 3. Bybit Positions Row-List (Clean Financial Rows)
+            // 4. Bybit Positions Row-List
             const listEl = document.getElementById('bybit-positions-list');
             if (bPositions.length === 0) {
                 listEl.innerHTML = `<div style="padding: 24px 0; text-align: center; color: var(--text-dim);" class="mono">Nessuna posizione aperta. Monitoraggio breakout in corso.</div>`;
@@ -723,7 +830,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 }).join('');
             }
 
-            // 4. Alpaca Table
+            // 5. Alpaca Table
             const aBody = document.getElementById('alpaca-tbody');
             if (aPositions.length === 0) {
                 aBody.innerHTML = `<tr><td colspan="6" style="text-align: center; padding: 20px 0; color: var(--text-dim);">Nessun titolo aperto. Wall Street chiusa nel weekend.</td></tr>`;
@@ -745,7 +852,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 }).join('');
             }
 
-            // 5. History Table
+            // 6. History Table
             document.getElementById('closed-count-label').innerText = `${bClosed.length} eseguiti`;
             const hBody = document.getElementById('history-tbody');
             if (bClosed.length === 0) {
@@ -782,12 +889,14 @@ async def handle_dashboard_page(request):
     return web.Response(text=DASHBOARD_HTML, content_type="text/html")
 
 async def handle_dashboard_api(request):
-    """Restituisce il payload JSON completo in tempo reale per alimentare la dashboard."""
+    """Restituisce il payload JSON completo con variazioni multi-timeframe e serie storiche selezionabili."""
     global _bybit_service, _alpaca_service
     if not _bybit_service:
         _bybit_service = BybitExecutionService()
     if not _alpaca_service:
         _alpaca_service = AlpacaExecutionService()
+
+    tf = request.query.get("tf", "3s")
 
     try:
         b_wallet = _bybit_service.get_wallet_summary()
@@ -800,14 +909,14 @@ async def handle_dashboard_api(request):
         
         a_summary = _alpaca_service.get_account_summary()
 
+        b_eq = float(b_wallet.get("total_equity", 0.0) or 0.0)
+        a_eq = float(a_summary.get("account", {}).get("portfolio_value", 0.0) or 0.0)
+        tot_eq = b_eq + a_eq
+        unreal_pnl = sum(p.get("unrealized_pnl", 0.0) for p in b_pos)
+        cum_real = sum(float(c.get("closedPnl", 0.0)) for c in b_closed)
+        cum_vol = sum(float(c.get("cumExitValue", 0.0)) + float(c.get("cumEntryValue", 0.0)) for c in b_closed)
+
         try:
-            b_eq = float(b_wallet.get("total_equity", 0.0) or 0.0)
-            a_eq = float(a_summary.get("account", {}).get("portfolio_value", 0.0) or 0.0)
-            tot_eq = b_eq + a_eq
-            unreal_pnl = sum(p.get("unrealized_pnl", 0.0) for p in b_pos)
-            cum_real = sum(float(c.get("closedPnl", 0.0)) for c in b_closed)
-            cum_vol = sum(float(c.get("cumExitValue", 0.0)) + float(c.get("cumEntryValue", 0.0)) for c in b_closed)
-            
             perf_tracker.record_snapshot(
                 total_equity=tot_eq,
                 bybit_equity=b_eq,
@@ -820,11 +929,13 @@ async def handle_dashboard_api(request):
         except Exception as e_snap:
             print(f"[!] Errore registrazione snapshot: {e_snap}")
 
-        history = perf_tracker.get_history(limit=60)
+        history = perf_tracker.get_timeframe_history(tf)
+        variations = perf_tracker.get_variations(tot_eq, cum_real)
         
         payload = {
             "status": "online",
             "timestamp": datetime.now(ZoneInfo("Europe/Rome")).isoformat(),
+            "timeframe": tf,
             "bybit": {
                 "wallet": b_wallet,
                 "positions": b_pos,
@@ -834,7 +945,8 @@ async def handle_dashboard_api(request):
                 "account": a_summary.get("account", {}),
                 "positions": a_summary.get("positions", [])
             },
-            "perf_history": history
+            "perf_history": history,
+            "variations": variations
         }
         return web.json_response(payload)
     except Exception as e:
