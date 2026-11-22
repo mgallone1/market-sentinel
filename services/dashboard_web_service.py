@@ -596,14 +596,28 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             });
         }
 
+        let consecutiveErrors = 0;
+
         async function fetchData() {
             try {
-                const res = await fetch('/api/dashboard', { cache: 'no-store' });
-                if (!res.ok) return;
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 4000);
+                const res = await fetch('/api/dashboard', { cache: 'no-store', signal: controller.signal });
+                clearTimeout(timeoutId);
+                
+                if (!res.ok) throw new Error('HTTP ' + res.status);
                 const data = await res.json();
                 renderUI(data);
+                consecutiveErrors = 0;
+                document.querySelector('.status-dot').style.background = 'var(--green)';
             } catch (e) {
-                console.error(e);
+                console.error("Dashboard sync error:", e);
+                consecutiveErrors++;
+                document.querySelector('.status-dot').style.background = 'var(--red)';
+                // Se la connessione cade, tenta un re-sync istantaneo dopo 1.5s
+                if (consecutiveErrors <= 3) {
+                    setTimeout(fetchData, 1500);
+                }
             }
         }
 
