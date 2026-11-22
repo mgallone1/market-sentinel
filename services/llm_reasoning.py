@@ -1516,6 +1516,19 @@ LINEE GUIDA RIGOROSE:
 
         portfolio_summary = ", ".join([f"{p.get('name', p.get('ticker'))} ({p.get('ticker')})" for p in user_portfolio]) if user_portfolio else "Portafoglio non configurato."
 
+        # Raccoglie i prezzi correnti reali in Euro dei principali asset di riferimento per evitare qualsiasi allucinazione sui livelli di prezzo
+        live_anchor_lines = []
+        try:
+            from services.market_data import MarketDataService
+            anchor_tickers = ["BTC-EUR", "ETH-EUR", "SOL-EUR", "NVDA", "XDWD.DE", "XDEM.DE"]
+            for at in anchor_tickers:
+                aq = MarketDataService.get_realtime_quote(at)
+                if aq and aq.get("last_price"):
+                    live_anchor_lines.append(f"• {at}: {aq['last_price']:.2f} € (var: {aq.get('change_pct', 0.0):+.2f}%)")
+        except Exception:
+            pass
+        live_anchor_block = ("\nQUOTAZIONI REALI LIVE DI MERCATO (IN EURO - DATI VERIFICATI OBBLIGATORI):\n" + "\n".join(live_anchor_lines) + "\n") if live_anchor_lines else ""
+
         prompt = f"""
 [CONTESTO DI SISTEMA INTERNO: Anno e data attuale {now_str}. Usalo SOLO come ancoraggio temporale contro allucinazioni sul passato. VIETATO ASSOLUTO iniziare recitando la data o convenevoli!]
 Sei il Chief Investment Officer (CIO) e Sentinella Personale di Michele.
@@ -1523,6 +1536,7 @@ Il tuo ruolo è proteggere il suo capitale e cogliere tempestivamente le miglior
 Michele ha impostato soglie vigili e anticipate per essere avvisato *in tempo*, prima che i movimenti si esauriscano o provochino danni.
 
 PORTAFOGLIO REALE DI MICHELE: {portfolio_summary}
+{live_anchor_block}
 {mem_block}
 
 TIPO DI EVENTO RILEVATO DALLA SENTINELLA: {alert_type}
@@ -1542,6 +1556,7 @@ COMPITO DI REDAZIONE (SARTORIALE, AUTOREVOLE E IMMEDIATO):
   3. CORRELAZIONE E IMPATTO SU MICHELE: Come questo movimento tocca i pesi di portafoglio (ETF XDWD/XDEM o singole posizioni) e la tenuta rispetto al PMC.
 - DIVIETO ASSOLUTO DI CHIUDERE CON DOMANDE EMOTIVE O PSICOLOGICHE ("Come ti senti", "Preferisci che prepariamo", "Come vuoi muoverti", ecc.).
 - Concludi con il livello di guardia/target quantitativo (supporto/resistenza in Euro) e l'indicazione tecnica netta. Zero inviti o frasi di consultazione generiche.
+- VINCOLO RIGOROSO DI VERIFICA PREZZI: Se citi prezzi o supporti per Bitcoin, Ethereum, Solana o azioni, DEVI usare ESCLUSIVAMENTE le 'QUOTAZIONI REALI LIVE DI MERCATO' fornite sopra (es. BTC quota nell'intorno di ~55.000 €). È SEVERAMENTE VIETATO allucinare o inventare livelli di prezzo non presenti nei dati verificati (es. vietato scrivere 'BTC sotto i 90.000 €' quando quota a ~55.000 €).
 
 Tutte le quotazioni RIGOROSAMENTE in Euro (€).
 {TELEGRAM_FORMATTING_RULES}
