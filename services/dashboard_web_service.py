@@ -613,10 +613,20 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         </div>
     </div>
 
-    <!-- 4. INTERACTIVE CHART CON CONTROLLO TIMEFRAME -->
+    <!-- 4. INTERACTIVE CHART CON CONTROLLO TIMEFRAME E SEPARAZIONE ISTANZE -->
     <div class="section">
-        <div class="section-header">
-            <span class="section-title">Traiettoria Grafico</span>
+        <div class="section-header" style="flex-wrap: wrap; gap: 8px;">
+            <div style="display: flex; align-items: center; gap: 6px;">
+                <span class="section-title" id="chart-instance-title">Grafico: Bybit Futures (Crypto)</span>
+            </div>
+            <!-- Selettore Istanza Grafico Separato al 100% -->
+            <div class="chart-controls mono">
+                <button class="tf-btn active" id="btn-inst-bybit" onclick="setChartInstance('bybit')">🪙 BYBIT FUTURES</button>
+                <button class="tf-btn" id="btn-inst-alpaca" onclick="setChartInstance('alpaca')">🏛️ ALPACA WALL ST</button>
+                <button class="tf-btn" id="btn-inst-total" onclick="setChartInstance('total')">🌐 TOTALE</button>
+            </div>
+        </div>
+        <div style="display: flex; justify-content: flex-end; margin-bottom: 8px;">
             <div class="chart-controls mono">
                 <button class="tf-btn active" id="btn-tf-3s" onclick="setTimeframe('3s')">3S</button>
                 <button class="tf-btn" id="btn-tf-1m" onclick="setTimeframe('1m')">1M</button>
@@ -747,6 +757,29 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     <script>
         let chartInstance = null;
         let currentTimeframe = '3s';
+        let currentInstance = 'bybit'; // 'bybit' | 'alpaca' | 'total'
+
+        function setChartInstance(inst) {
+            currentInstance = inst;
+            ['bybit', 'alpaca', 'total'].forEach(i => {
+                const btn = document.getElementById('btn-inst-' + i);
+                if (btn) {
+                    if (i === inst) btn.classList.add('active');
+                    else btn.classList.remove('active');
+                }
+            });
+            const titleEl = document.getElementById('chart-instance-title');
+            if (titleEl) {
+                if (inst === 'bybit') titleEl.innerText = 'Grafico: Bybit Futures (Crypto 24/7)';
+                else if (inst === 'alpaca') titleEl.innerText = 'Grafico: Alpaca (Wall Street USA)';
+                else titleEl.innerText = 'Grafico: Portafoglio Totale Consolidato';
+            }
+            if (chartInstance) {
+                chartInstance.destroy();
+                chartInstance = null;
+            }
+            fetchData();
+        }
 
         // GESTIONE TEMA LIGHT / DARK CON LOCALSTORAGE
         function initTheme() {
@@ -788,6 +821,12 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                     btn.classList.remove('active');
                 }
             });
+            // Separazione istanze: quando navigo su Bybit o Alpaca sincronizza il grafico corrispondente
+            if (tabName === 'bybit') {
+                setChartInstance('bybit');
+            } else if (tabName === 'alpaca') {
+                setChartInstance('alpaca');
+            }
         }
 
         function setTimeframe(tf) {
@@ -832,8 +871,28 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                     }
                     return d.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit', second: (currentTimeframe === '3s' ? '2-digit' : undefined) });
                 });
-                const equity = snapshots.map(s => s.total_equity);
-                const pnl = snapshots.map(s => s.cumulative_realized_pnl);
+                // Estrazione dati separati al 100% in base all'istanza selezionata
+                let equity = [];
+                let pnl = [];
+                let labelName = 'Capitale Bybit ($)';
+                let pnlName = 'PnL Chiuso Bybit ($)';
+
+                if (currentInstance === 'bybit') {
+                    equity = snapshots.map(s => s.bybit_equity);
+                    pnl = snapshots.map(s => s.cumulative_realized_pnl);
+                    labelName = 'Capitale Bybit ($)';
+                    pnlName = 'PnL Realizzato Bybit ($)';
+                } else if (currentInstance === 'alpaca') {
+                    equity = snapshots.map(s => s.alpaca_equity);
+                    pnl = snapshots.map(s => 0); // Wall Street equities PnL non mescolato con Crypto
+                    labelName = 'Portfolio Alpaca ($)';
+                    pnlName = 'PnL Alpaca ($)';
+                } else {
+                    equity = snapshots.map(s => s.total_equity);
+                    pnl = snapshots.map(s => s.cumulative_realized_pnl);
+                    labelName = 'Capitale Totale ($)';
+                    pnlName = 'PnL Consolidato ($)';
+                }
 
                 const gradient = ctx.createLinearGradient(0, 0, 0, 220);
                 if (isDark) {
@@ -864,7 +923,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                         labels: labels,
                         datasets: [
                             {
-                                label: 'Capitale ($)',
+                                label: labelName,
                                 data: equity,
                                 borderColor: lineColor,
                                 borderWidth: 2.2,
@@ -879,7 +938,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                                 yAxisID: 'y'
                             },
                             {
-                                label: 'PnL ($)',
+                                label: pnlName,
                                 data: pnl,
                                 borderColor: pnlColor,
                                 borderWidth: 1.8,
@@ -1064,17 +1123,28 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             pnlEl.className = 'acc-val ' + (totPnl >= 0 ? 'val-up' : 'val-down');
             document.getElementById('active-positions-count').innerText = `${bPositions.length} posizioni`;
 
-            // 3. Variazioni Multi-Timeframe
+            // 3. Variazioni Multi-Timeframe (Separazione Istanza Istantanea)
             ['3s', '1m', '1h', '1d', '1w', '1M'].forEach(tf => {
-                const v = variations[tf] || { delta_equity: 0, delta_equity_pct: 0 };
+                const baseV = variations[tf] || { delta_equity: 0, delta_equity_pct: 0 };
+                let targetDelta = baseV.delta_equity;
+                let targetPct = baseV.delta_equity_pct;
+
+                if (currentInstance === 'bybit' && baseV.bybit) {
+                    targetDelta = baseV.bybit.delta_equity;
+                    targetPct = baseV.bybit.delta_equity_pct;
+                } else if (currentInstance === 'alpaca' && baseV.alpaca) {
+                    targetDelta = baseV.alpaca.delta_equity;
+                    targetPct = baseV.alpaca.delta_equity_pct;
+                }
+
                 const vVal = document.getElementById(`delta-${tf}-val`);
                 const vPct = document.getElementById(`delta-${tf}-pct`);
                 if (vVal && vPct) {
-                    const dSign = v.delta_equity >= 0 ? '+' : '';
-                    vVal.innerText = `${dSign}$${v.delta_equity.toFixed(2)}`;
-                    vPct.innerText = `${dSign}${v.delta_equity_pct.toFixed(2)}%`;
+                    const dSign = targetDelta >= 0 ? '+' : '';
+                    vVal.innerText = `${dSign}$${targetDelta.toFixed(2)}`;
+                    vPct.innerText = `${dSign}${targetPct.toFixed(2)}%`;
 
-                    const vClass = v.delta_equity > 0 ? 'val-up' : (v.delta_equity < 0 ? 'val-down' : 'val-neutral');
+                    const vClass = targetDelta > 0 ? 'val-up' : (targetDelta < 0 ? 'val-down' : 'val-neutral');
                     vVal.className = `tf-delta ${vClass}`;
                     vPct.className = `tf-pct ${vClass}`;
                 }
@@ -1264,7 +1334,7 @@ def _fetch_all_live_data_sync(tf: str):
         print(f"[!] Errore registrazione snapshot: {e_snap}")
 
     history = perf_tracker.get_timeframe_history(tf)
-    variations = perf_tracker.get_variations(tot_eq, cum_real)
+    variations = perf_tracker.get_variations(tot_eq, cum_real, bybit_eq=b_eq, alpaca_eq=a_eq)
     compass_metrics = trading_compass.compute_edge_metrics(b_closed, b_pos, tot_eq)
 
     return {

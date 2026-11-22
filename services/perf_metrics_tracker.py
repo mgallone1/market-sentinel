@@ -275,7 +275,8 @@ class PerfMetricsTracker:
             print(f"[!] Errore lettura timeframe {timeframe}: {e}")
             return []
 
-    def get_variations(self, current_equity: float, current_realized_pnl: float) -> Dict[str, Dict[str, Any]]:
+    def get_variations(self, current_equity: float, current_realized_pnl: float,
+                       bybit_eq: float = 0.0, alpaca_eq: float = 0.0) -> Dict[str, Dict[str, Any]]:
         """
         Calcola la variazione di Equity e PnL rispetto all'inizio di ciascun timeframe:
         - 3 secondi fa
@@ -307,7 +308,7 @@ class PerfMetricsTracker:
                     
                     # 1. Cerca il record più vicino prima o uguale a target_epoch
                     cursor.execute("""
-                        SELECT total_equity, cumulative_realized_pnl
+                        SELECT total_equity, bybit_equity, alpaca_equity, cumulative_realized_pnl
                         FROM equity_snapshots
                         WHERE epoch <= ?
                         ORDER BY epoch DESC
@@ -315,10 +316,9 @@ class PerfMetricsTracker:
                     """, (target_epoch,))
                     row = cursor.fetchone()
 
-                    # 2. Se non c'è prima di target_epoch, prendi il record più antico disponibile nel database
                     if not row:
                         cursor.execute("""
-                            SELECT total_equity, cumulative_realized_pnl
+                            SELECT total_equity, bybit_equity, alpaca_equity, cumulative_realized_pnl
                             FROM equity_snapshots
                             ORDER BY epoch ASC
                             LIMIT 1
@@ -327,19 +327,36 @@ class PerfMetricsTracker:
 
                     if row:
                         past_eq = float(row["total_equity"])
+                        past_bybit = float(row["bybit_equity"])
+                        past_alpaca = float(row["alpaca_equity"])
                         past_pnl = float(row["cumulative_realized_pnl"])
+                        
                         diff_eq = current_equity - past_eq
                         diff_eq_pct = (diff_eq / (past_eq or 1.0)) * 100
                         diff_pnl = current_realized_pnl - past_pnl
+
+                        diff_bybit = bybit_eq - past_bybit
+                        diff_bybit_pct = (diff_bybit / (past_bybit or 1.0)) * 100
+
+                        diff_alpaca = alpaca_eq - past_alpaca
+                        diff_alpaca_pct = (diff_alpaca / (past_alpaca or 1.0)) * 100
                     else:
-                        diff_eq = 0.0
-                        diff_eq_pct = 0.0
-                        diff_pnl = 0.0
+                        diff_eq = diff_eq_pct = diff_pnl = 0.0
+                        diff_bybit = diff_bybit_pct = 0.0
+                        diff_alpaca = diff_alpaca_pct = 0.0
 
                     results[tf_label] = {
                         "delta_equity": round(diff_eq, 2),
                         "delta_equity_pct": round(diff_eq_pct, 4),
-                        "delta_pnl": round(diff_pnl, 2)
+                        "delta_pnl": round(diff_pnl, 2),
+                        "bybit": {
+                            "delta_equity": round(diff_bybit, 2),
+                            "delta_equity_pct": round(diff_bybit_pct, 4)
+                        },
+                        "alpaca": {
+                            "delta_equity": round(diff_alpaca, 2),
+                            "delta_equity_pct": round(diff_alpaca_pct, 4)
+                        }
                     }
         except Exception as e:
             print(f"[!] Errore calcolo variazioni: {e}")
