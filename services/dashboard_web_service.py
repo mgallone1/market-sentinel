@@ -17,6 +17,7 @@ from services.bybit_execution_service import BybitExecutionService
 from services.alpaca_execution_service import AlpacaExecutionService
 from services.perf_metrics_tracker import perf_tracker
 from services.trading_compass_service import trading_compass
+from services.deep_trade_analysis_service import get_deep_trade_forecast
 
 _bybit_service: BybitExecutionService = None
 _alpaca_service: AlpacaExecutionService = None
@@ -487,6 +488,135 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             transition: width 0.3s ease;
         }
 
+        /* MODAL FORECAST QUANTITATIVO (HURST, MIGLIORINO, ELLIOTT, MONTE CARLO) */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(15, 23, 42, 0.75);
+            backdrop-filter: blur(4px);
+            -webkit-backdrop-filter: blur(4px);
+            z-index: 1000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 14px;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.25s ease;
+        }
+        .modal-overlay.active {
+            opacity: 1;
+            pointer-events: auto;
+        }
+        .modal-card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            width: 100%;
+            max-width: 580px;
+            max-height: 90vh;
+            overflow-y: auto;
+            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.3);
+            display: flex;
+            flex-direction: column;
+            animation: modalSlideUp 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+        @keyframes modalSlideUp {
+            from { transform: translateY(20px) scale(0.97); }
+            to { transform: translateY(0) scale(1); }
+        }
+        .modal-header {
+            padding: 16px 18px;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            position: sticky;
+            top: 0;
+            background: var(--surface);
+            z-index: 2;
+        }
+        .modal-title-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .modal-title {
+            font-size: 15px;
+            font-weight: 800;
+            color: var(--text-main);
+        }
+        .modal-close-btn {
+            background: var(--surface-elevated);
+            border: 1px solid var(--border);
+            border-radius: 50%;
+            width: 32px;
+            height: 32px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--text-muted);
+            cursor: pointer;
+            font-size: 16px;
+            transition: all 0.2s;
+        }
+        .modal-close-btn:hover {
+            color: var(--text-main);
+            background: var(--border);
+        }
+        .modal-body {
+            padding: 16px 18px;
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+        }
+        .forecast-chart-container {
+            position: relative;
+            height: 220px;
+            width: 100%;
+            background: var(--surface-elevated);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 8px;
+        }
+        .diag-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+        }
+        @media (max-width: 480px) {
+            .diag-grid { grid-template-columns: 1fr; }
+        }
+        .diag-card {
+            background: var(--surface-elevated);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 10px 12px;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+        .diag-card-title {
+            font-size: 10px;
+            font-weight: 700;
+            color: var(--text-dim);
+            letter-spacing: 0.5px;
+            text-transform: uppercase;
+        }
+        .diag-card-val {
+            font-size: 12px;
+            font-weight: 700;
+            color: var(--text-main);
+        }
+        .diag-card-desc {
+            font-size: 11px;
+            color: var(--text-muted);
+            line-height: 1.4;
+        }
+
         
         /* TOOLTIPS INTERATTIVI ELEVATI (HOVER E TAP) */
         [data-tip] {
@@ -954,6 +1084,94 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                     <strong>• Chiusura TP (+3.60%) / SL (-1.20%):</strong> Riepilogo immediato con dollari incassati e PnL percentuale.
                 </div>
             </div>
+
+            <!-- Card 8: Diagnostica Ciclica (Hurst/Migliorino), Onde di Elliott e Monte Carlo -->
+            <div class="acc-cell" style="padding: 14px; text-align: left;">
+                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
+                    <strong style="color: var(--text-main); font-size: 13px;">8. Analisi Ciclica, Onde di Elliott &amp; Previsione Monte Carlo</strong>
+                    <span class="badge mono" style="background: var(--blue); color: #fff; font-size: 9px; padding: 2px 6px; border-radius: 3px;">QUANT PRO</span>
+                </div>
+                <div style="font-size: 11px; color: var(--text-muted); line-height: 1.45;">
+                    Toccando qualsiasi riga di trade aperto si apre il pannello di analisi quantitativa approfondita:<br>
+                    <strong>• Hurst FLD:</strong> La Future Line of Demarcation indica se il ciclo in corso ha forza propulsiva o se proietta verso il minimo ciclico.<br>
+                    <strong>• Battleplan &amp; Vincoli di Migliorino:</strong> Mostra il tempo ciclico su 4 tempi (T, T+1, T+2, T+3) e segnala se il ciclo è libero o vincolato al ribasso.<br>
+                    <strong>• Onde di Elliott:</strong> Riconosce la fase frattale (Onda 3 d'impulso, Onda 4 di ritracciamento, o correzione maggiore A-B-C).<br>
+                    <strong>• Simulazione Monte Carlo a 15 Giorni:</strong> Disegna la traiettoria mediana attesa P50 e il cono di confidenza statistico al 95% (10.000 iterazioni stocastiche).
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <!-- MODAL POPUP ANALISI TRADE AVANZATA -->
+    <div class="modal-overlay" id="trade-modal" onclick="closeTradeModal(event)">
+        <div class="modal-card mono" onclick="event.stopPropagation()">
+            <div class="modal-header">
+                <div class="modal-title-row">
+                    <span id="modal-trade-sym" class="modal-title">BTCUSDT</span>
+                    <span id="modal-trade-side" class="trade-side-short">SHORT</span>
+                    <span id="modal-trade-price" style="font-size: 12px; color: var(--text-muted);">$0.00</span>
+                </div>
+                <button class="modal-close-btn" onclick="closeTradeModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <!-- Grafico Previsionale Stocastico Monte Carlo -->
+                <div>
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                        <span style="font-size: 11px; font-weight: 700; color: var(--text-main);">Traiettoria Monte Carlo a 15 Giorni</span>
+                        <span id="modal-mc-prob" class="badge mono" style="background: var(--green-bg); color: var(--green); font-size: 10px; padding: 2px 6px; border-radius: 4px;">Prob. Up: 50%</span>
+                    </div>
+                    <div class="forecast-chart-container">
+                        <canvas id="forecastChart"></canvas>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; font-size: 9px; color: var(--text-dim); margin-top: 4px;">
+                        <span>&larr; Ultimi 20gg Storico</span>
+                        <span style="color: var(--blue);">● Proiezione Mediana P50</span>
+                        <span>Fascia Confidenza 95% (P05 - P95) &rarr;</span>
+                    </div>
+                </div>
+
+                <!-- Griglia Diagnostica Quantitativa Avanzata -->
+                <div class="diag-grid">
+                    <!-- Hurst FLD -->
+                    <div class="diag-card">
+                        <span class="diag-card-title">Ciclica di Hurst (FLD)</span>
+                        <span class="diag-card-val" id="modal-hurst-val">FLD: $0.00</span>
+                        <span class="diag-card-desc" id="modal-hurst-desc">Calcolo centratura ciclica in corso...</span>
+                    </div>
+
+                    <!-- Giuseppe Migliorino -->
+                    <div class="diag-card">
+                        <span class="diag-card-title">Battleplan &amp; Vincolo Migliorino</span>
+                        <span class="diag-card-val" id="modal-migliorino-val">1° Tempo (T+2)</span>
+                        <span class="diag-card-desc" id="modal-migliorino-desc">Analisi rottura minimi e vincolo...</span>
+                    </div>
+
+                    <!-- Onde di Elliott -->
+                    <div class="diag-card">
+                        <span class="diag-card-title">Struttura Onde di Elliott</span>
+                        <span class="diag-card-val" id="modal-elliott-val">Onda 4 Correttiva</span>
+                        <span class="diag-card-desc" id="modal-elliott-desc">Diagnostica frattale del trend...</span>
+                    </div>
+
+                    <!-- Monte Carlo & Wyckoff -->
+                    <div class="diag-card">
+                        <span class="diag-card-title">Distribuzione Statistica (MC)</span>
+                        <span class="diag-card-val" id="modal-mc-val">Target Mediano: $0.00</span>
+                        <span class="diag-card-desc" id="modal-mc-desc">Range al 95% di confidenza.</span>
+                    </div>
+                </div>
+
+                <!-- Raccomandazione Quantitativa Sintetica -->
+                <div style="background: var(--surface-elevated); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; font-size: 11px;">
+                    <strong style="color: var(--text-main);">Verdetto Ciclico &amp; Operativo:</strong>
+                    <div id="modal-advice-text" style="color: var(--text-muted); margin-top: 4px; line-height: 1.45;">
+                        Caricamento sintesi operativa...
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
 
         </div>
     </div>
@@ -1570,7 +1788,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                     const sparkId = `sparkline-pos-${idx}`;
 
                     return `
-                        <div class="trade-row mono">
+                        <div class="trade-row mono" onclick="openTradeModal('${p.symbol}', '${sideText}', ${entry}, ${mark})" style="cursor: pointer;" title="Tocca per visualizzare la diagnostica ciclica (Hurst/Migliorino), Elliott e Monte Carlo">
                             <div class="trade-row-top">
                                 <div class="trade-left">
                                     <div class="trade-symbol-row">
@@ -1699,6 +1917,184 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             }
         }
 
+        let forecastChartInstance = null;
+
+        async function openTradeModal(symbol, side, entry, mark) {
+            const modal = document.getElementById('trade-modal');
+            modal.classList.add('active');
+
+            document.getElementById('modal-trade-sym').innerText = symbol;
+            const sideEl = document.getElementById('modal-trade-side');
+            sideEl.innerText = side;
+            sideEl.className = side === 'LONG' ? 'trade-side-long' : 'trade-side-short';
+            document.getElementById('modal-trade-price').innerText = `Entry: $${entry.toFixed(4)} | Mark: $${mark.toFixed(4)}`;
+
+            // Reset testi a loading
+            document.getElementById('modal-mc-prob').innerText = 'Calcolo in corso...';
+            document.getElementById('modal-hurst-val').innerText = 'Caricamento FLD...';
+            document.getElementById('modal-hurst-desc').innerText = 'Recupero serie storiche e centratura ciclica...';
+            document.getElementById('modal-migliorino-val').innerText = 'Battleplan...';
+            document.getElementById('modal-migliorino-desc').innerText = 'Verifica rottura minimi di partenza...';
+            document.getElementById('modal-elliott-val').innerText = 'Analisi Frattale...';
+            document.getElementById('modal-elliott-desc').innerText = 'Misurazione ritracciamento Fibonacci...';
+            document.getElementById('modal-mc-val').innerText = 'Simulazione 10.000 scenari...';
+            document.getElementById('modal-mc-desc').innerText = 'Estrazione percentili P05, P50, P95...';
+            document.getElementById('modal-advice-text').innerText = 'Analisi quantitativa multi-modello in elaborazione...';
+
+            try {
+                const res = await fetch(`/api/trade-forecast?symbol=${symbol}`);
+                const data = await res.json();
+                if (data.error) {
+                    document.getElementById('modal-advice-text').innerText = data.error;
+                    return;
+                }
+
+                // Popola Hurst
+                const c = data.cycle || {};
+                document.getElementById('modal-hurst-val').innerText = `FLD: $${(c.hurst_fld_value || 0).toFixed(4)}`;
+                document.getElementById('modal-hurst-desc').innerText = c.hurst_fld_signal || 'FLD attiva';
+
+                // Popola Migliorino
+                document.getElementById('modal-migliorino-val').innerText = c.tempo_battleplan || 'Ciclo T+2';
+                document.getElementById('modal-migliorino-desc').innerText = `${c.vincolo_migliorino || 'LIBERO'}: ${c.descrizione_battleplan || ''}`;
+
+                // Popola Elliott
+                const el = data.elliott || {};
+                document.getElementById('modal-elliott-val').innerText = el.wave_label || 'Struttura Frattale';
+                document.getElementById('modal-elliott-desc').innerText = el.analysis || 'Onde di Elliott in sviluppo.';
+
+                // Popola Monte Carlo
+                const mc = data.monte_carlo || {};
+                document.getElementById('modal-mc-prob').innerText = `Prob. Up: ${mc.probability_positive || '50%'}`;
+                document.getElementById('modal-mc-val').innerText = `Mediana: $${(mc.median_forecast || 0).toFixed(4)}`;
+                document.getElementById('modal-mc-desc').innerText = `Intervallo 95% CI: ${mc.ci_95_range || ''} (Vol: ${mc.annualized_vol || 0}%)`;
+
+                // Sintesi operativa
+                document.getElementById('modal-advice-text').innerText = `${c.consiglio_pratico || ''} Setup: ${side === 'LONG' ? 'Rialzista' : 'Ribassista'} su ${symbol}.`;
+
+                // Renderizza Grafico Monte Carlo (Storico + Previsione)
+                initForecastChart(data.chart_data);
+            } catch (err) {
+                console.error("Forecast fetch error:", err);
+                document.getElementById('modal-advice-text').innerText = 'Errore di connessione al motore predittivo.';
+            }
+        }
+
+        function closeTradeModal(e) {
+            if (e && e.target && e.target !== document.getElementById('trade-modal') && !e.target.classList.contains('modal-close-btn')) {
+                return;
+            }
+            const modal = document.getElementById('trade-modal');
+            modal.classList.remove('active');
+            if (forecastChartInstance) {
+                forecastChartInstance.destroy();
+                forecastChartInstance = null;
+            }
+        }
+
+        function initForecastChart(chartData) {
+            if (!chartData) return;
+            const canvas = document.getElementById('forecastChart');
+            if (!canvas) return;
+            const ctx = canvas.getContext('2d');
+
+            if (forecastChartInstance) {
+                forecastChartInstance.destroy();
+                forecastChartInstance = null;
+            }
+
+            const hist = chartData.historical || [];
+            const p50 = chartData.forecast_p50 || [];
+            const p05 = chartData.forecast_p05 || [];
+            const p95 = chartData.forecast_p95 || [];
+
+            // Combina etichette
+            const labels = (chartData.historical_labels || []).concat((chartData.forecast_labels || []).slice(1));
+            
+            // Allinea serie storiche e previsionali
+            const histSeries = hist.concat(new Array(p50.length - 1).fill(null));
+            const pad = new Array(hist.length - 1).fill(null);
+            const p50Series = pad.concat(p50);
+            const p05Series = pad.concat(p05);
+            const p95Series = pad.concat(p95);
+
+            forecastChartInstance = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [
+                        {
+                            label: 'Storico Prezzo',
+                            data: histSeries,
+                            borderColor: '#38bdf8',
+                            borderWidth: 2,
+                            pointRadius: 0,
+                            pointHoverRadius: 4,
+                            tension: 0.1
+                        },
+                        {
+                            label: 'Monte Carlo Mediana (P50)',
+                            data: p50Series,
+                            borderColor: '#a855f7',
+                            borderWidth: 2.2,
+                            borderDash: [5, 4],
+                            pointRadius: 0,
+                            pointHoverRadius: 4,
+                            tension: 0.2
+                        },
+                        {
+                            label: 'Banda Superiore (P95)',
+                            data: p95Series,
+                            borderColor: 'rgba(16, 185, 129, 0.4)',
+                            borderWidth: 1,
+                            backgroundColor: 'transparent',
+                            pointRadius: 0,
+                            tension: 0.2
+                        },
+                        {
+                            label: 'Banda Inferiore (P05)',
+                            data: p05Series,
+                            borderColor: 'rgba(239, 68, 68, 0.4)',
+                            borderWidth: 1,
+                            backgroundColor: 'rgba(168, 85, 247, 0.08)',
+                            fill: '-1',
+                            pointRadius: 0,
+                            tension: 0.2
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    animation: false,
+                    interaction: { mode: 'index', intersect: false },
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    if (context.parsed.y !== null) {
+                                        return `${context.dataset.label}: $${context.parsed.y.toFixed(4)}`;
+                                    }
+                                    return '';
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            ticks: { maxTicksLimit: 7, font: { family: 'ui-monospace, monospace', size: 9 }, color: '#94a3b8' },
+                            grid: { display: false }
+                        },
+                        y: {
+                            ticks: { font: { family: 'ui-monospace, monospace', size: 9 }, color: '#94a3b8' },
+                            grid: { color: 'rgba(148, 163, 184, 0.1)' }
+                        }
+                    }
+                }
+            });
+        }
+
         fetchData();
         setInterval(fetchData, 5000);
     </script>
@@ -1812,6 +2208,12 @@ async def handle_dashboard_api(request):
             return web.json_response(_CACHE_STORE[tf]["data"])
         return web.json_response({"error": str(e), "status": "recovering"}, status=200)
 
+async def handle_trade_forecast_api(request):
+    """Restituisce l'analisi ciclica (Hurst/Migliorino), onde di Elliott e simulazione Monte Carlo per un asset."""
+    symbol = request.query.get("symbol", "BTCUSDT")
+    data = await asyncio.to_thread(get_deep_trade_forecast, symbol)
+    return web.json_response(data)
+
 def create_web_app(bybit_svc=None, alpaca_svc=None):
     global _bybit_service, _alpaca_service
     if bybit_svc:
@@ -1822,5 +2224,6 @@ def create_web_app(bybit_svc=None, alpaca_svc=None):
     app = web.Application()
     app.router.add_get("/", handle_dashboard_page)
     app.router.add_get("/api/dashboard", handle_dashboard_api)
+    app.router.add_get("/api/trade-forecast", handle_trade_forecast_api)
     app.router.add_get("/health", lambda r: web.Response(text="OK"))
     return app
