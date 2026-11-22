@@ -1,11 +1,11 @@
 """
 Web Dashboard Service for Market Sentinel.
 Design: PURE FINANCIAL TERMINAL (Broker Grade, Apple Dark OLED).
-Features:
-- Monitor multi-timeframe dinamico per Variazioni: 3s, 1m, 1h, 1d, 1w, 1M
-- Pulsantiere rapide per switch del grafico tra i timeframe (3s, 1m, 1h, 1d, 1w, 1M)
-- Delta assoluto ($) e percentuale (%) aggiornati in tempo reale
-- Struttura ottimizzata 100% per iPhone e Desktop
+Includes:
+- TRADING COMPASS: Health Score (0-100), Directional Edge Verdict, Realized R:R, Expected Value (EV $/trade)
+- Monitor Multi-Timeframe per Variazioni (3s, 1m, 1h, 1d, 1w, 1M)
+- Chart.js a 2 assi con ricampionamento dinamico
+- Lista posizioni Bybit a riga singola con indicatore di stato rischio e fee
 """
 
 import json
@@ -17,6 +17,7 @@ from typing import Dict, Any
 from services.bybit_execution_service import BybitExecutionService
 from services.alpaca_execution_service import AlpacaExecutionService
 from services.perf_metrics_tracker import perf_tracker
+from services.trading_compass_service import trading_compass
 
 _bybit_service: BybitExecutionService = None
 _alpaca_service: AlpacaExecutionService = None
@@ -29,7 +30,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black">
     <meta name="theme-color" content="#000000">
-    <title>TERMINAL // SENTINEL</title>
+    <title>TERMINAL // SENTINEL COMPASS</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
         :root {
@@ -45,6 +46,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             --red: #ef4444;
             --red-bg: #450a0a;
             --amber: #f59e0b;
+            --amber-bg: #2d1800;
             --blue: #3b82f6;
         }
         * {
@@ -127,11 +129,87 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             text-transform: uppercase;
         }
 
+        /* DIRECTIONAL COMPASS BOX */
+        .compass-box {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            padding: 12px;
+            margin-top: 4px;
+        }
+        .compass-top {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            border-bottom: 1px solid var(--border-subtle);
+            padding-bottom: 8px;
+        }
+        .compass-score-wrap {
+            display: flex;
+            align-items: baseline;
+            gap: 6px;
+        }
+        .compass-score {
+            font-size: 24px;
+            font-weight: 800;
+        }
+        .compass-badge {
+            font-size: 10px;
+            font-weight: 800;
+            padding: 3px 8px;
+            border-radius: 3px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .badge-green { background: var(--green-bg); color: var(--green); border: 1px solid rgba(34,197,94,0.3); }
+        .badge-amber { background: var(--amber-bg); color: var(--amber); border: 1px solid rgba(245,158,11,0.3); }
+        .badge-red { background: var(--red-bg); color: var(--red); border: 1px solid rgba(239,68,68,0.3); }
+
+        .compass-desc {
+            font-size: 11px;
+            color: #aaa;
+            margin-top: 8px;
+            line-height: 1.4;
+        }
+
+        /* 4-Cell Diagnostic Edge Grid */
+        .diag-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 6px;
+            margin-top: 10px;
+        }
+        @media (min-width: 640px) {
+            .diag-grid { grid-template-columns: repeat(4, 1fr); }
+        }
+        .diag-cell {
+            background: #0d0d0d;
+            border: 1px solid #1a1a1a;
+            padding: 8px 10px;
+            border-radius: 3px;
+        }
+        .diag-label {
+            font-size: 9px;
+            color: var(--text-muted);
+            text-transform: uppercase;
+        }
+        .diag-val {
+            font-size: 13px;
+            font-weight: 700;
+            color: #fff;
+            margin-top: 2px;
+        }
+        .diag-sub {
+            font-size: 9px;
+            color: var(--text-dim);
+            margin-top: 1px;
+        }
+
         /* Account Summary Row */
         .acc-grid {
             display: grid;
             grid-template-columns: repeat(2, 1fr);
-            gap: 10px;
+            gap: 8px;
         }
         @media (min-width: 640px) {
             .acc-grid { grid-template-columns: repeat(4, 1fr); }
@@ -222,7 +300,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             border-color: #444;
         }
         .chart-wrap {
-            height: 180px;
+            height: 170px;
             position: relative;
             margin-top: 8px;
         }
@@ -296,7 +374,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             background: #2b1700;
         }
 
-        /* Bottom Tab Bar (Pure iOS style) */
+        /* Bottom Tab Bar */
         .tabbar {
             position: fixed;
             bottom: 0;
@@ -364,13 +442,60 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     <div class="topbar">
         <div class="topbar-title">
             <span class="status-dot"></span>
-            <span>SENTINEL DESK</span>
+            <span>SENTINEL COMPASS</span>
             <span class="mono" style="font-size: 10px; color: var(--text-muted);" id="top-clock">--:--:--</span>
         </div>
         <button class="refresh-btn mono" onclick="fetchData()">SYNC</button>
     </div>
 
-    <!-- 1. ACCOUNTS SUMMARY STRIP -->
+    <!-- 1. TRADING COMPASS: DIREZIONE STRATEGICA & HEALTH SCORE -->
+    <div class="section">
+        <div class="section-header">
+            <span class="section-title">Trading Compass (Verifica Vantaggio Quant)</span>
+            <span class="mono" style="font-size: 10px; color: var(--text-dim);">EDGE DIAGNOSTICS</span>
+        </div>
+        <div class="compass-box">
+            <div class="compass-top">
+                <div>
+                    <div style="font-size: 9px; color: var(--text-muted); text-transform: uppercase;" class="mono">Health &amp; Alignment Score</div>
+                    <div class="compass-score-wrap mono">
+                        <span class="compass-score" id="compass-score-val">--</span>
+                        <span style="font-size: 12px; color: var(--text-dim);">/ 100</span>
+                    </div>
+                </div>
+                <div id="compass-badge-el" class="compass-badge badge-amber mono">CALCOLO</div>
+            </div>
+            <div class="compass-desc" id="compass-desc-el">
+                Inizializzazione diagnostica probabilistica...
+            </div>
+
+            <!-- 4 Metric Cards: Expected Value, Realized R:R, In-The-Money Ratio, Profit Factor -->
+            <div class="diag-grid mono">
+                <div class="diag-cell">
+                    <div class="diag-label">Expected Value (EV)</div>
+                    <div class="diag-val" id="diag-ev-val">$0.00</div>
+                    <div class="diag-sub">Utile atteso per trade</div>
+                </div>
+                <div class="diag-cell">
+                    <div class="diag-label">R:R Reale vs Target</div>
+                    <div class="diag-val" id="diag-rr-val">1:0.0</div>
+                    <div class="diag-sub">Target min: 1:2.5</div>
+                </div>
+                <div class="diag-cell">
+                    <div class="diag-label">Posizioni in Gain</div>
+                    <div class="diag-val" id="diag-itm-val">0%</div>
+                    <div class="diag-sub" id="diag-prot-sub">0 protette Break-Even</div>
+                </div>
+                <div class="diag-cell">
+                    <div class="diag-label">Profit Factor</div>
+                    <div class="diag-val" id="diag-pf-val">0.00</div>
+                    <div class="diag-sub">Gross Win / Gross Loss</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 2. ACCOUNTS SUMMARY STRIP -->
     <div class="section">
         <div class="acc-grid mono">
             <div class="acc-cell">
@@ -396,7 +521,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         </div>
     </div>
 
-    <!-- 2. MULTI-TIMEFRAME VARIATIONS STRIP (3s, 1m, 1h, 1d, 1w, 1M) -->
+    <!-- 3. MULTI-TIMEFRAME VARIATIONS STRIP (3s, 1m, 1h, 1d, 1w, 1M) -->
     <div class="section">
         <div class="section-header">
             <span class="section-title">Variazione Rendimento Portfolio</span>
@@ -419,7 +544,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 <div class="tf-pct" id="delta-1h-pct">0.00%</div>
             </div>
             <div class="tf-card" onclick="setTimeframe('1d')">
-                <div class="tf-header">1 Giorno (24h)</div>
+                <div class="tf-header">1 Giorno</div>
                 <div class="tf-delta" id="delta-1d-val">$0.00</div>
                 <div class="tf-pct" id="delta-1d-pct">0.00%</div>
             </div>
@@ -429,14 +554,14 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 <div class="tf-pct" id="delta-1w-pct">0.00%</div>
             </div>
             <div class="tf-card" onclick="setTimeframe('1M')">
-                <div class="tf-header">1 Mese (30d)</div>
+                <div class="tf-header">1 Mese</div>
                 <div class="tf-delta" id="delta-1M-val">$0.00</div>
                 <div class="tf-pct" id="delta-1M-pct">0.00%</div>
             </div>
         </div>
     </div>
 
-    <!-- 3. INTERACTIVE CHART CON CONTROLLO TIMEFRAME -->
+    <!-- 4. INTERACTIVE CHART CON CONTROLLO TIMEFRAME -->
     <div class="section">
         <div class="section-header">
             <span class="section-title">Traiettoria Grafico</span>
@@ -459,11 +584,11 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         </div>
     </div>
 
-    <!-- 4. TAB 1: BYBIT POSITIONS (DEFAULT) -->
+    <!-- 5. TAB 1: BYBIT POSITIONS (DEFAULT) -->
     <div class="section" id="view-bybit">
         <div class="section-header">
             <span class="section-title">Posizioni Attive Bybit (Futures 24/7)</span>
-            <span class="mono" style="font-size: 10px; color: var(--text-muted);">Size: $15,000 / TP: +3% / SL: -1.2%</span>
+            <span class="mono" style="font-size: 10px; color: var(--text-muted);">Size: $15k / TP: +3% / SL: -1.2%</span>
         </div>
         <div id="bybit-positions-list">
             <div style="padding: 20px 0; text-align: center; color: var(--text-dim);" class="mono">
@@ -472,7 +597,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         </div>
     </div>
 
-    <!-- 5. TAB 2: ALPACA EQUITIES -->
+    <!-- 6. TAB 2: ALPACA EQUITIES -->
     <div class="section hidden" id="view-alpaca">
         <div class="section-header">
             <span class="section-title">Alpaca Wall Street (NYSE / NASDAQ)</span>
@@ -499,7 +624,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         </table>
     </div>
 
-    <!-- 6. TAB 3: STORICO CHIUSI -->
+    <!-- 7. TAB 3: STORICO CHIUSI -->
     <div class="section hidden" id="view-history">
         <div class="section-header">
             <span class="section-title">Storico Trade Chiusi (Bybit)</span>
@@ -526,7 +651,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         </table>
     </div>
 
-    <!-- 7. TAB 4: REGOLE TRADING -->
+    <!-- 8. TAB 4: REGOLE TRADING -->
     <div class="section hidden" id="view-rules">
         <div class="section-header">
             <span class="section-title">Parametri di Esecuzione Quantitativa</span>
@@ -721,8 +846,34 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             const aPositions = alpaca.positions || [];
             const history = data.perf_history || [];
             const variations = data.variations || {};
+            const compass = data.compass || {};
 
-            // 1. Acc Summary
+            // 1. Trading Compass & Edge Score
+            const cScore = compass.health_score || 50;
+            const scoreEl = document.getElementById('compass-score-val');
+            scoreEl.innerText = cScore;
+            
+            const badgeEl = document.getElementById('compass-badge-el');
+            badgeEl.innerText = compass.verdict || 'CALCOLO';
+            
+            const col = compass.verdict_color || 'amber';
+            badgeEl.className = 'compass-badge badge-' + col + ' mono';
+            scoreEl.style.color = (col === 'green' ? 'var(--green)' : (col === 'red' ? 'var(--red)' : 'var(--amber)'));
+
+            document.getElementById('compass-desc-el').innerText = compass.verdict_desc || '';
+
+            // 4 Diag Metrics
+            const evEl = document.getElementById('diag-ev-val');
+            const evSign = (compass.expected_value_usd || 0) >= 0 ? '+' : '';
+            evEl.innerText = `${evSign}$${(compass.expected_value_usd || 0).toFixed(2)}`;
+            evEl.className = 'diag-val ' + ((compass.expected_value_usd || 0) >= 0 ? 'val-up' : 'val-down');
+
+            document.getElementById('diag-rr-val').innerText = `1:${(compass.realized_rr || 0).toFixed(1)}`;
+            document.getElementById('diag-itm-val').innerText = `${compass.open_itm_ratio || 0}%`;
+            document.getElementById('diag-prot-sub').innerText = `${compass.protected_positions_count || 0} a Break-Even`;
+            document.getElementById('diag-pf-val').innerText = (compass.profit_factor || 0).toFixed(2);
+
+            // 2. Acc Summary
             const bEq = bWallet.total_equity || 0;
             const aEq = parseFloat(aAcc.portfolio_value || 0);
             const totalEq = bEq + aEq;
@@ -745,7 +896,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             pnlEl.className = 'acc-val ' + (totPnl >= 0 ? 'val-up' : 'val-down');
             document.getElementById('active-positions-count').innerText = `${bPositions.length} posizioni`;
 
-            // 2. Variazioni Multi-Timeframe (3s, 1m, 1h, 1d, 1w, 1M)
+            // 3. Variazioni Multi-Timeframe
             ['3s', '1m', '1h', '1d', '1w', '1M'].forEach(tf => {
                 const v = variations[tf] || { delta_equity: 0, delta_equity_pct: 0 };
                 const vVal = document.getElementById(`delta-${tf}-val`);
@@ -761,7 +912,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 }
             });
 
-            // 3. Metrics & Chart
+            // 4. Metrics & Chart
             let cumVol = 0;
             let cumPnl = 0;
             let wins = 0;
@@ -783,7 +934,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 initChart(history);
             }
 
-            // 4. Bybit Positions Row-List
+            // 5. Bybit Positions Row-List
             const listEl = document.getElementById('bybit-positions-list');
             if (bPositions.length === 0) {
                 listEl.innerHTML = `<div style="padding: 24px 0; text-align: center; color: var(--text-dim);" class="mono">Nessuna posizione aperta. Monitoraggio breakout in corso.</div>`;
@@ -830,7 +981,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 }).join('');
             }
 
-            // 5. Alpaca Table
+            // 6. Alpaca Table
             const aBody = document.getElementById('alpaca-tbody');
             if (aPositions.length === 0) {
                 aBody.innerHTML = `<tr><td colspan="6" style="text-align: center; padding: 20px 0; color: var(--text-dim);">Nessun titolo aperto. Wall Street chiusa nel weekend.</td></tr>`;
@@ -852,7 +1003,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 }).join('');
             }
 
-            // 6. History Table
+            // 7. History Table
             document.getElementById('closed-count-label').innerText = `${bClosed.length} eseguiti`;
             const hBody = document.getElementById('history-tbody');
             if (bClosed.length === 0) {
@@ -889,7 +1040,7 @@ async def handle_dashboard_page(request):
     return web.Response(text=DASHBOARD_HTML, content_type="text/html")
 
 async def handle_dashboard_api(request):
-    """Restituisce il payload JSON completo con variazioni multi-timeframe e serie storiche selezionabili."""
+    """Restituisce il payload JSON completo con Compass, variazioni multi-timeframe e serie storiche."""
     global _bybit_service, _alpaca_service
     if not _bybit_service:
         _bybit_service = BybitExecutionService()
@@ -931,11 +1082,13 @@ async def handle_dashboard_api(request):
 
         history = perf_tracker.get_timeframe_history(tf)
         variations = perf_tracker.get_variations(tot_eq, cum_real)
+        compass_metrics = trading_compass.compute_edge_metrics(b_closed, b_pos, tot_eq)
         
         payload = {
             "status": "online",
             "timestamp": datetime.now(ZoneInfo("Europe/Rome")).isoformat(),
             "timeframe": tf,
+            "compass": compass_metrics,
             "bybit": {
                 "wallet": b_wallet,
                 "positions": b_pos,
