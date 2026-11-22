@@ -936,6 +936,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             <div class="metric-item"><span>Vol:</span><strong id="metric-volume">$0</strong></div>
             <div class="metric-item"><span>PnL Chiuso:</span><strong id="metric-realized">$0.00</strong></div>
             <div class="metric-item"><span>Win Rate:</span><strong id="metric-winrate">0%</strong></div>
+            <div class="metric-item" data-tip-pos="bottom" data-tip="Media matematica netta guadagnata o persa per singolo trade chiuso"><span>Trade Medio:</span><strong id="metric-avg-trade">$0.00</strong></div>
         </div>
     </div>
 
@@ -983,7 +984,10 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     <div class="section hidden" id="view-history">
         <div class="section-header">
             <span class="section-title">Storico Trade Chiusi (Bybit)</span>
-            <span class="mono" style="font-size: 10px; color: var(--text-muted);" id="closed-count-label">0 eseguiti</span>
+            <div style="display: flex; gap: 8px; align-items: center;">
+                <span class="mono" style="font-size: 10px; color: var(--blue);" id="history-avg-label">Trade Medio: $0.00</span>
+                <span class="mono" style="font-size: 10px; color: var(--text-muted);" id="closed-count-label">0 eseguiti</span>
+            </div>
         </div>
         <table class="clean-table mono">
             <thead>
@@ -991,6 +995,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                     <th>Ora</th>
                     <th>Simbolo</th>
                     <th>Lato</th>
+                    <th>Investito ($)</th>
                     <th>Prezzi</th>
                     <th>Fee</th>
                     <th>PnL Netto</th>
@@ -998,7 +1003,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             </thead>
             <tbody id="history-tbody">
                 <tr>
-                    <td colspan="6" style="text-align: center; padding: 20px 0; color: var(--text-dim);">
+                    <td colspan="7" style="text-align: center; padding: 20px 0; color: var(--text-dim);">
                         Nessun trade chiuso di recente.
                     </td>
                 </tr>
@@ -1063,10 +1068,25 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 </div>
             </div>
 
-            <!-- Card 4: Separazione Bybit e Alpaca -->
+            <!-- Card 4: Saldo Conto Unificato Bybit (UTA) vs Credito Demo Iniziale -->
             <div class="acc-cell" style="padding: 14px; text-align: left;">
                 <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
-                    <strong style="color: var(--text-main); font-size: 13px;">4. Separazione dei Broker (Crypto vs Wall Street)</strong>
+                    <strong style="color: var(--text-main); font-size: 13px;">4. Patrimonio Bybit UTA e Composizione del Credito Demo</strong>
+                    <span class="badge mono" style="background: var(--blue); color: #fff; font-size: 9px; padding: 2px 6px; border-radius: 3px;">BYBIT UTA</span>
+                </div>
+                <div style="font-size: 11px; color: var(--text-muted); line-height: 1.45;">
+                    La card <strong>BYBIT UTA</strong> mostra il valore del conto Unificato:<br>
+                    <strong>• Cifra Principale (es. $162,260.09):</strong> È l'<strong>Equity Totale Consolidata</strong> (Total Equity), che somma a prezzi di mercato correnti tutti gli asset del conto (1 BTC spot ~ $60,700, 1 ETH spot ~ $1,710, 50,000 USDC e USDT).<br>
+                    <strong>• Disponibile (es. $49,764 USDT):</strong> È la liquidità cash in stablecoin USDT libera da vincoli di margine, utilizzabile per aprire nuovi contratti futures.<br>
+                    <strong>• Credito Demo Iniziale Assegnato da Bybit:</strong> All'attivazione del conto Demo UTA, Bybit accredita di default un pacchetto multi-asset composto da <strong>50,000 USDT</strong>, <strong>50,000 USDC</strong>, <strong>1 BTC</strong> e <strong>1 ETH</strong>. Le variazioni dell'equity totale riflettono sia le oscillazioni del valore di mercato di BTC/ETH sia i profitti e le perdite realizzati dal bot.<br>
+                    <strong>• Capitale Investito &amp; Trade Medio nello Storico:</strong> Nella tab <strong>Storico Trade</strong> viene indicata la colonna <strong>Investito ($)</strong> (notionale del trade aperto, circa $15,000 pari al 10% dell'equity) e il <strong>Trade Medio</strong> (media matematica del guadagno/perdita netto per singola operazione conclusa).
+                </div>
+            </div>
+
+            <!-- Card 5: Separazione dei Broker (Crypto vs Wall Street) -->
+            <div class="acc-cell" style="padding: 14px; text-align: left;">
+                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
+                    <strong style="color: var(--text-main); font-size: 13px;">5. Separazione dei Broker (Crypto vs Wall Street)</strong>
                 </div>
                 <div style="font-size: 11px; color: var(--text-muted); line-height: 1.45;">
                     <strong>• Bybit Futures (UTA):</strong> Opera 24/7 (weekend compreso) sui derivati crypto liquidi (BTC, ETH, SOL, LINK, AVAX, XRP).<br>
@@ -1075,10 +1095,10 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 </div>
             </div>
 
-            <!-- Card 5: Timeframe e Grafico Zoomabile -->
+            <!-- Card 6: Timeframe e Grafico Zoomabile -->
             <div class="acc-cell" style="padding: 14px; text-align: left;">
                 <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
-                    <strong style="color: var(--text-main); font-size: 13px;">5. Timeframe e Zoom Interattivo</strong>
+                    <strong style="color: var(--text-main); font-size: 13px;">6. Timeframe e Zoom Interattivo</strong>
                 </div>
                 <div style="font-size: 11px; color: var(--text-muted); line-height: 1.45;">
                     <strong>• Timeframe (3S, 1M, 1H, 1D, 1W, 1MO):</strong> Permette di visualizzare sia il micro-tick in tempo reale che l'andamento a lungo termine fino a 30 giorni.<br>
@@ -1087,10 +1107,10 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 </div>
             </div>
 
-            <!-- Card 6: Mini-Sparklines & Target R:R Progress -->
+            <!-- Card 7: Mini-Sparklines & Target R:R Progress -->
             <div class="acc-cell" style="padding: 14px; text-align: left;">
                 <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
-                    <strong style="color: var(--text-main); font-size: 13px;">6. Mini-Sparklines &amp; Barra Progresso R:R 1:3</strong>
+                    <strong style="color: var(--text-main); font-size: 13px;">7. Mini-Sparklines &amp; Barra Progresso R:R 1:3</strong>
                     <span class="badge mono" style="background: var(--blue); color: #fff; font-size: 9px; padding: 2px 6px; border-radius: 3px;">REAL-TIME</span>
                 </div>
                 <div style="font-size: 11px; color: var(--text-muted); line-height: 1.45;">
@@ -1101,10 +1121,10 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 </div>
             </div>
 
-            <!-- Card 7: Notifiche Push Telegram Smart -->
+            <!-- Card 8: Notifiche Push Telegram Smart -->
             <div class="acc-cell" style="padding: 14px; text-align: left;">
                 <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
-                    <strong style="color: var(--text-main); font-size: 13px;">7. Notifiche Push Telegram Intelligenti (Zero Spam) &amp; Recap 22:00</strong>
+                    <strong style="color: var(--text-main); font-size: 13px;">8. Notifiche Push Telegram Intelligenti (Zero Spam) &amp; Recap 22:00</strong>
                     <span class="badge mono" style="background: var(--green); color: #fff; font-size: 9px; padding: 2px 6px; border-radius: 3px;">ALERT 24/7</span>
                 </div>
                 <div style="font-size: 11px; color: var(--text-muted); line-height: 1.45;">
@@ -1117,10 +1137,10 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 </div>
             </div>
 
-            <!-- Card 8: Diagnostica Ciclica (Hurst/Migliorino), Onde di Elliott e Monte Carlo -->
+            <!-- Card 9: Diagnostica Ciclica (Hurst/Migliorino), Onde di Elliott e Monte Carlo -->
             <div class="acc-cell" style="padding: 14px; text-align: left;">
                 <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
-                    <strong style="color: var(--text-main); font-size: 13px;">8. Analisi Ciclica, Onde di Elliott, Timeframe &amp; Previsione Monte Carlo</strong>
+                    <strong style="color: var(--text-main); font-size: 13px;">9. Analisi Ciclica, Onde di Elliott, Timeframe &amp; Previsione Monte Carlo</strong>
                     <span class="badge mono" style="background: var(--blue); color: #fff; font-size: 9px; padding: 2px 6px; border-radius: 3px;">QUANT PRO</span>
                 </div>
                 <div style="font-size: 11px; color: var(--text-muted); line-height: 1.45;">
@@ -1877,6 +1897,19 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             const wr = bClosed.length > 0 ? (wins / bClosed.length * 100).toFixed(0) : 0;
             document.getElementById('metric-winrate').innerText = `${wr}% (${wins}/${bClosed.length})`;
 
+            // Calcolo Trade Medio
+            const avgTrade = bClosed.length > 0 ? (cumPnl / bClosed.length) : 0;
+            const avgEl = document.getElementById('metric-avg-trade');
+            if (avgEl) {
+                avgEl.innerText = `${avgTrade >= 0 ? '+' : ''}$${avgTrade.toFixed(2)}`;
+                avgEl.className = avgTrade >= 0 ? 'val-up' : 'val-down';
+            }
+            const histAvgEl = document.getElementById('history-avg-label');
+            if (histAvgEl) {
+                histAvgEl.innerText = `Trade Medio: ${avgTrade >= 0 ? '+' : ''}$${avgTrade.toFixed(2)}`;
+                histAvgEl.style.color = avgTrade >= 0 ? 'var(--green)' : 'var(--red)';
+            }
+
             if (history.length > 0) {
                 initChart(history);
             }
@@ -2025,18 +2058,24 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             document.getElementById('closed-count-label').innerText = `${sortedClosed.length} eseguiti`;
             const hBody = document.getElementById('history-tbody');
             if (sortedClosed.length === 0) {
-                hBody.innerHTML = `<tr><td colspan="6" style="text-align: center; padding: 20px 0; color: var(--text-dim);">Nessun trade chiuso recente.</td></tr>`;
+                hBody.innerHTML = `<tr><td colspan="7" style="text-align: center; padding: 20px 0; color: var(--text-dim);">Nessun trade chiuso recente.</td></tr>`;
             } else {
                 hBody.innerHTML = sortedClosed.slice(0, 20).map(c => {
                     const pVal = parseFloat(c.closedPnl || 0);
                     const pClass = pVal >= 0 ? 'val-up' : 'val-down';
                     const pSign = pVal >= 0 ? '+' : '';
                     const timeStr = c.updatedTime ? new Date(parseInt(c.updatedTime)).toLocaleTimeString('it-IT') : '--:--';
+                    
+                    // Quantitativo economico investito (Notionale = cumEntryValue o closedSize * avgEntryPrice)
+                    const invested = parseFloat(c.cumEntryValue || 0) || (parseFloat(c.closedSize || 0) * parseFloat(c.avgEntryPrice || 0));
+                    const investedStr = invested > 0 ? '$' + Math.round(invested).toLocaleString('en-US') : '--';
+
                     return `
                         <tr>
                             <td style="color: var(--text-muted); font-weight: 500;">${timeStr}</td>
                             <td style="font-weight: 700; color: var(--text-main);">${c.symbol}</td>
                             <td>${c.side}</td>
+                            <td style="color: var(--text-main); font-weight: 600;">${investedStr}</td>
                             <td>$${parseFloat(c.avgEntryPrice || 0).toFixed(3)} &rarr; $${parseFloat(c.avgExitPrice || 0).toFixed(3)}</td>
                             <td style="color: var(--text-dim);">$${(parseFloat(c.openFee || 0) + parseFloat(c.closeFee || 0)).toFixed(2)}</td>
                             <td class="${pClass}">${pSign}$${pVal.toFixed(2)}</td>
