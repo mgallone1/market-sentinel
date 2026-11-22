@@ -1755,67 +1755,52 @@ async def _handle_text_message_core(update: Update, context: ContextTypes.DEFAUL
             parse_mode="Markdown"
         )
 
-        # Riconoscimento speciale per Crypto (BTC, ETH, SOL...)
-        is_crypto_target = any(c in resolved_sym for c in ["BTC", "ETH", "SOL", "BITCOIN", "ETHEREUM", "SOLANA"]) or "/" in resolved_sym
+        # Riconoscimento speciale per Crypto (BTC, ETH, SOL, LINK, AVAX...) -> 100% SU BYBIT FUTURES DEMO
+        is_crypto_target = any(c in resolved_sym for c in ["BTC", "ETH", "SOL", "LINK", "AVAX", "XRP", "DOGE", "BITCOIN", "ETHEREUM", "SOLANA"]) or "/" in resolved_sym
         if is_crypto_target:
-            crypto_sym = "BTC/USD" if "BTC" in resolved_sym or "BITCOIN" in resolved_sym else (
-                "ETH/USD" if "ETH" in resolved_sym or "ETHEREUM" in resolved_sym else (
-                    "SOL/USD" if "SOL" in resolved_sym or "SOLANA" in resolved_sym else f"{resolved_sym}/USD"
+            bybit_sym = "BTCUSDT" if "BTC" in resolved_sym or "BITCOIN" in resolved_sym else (
+                "ETHUSDT" if "ETH" in resolved_sym or "ETHEREUM" in resolved_sym else (
+                    "SOLUSDT" if "SOL" in resolved_sym or "SOLANA" in resolved_sym else (
+                        "LINKUSDT" if "LINK" in resolved_sym else (
+                            "AVAXUSDT" if "AVAX" in resolved_sym else (
+                                "XRPUSDT" if "XRP" in resolved_sym else (
+                                    "DOGEUSDT" if "DOGE" in resolved_sym else f"{resolved_sym.replace('/', '')}USDT"
+                                )
+                            )
+                        )
+                    )
                 )
             )
-            # Se l'utente specifica un importo in valuta lo usa, altrimenti se passa un intero piccolo (es. 1 o 2 crypto) assegna sizing proporzionato di $2.500
+            # Se l'utente specifica un importo in valuta lo usa, altrimenti assegna $5.000
             if unit in ["$", "usd", "euro", "dollari"]:
                 notional_amt = val_num
             elif unit in ["azioni", "quote", "crypto", "pezzi"] and val_num <= 10:
-                notional_amt = val_num * 2500.0  # $2.500 per quota richiesta, allineato al sizing azionario
+                notional_amt = val_num * 5000.0
             else:
-                notional_amt = val_num
+                notional_amt = 5000.0
 
-            # Se l'operazione richiesta è SHORT, usiamo direttamente Bybit Perpetual Futures
-            if side.lower() in ["sell", "short", "vendi", "shorta"]:
-                bybit_sym = "BTCUSDT" if "BTC" in resolved_sym or "BITCOIN" in resolved_sym else (
-                    "ETHUSDT" if "ETH" in resolved_sym or "ETHEREUM" in resolved_sym else (
-                        "SOLUSDT" if "SOL" in resolved_sym or "SOLANA" in resolved_sym else f"{resolved_sym.replace('/', '')}USDT"
-                    )
-                )
-                res_short = bybit_service.place_order(symbol=bybit_sym, side="Sell", notional_usd=notional_amt, take_profit_pct=2.5, stop_loss_pct=1.5)
-                if "error" in res_short:
-                    await status_order_msg.edit_text(
-                        f"⚠️ *Errore ordine Short su Bybit:*\n`{res_short['error']}`",
-                        parse_mode="Markdown"
-                    )
-                else:
-                    await status_order_msg.edit_text(
-                        f"🔻 *ORDINE SHORT CRYPTO ESEGUITO SU BYBIT (24/7)!* 📉\n"
-                        f"────────────────────────\n"
-                        f"• *Contratto:* `{bybit_sym}`\n"
-                        f"• *Operazione:* `SHORT (Vendita allo Scoperto)`\n"
-                        f"• *Importo Notionale:* `${notional_amt:.2f} USDT`\n"
-                        f"• *Prezzo Esecuzione:* `${res_short.get('price'):.2f}`\n"
-                        f"• *Take Profit:* `${res_short.get('take_profit')}` (+2.5% al ribasso)\n"
-                        f"• *Stop Loss:* `${res_short.get('stop_loss')}` (-1.5% al rialzo)\n"
-                        f"• *Status:* `APERTO SUL CONTO DEMO BYBIT` 🎯\n\n"
-                        f"💡 _Visualizza il saldo e le posizioni con `/crypto`._",
-                        parse_mode="Markdown"
-                    )
-                return
+            side_bybit = "Buy" if side.lower() in ["buy", "long", "compra"] else "Sell"
+            action_label = "LONG (Rialzista)" if side_bybit == "Buy" else "SHORT (Ribassista)"
+            action_icon = "🟢" if side_bybit == "Buy" else "🔻"
 
-            # Ordine LONG a mercato 24/7 (Alpaca)
-            res_crypto = alpaca_service.place_crypto_order(symbol=crypto_sym, notional=notional_amt, side=side)
-            if "error" in res_crypto:
+            res_order = bybit_service.place_order(symbol=bybit_sym, side=side_bybit, notional_usd=notional_amt, take_profit_pct=3.0, stop_loss_pct=1.5)
+            if "error" in res_order:
                 await status_order_msg.edit_text(
-                    f"⚠️ *Errore ordine Crypto su Alpaca:*\n`{res_crypto['error']}`",
+                    f"⚠️ *Errore ordine Crypto su Bybit:*\n`{res_order['error']}`",
                     parse_mode="Markdown"
                 )
             else:
                 await status_order_msg.edit_text(
-                    f"✅ *ORDINE CRYPTO ESEGUITO SU ALPACA (24/7)!* 🚀\n"
+                    f"{action_icon} *ORDINE CRYPTO ESEGUITO SU BYBIT (24/7)!* 🚀\n"
                     f"────────────────────────\n"
-                    f"• *Coppia:* `{crypto_sym}`\n"
-                    f"• *Operazione:* `{side.upper()}`\n"
-                    f"• *Importo Notionale:* `${notional_amt:.2f}`\n"
-                    f"• *Status:* `{res_crypto.get('status', 'inviato').upper()}`\n\n"
-                    f"💡 _Visualizza il saldo aggiornato con `/alpaca`._",
+                    f"• *Contratto:* `{bybit_sym}`\n"
+                    f"• *Operazione:* `{action_label}`\n"
+                    f"• *Importo Notionale:* `${notional_amt:,.2f} USDT`\n"
+                    f"• *Prezzo Esecuzione:* `${res_order.get('price'):.2f}`\n"
+                    f"• *Take Profit:* `${res_order.get('take_profit')}` (+3.0%)\n"
+                    f"• *Stop Loss:* `${res_order.get('stop_loss')}` (-1.5%)\n"
+                    f"• *Status:* `APERTO SUL CONTO DEMO BYBIT` 🎯\n\n"
+                    f"💡 _Visualizza il saldo e le posizioni aggiornate con `/crypto`._",
                     parse_mode="Markdown"
                 )
             return
@@ -2955,75 +2940,65 @@ async def auto_flatten_overnight_job(application):
 
 async def crypto_auto_risk_manager_job(application):
     """
-    Motore autonomo 24/7 di trading e risk management Crypto:
-    1. Gestione dinamica posizioni aperte:
-       - Take Profit (+2.5%) o Stop Loss (-1.5%) chiudono a mercato la posizione incassando il profitto o proteggendo il capitale.
-    2. Apertura autonoma e continua (Always in Trading):
-       - Se non ci sono posizioni crypto attive o se il numero di posizioni è < 2,
-         effettua una scansione quantitativa (RSI, trend EMA20/50 e momentum) sui principali asset (SOL, BTC, ETH)
-         e piazza un ordine a mercato di $2.500 mantenendo sempre attivo il trading su Alpaca anche nel weekend.
+    Motore autonomo 24/7 di trading e risk management Crypto 100% SU BYBIT FUTURES DEMO:
+    1. Gestione dinamica posizioni aperte Bybit:
+       - Take Profit (+3.0%) e Stop Loss (-1.5%) chiudono a mercato la posizione incassando il profitto o proteggendo il capitale.
+    2. Apertura autonoma e continua (Always in Trading su Bybit):
+       - Mantiene attivo un paniere dinamico fino a 5 posizioni diversificate contemporanee ($5.000 ciascuna),
+         sia LONG che SHORT a seconda dei segnali quantitativi di trend, RSI ed EMA.
+    3. ALPACA ZERO CRYPTO:
+       - Alpaca è preservato unicamente ed esclusivamente per le azioni americane (Wall Street) e cash USD.
     """
     try:
-        summary = alpaca_service.get_account_summary()
-        positions = summary.get("positions", [])
-        crypto_positions = []
-        for p in positions:
-            sym = p.get("symbol", "")
-            is_crypto = p.get("asset_class") == "crypto" or "/" in sym or sym.endswith("USD") and any(sym.startswith(c) for c in ["BTC", "ETH", "SOL", "ADA", "XRP", "DOGE"])
-            if is_crypto:
-                crypto_positions.append(p)
-                plpc = float(p.get("unrealized_plpc", 0.0)) * 100
-                qty = float(p.get("qty", 0.0))
-                pl = float(p.get("unrealized_pl", 0.0))
-                curr_p = float(p.get("current_price", 0.0))
+        # 1. Bybit Perpetual Futures Engine (Long & SHORT nativo 24/7)
+        bybit_positions = bybit_service.get_open_positions()
+        # Monitor dinamico Take Profit (+3.0%) e Stop Loss (-1.5%) sulle posizioni Bybit
+        for bp in bybit_positions:
+            bsym = bp["symbol"]
+            pnl_pct = bp["pnl_pct"]
+            unrealized = bp["unrealized_pnl"]
+            bside = bp["side"]
+            # TP al +3.0% e SL al -1.5%
+            if pnl_pct >= 3.0 or pnl_pct <= -1.5:
+                bybit_service.close_position(bsym)
+                action_label = f"🎯 *BYBIT TAKE PROFIT RAGGIUNTO (+{pnl_pct:.2f}%)*" if pnl_pct >= 3.0 else f"🛑 *BYBIT STOP LOSS ESEGUITO ({pnl_pct:.2f}%)*"
+                for uid in AUTHORIZED_USER_IDS:
+                    try:
+                        await application.bot.send_message(
+                            chat_id=uid,
+                            text=(
+                                f"{action_label}\n"
+                                f"────────────────────────\n"
+                                f"• *Asset:* `{bsym}` [{bside}]\n"
+                                f"• *Risultato Netto:* `${unrealized:+.2f}` ({pnl_pct:+.2f}%)\n"
+                                "Posizione futures demo liquidata con successo su Bybit."
+                            ),
+                            parse_mode="Markdown"
+                        )
+                    except Exception:
+                        pass
 
-                # Trigger Take Profit (+2.5%) o Stop Loss (-1.5%)
-                if plpc >= 2.5 or plpc <= -1.5:
-                    alpaca_service.close_position(sym)
-                    action_label = "🎯 *TAKE PROFIT CRYPTO RAGGIUNTO (+2.5%)*" if plpc >= 2.5 else "🛑 *STOP LOSS PROTETTIVO CRYPTO (-1.5%)*"
-                    for uid in AUTHORIZED_USER_IDS:
-                        try:
-                            await application.bot.send_message(
-                                chat_id=uid,
-                                text=(
-                                    f"{action_label}\n"
-                                    f"────────────────────────\n"
-                                    f"• *Asset Chiuso:* `{sym}`\n"
-                                    f"• *Prezzo Esecuzione:* `${curr_p:.2f}`\n"
-                                    f"• *Risultato Netto:* `${pl:+.2f}` ({plpc:+.2f}%)\n"
-                                    f"Posizione liquidata e reinvestimento automatico pronto sul prossimo segnale."
-                                ),
-                                parse_mode="Markdown"
-                            )
-                        except Exception:
-                            pass
-
-        # 2. Controllo Always in Trading: manteniamo un paniere diversificato (fino a 3 posizioni contemporanee)
-        target_max_positions = 3
-        if len(crypto_positions) < target_max_positions:
-            active_clean = {p.get("symbol", "").replace("/", "").upper() for p in crypto_positions}
-            # Universo diversificato di crypto negoziabili su Alpaca
-            candidates = [
-                ("BTC/USD", "BTCUSD", "BTC-USD", "Bitcoin"),
-                ("ETH/USD", "ETHUSD", "ETH-USD", "Ethereum"),
-                ("SOL/USD", "SOLUSD", "SOL-USD", "Solana"),
-                ("AVAX/USD", "AVAXUSD", "AVAX-USD", "Avalanche"),
-                ("LINK/USD", "LINKUSD", "LINK-USD", "Chainlink")
+        # 2. Apertura proattiva sia Long che Short su Bybit: fino a 5 posizioni diversificate
+        if len(bybit_positions) < 5:
+            active_bybit_syms = {bp["symbol"] for bp in bybit_positions}
+            bybit_candidates = [
+                ("SOLUSDT", "SOL-USD", "Solana"),
+                ("BTCUSDT", "BTC-USD", "Bitcoin"),
+                ("ETHUSDT", "ETH-USD", "Ethereum"),
+                ("LINKUSDT", "LINK-USD", "Chainlink"),
+                ("AVAXUSDT", "AVAX-USD", "Avalanche"),
+                ("XRPUSDT", "XRP-USD", "Ripple"),
+                ("DOGEUSDT", "DOGE-USD", "Dogecoin")
             ]
-
-            eligible = []
-            for pair_slash, pair_clean, yf_sym, name in candidates:
-                if pair_clean in active_clean or pair_slash.replace("/", "") in active_clean:
+            for b_sym, b_yf, b_name in bybit_candidates:
+                if b_sym in active_bybit_syms:
                     continue
-
                 try:
                     import yfinance as yf
                     import pandas as pd
-                    df = yf.download(yf_sym, period="5d", interval="15m", progress=False)
+                    df = yf.download(b_yf, period="5d", interval="15m", progress=False)
                     if df.empty or len(df) < 25:
-                        eligible.append((pair_slash, name, 0, "NEUTRAL"))
                         continue
-
                     close = df["Close"].iloc[:, 0] if isinstance(df["Close"], pd.DataFrame) else df["Close"]
                     delta = close.diff()
                     gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
@@ -3034,145 +3009,44 @@ async def crypto_auto_risk_manager_job(application):
                     ema50 = float(close.ewm(span=50, adjust=False).mean().iloc[-1])
                     last_c = float(close.iloc[-1])
 
-                    score = 0
-                    if last_c > ema20:
-                        score += 2
-                    if ema20 > ema50:
-                        score += 2
-                    if 35 <= rsi <= 65:
-                        score += 2
-                    elif rsi < 35:
-                        score += 3 # Segnale forte di rimbalzo da ipervenduto
-
-                    eligible.append((pair_slash, name, score, "BULLISH" if score >= 2 else "NEUTRAL"))
-                except Exception as ex_c:
-                    eligible.append((pair_slash, name, 0, "NEUTRAL"))
-
-            # Ordina per score quantitativo decrescente per selezionare il miglior asset diversificato
-            eligible.sort(key=lambda x: x[2], reverse=True)
-
-            if eligible:
-                target_pair, target_name, target_score, direction = eligible[0]
-                print(f"🪙 [Crypto Multi-Asset] Apertura diversificata di $2.500 su {target_pair} ({target_name}) con score: {target_score}...")
-                res_order = alpaca_service.place_crypto_order(symbol=target_pair, notional=2500.0, side="buy")
-                if "error" not in res_order:
-                    for uid in AUTHORIZED_USER_IDS:
-                        try:
-                            await application.bot.send_message(
-                                chat_id=uid,
-                                text=(
-                                    "⚡ *CRYPTO TRADING 24/7 DIVERSIFICATO — NUOVO INGRESSO* 🚀\n"
-                                    "────────────────────────\n"
-                                    f"• *Asset:* *{target_name}* (`{target_pair}`)\n"
-                                    f"• *Importo Operazione:* `$2,500.00`\n"
-                                    f"• *Allocazione:* Paniere multi-crypto attivo (BTC, ETH, SOL e Altcoin)\n"
-                                    f"• *Strategia:* TP: +2.5% | SL: -1.5%\n"
-                                    f"• *Status Ordine:* `{res_order.get('status', 'inviato').upper()}`\n\n"
-                                    "💡 _Il sistema ruota automaticamente e non si concentra su un singolo asset._"
-                                ),
-                                parse_mode="Markdown"
-                            )
-                        except Exception:
-                            pass
-
-        # 3. Bybit Perpetual Futures Engine (Long & SHORT nativo 24/7 con allocazione aggressiva $5,000)
-        try:
-            bybit_positions = bybit_service.get_open_positions()
-            # Monitor dinamico Take Profit (+3.0%) e Stop Loss (-1.5%) sulle posizioni Bybit
-            for bp in bybit_positions:
-                bsym = bp["symbol"]
-                pnl_pct = bp["pnl_pct"]
-                unrealized = bp["unrealized_pnl"]
-                bside = bp["side"]
-                # TP al +3.0% e SL al -1.5%
-                if pnl_pct >= 3.0 or pnl_pct <= -1.5:
-                    bybit_service.close_position(bsym)
-                    action_label = f"🎯 *BYBIT TAKE PROFIT RAGGIUNTO (+{pnl_pct:.2f}%)*" if pnl_pct >= 3.0 else f"🛑 *BYBIT STOP LOSS ESEGUITO ({pnl_pct:.2f}%)*"
-                    for uid in AUTHORIZED_USER_IDS:
-                        try:
-                            await application.bot.send_message(
-                                chat_id=uid,
-                                text=(
-                                    f"{action_label}\n"
-                                    f"────────────────────────\n"
-                                    f"• *Asset:* `{bsym}` [{bside}]\n"
-                                    f"• *Risultato Netto:* `${unrealized:+.2f}` ({pnl_pct:+.2f}%)\n"
-                                    "Posizione futures demo liquidata con successo su Bybit."
-                                ),
-                                parse_mode="Markdown"
-                            )
-                        except Exception:
-                            pass
-
-            # Apertura proattiva sia Long che Short su Bybit: manteniamo fino a 3 posizioni contemporanee per massimizzare il rendimento
-            if len(bybit_positions) < 3:
-                active_bybit_syms = {bp["symbol"] for bp in bybit_positions}
-                bybit_candidates = [
-                    ("BTCUSDT", "BTC-USD", "Bitcoin"),
-                    ("SOLUSDT", "SOL-USD", "Solana"),
-                    ("ETHUSDT", "ETH-USD", "Ethereum"),
-                    ("LINKUSDT", "LINK-USD", "Chainlink"),
-                    ("AVAXUSDT", "AVAX-USD", "Avalanche")
-                ]
-                for b_sym, b_yf, b_name in bybit_candidates:
-                    if b_sym in active_bybit_syms:
+                    # Segnale SHORT: RSI elevato (>= 60) oppure rottura ribassista sotto le medie
+                    if rsi >= 60 or (last_c < ema20 < ema50):
+                        print(f"📉 [Bybit Futures] Rilevato segnale SHORT su {b_sym} (RSI: {rsi:.1f}). Invio ordine Short $5,000...")
+                        res_order = bybit_service.place_order(b_sym, side="Sell", notional_usd=5000.0, take_profit_pct=3.0, stop_loss_pct=1.5)
+                        order_type_label = "SHORT (Ribassista)"
+                        order_icon = "🔻"
+                    # Segnale LONG: RSI favorevole con trend rialzista
+                    elif rsi <= 55 and (last_c > ema20 > ema50):
+                        print(f"📈 [Bybit Futures] Rilevato segnale LONG su {b_sym} (RSI: {rsi:.1f}). Invio ordine Long $5,000...")
+                        res_order = bybit_service.place_order(b_sym, side="Buy", notional_usd=5000.0, take_profit_pct=3.0, stop_loss_pct=1.5)
+                        order_type_label = "LONG (Rialzista)"
+                        order_icon = "🟢"
+                    else:
                         continue
-                    try:
-                        import yfinance as yf
-                        import pandas as pd
-                        df = yf.download(b_yf, period="5d", interval="15m", progress=False)
-                        if df.empty or len(df) < 25:
-                            continue
-                        close = df["Close"].iloc[:, 0] if isinstance(df["Close"], pd.DataFrame) else df["Close"]
-                        delta = close.diff()
-                        gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
-                        loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
-                        rs = gain / (loss + 1e-9)
-                        rsi = float((100 - (100 / (1 + rs))).iloc[-1])
-                        ema20 = float(close.ewm(span=20, adjust=False).mean().iloc[-1])
-                        ema50 = float(close.ewm(span=50, adjust=False).mean().iloc[-1])
-                        last_c = float(close.iloc[-1])
 
-                        # Segnale SHORT: RSI elevato (> 65) oppure rottura ribassista sotto le medie
-                        if rsi >= 65 or (last_c < ema20 < ema50):
-                            print(f"📉 [Bybit Futures] Rilevato segnale SHORT su {b_sym} (RSI: {rsi:.1f}). Invio ordine Short $5,000...")
-                            res_order = bybit_service.place_order(b_sym, side="Sell", notional_usd=5000.0, take_profit_pct=3.0, stop_loss_pct=1.5)
-                            order_type_label = "SHORT (Ribassista)"
-                            order_icon = "🔻"
-                        # Segnale LONG: RSI favorevole con trend rialzista
-                        elif rsi <= 55 and (last_c > ema20 > ema50):
-                            print(f"📈 [Bybit Futures] Rilevato segnale LONG su {b_sym} (RSI: {rsi:.1f}). Invio ordine Long $5,000...")
-                            res_order = bybit_service.place_order(b_sym, side="Buy", notional_usd=5000.0, take_profit_pct=3.0, stop_loss_pct=1.5)
-                            order_type_label = "LONG (Rialzista)"
-                            order_icon = "🟢"
-                        else:
-                            continue
-
-                        if "error" not in res_order:
-                            for uid in AUTHORIZED_USER_IDS:
-                                try:
-                                    await application.bot.send_message(
-                                        chat_id=uid,
-                                        text=(
-                                            f"{order_icon} *BYBIT FUTURES DEMO — NUOVO TRADE 24/7* 🚀\n"
-                                            "────────────────────────\n"
-                                            f"• *Contratto:* `{b_sym}`\n"
-                                            f"• *Operazione:* `{order_type_label}`\n"
-                                            f"• *Controvalore:* `$5,000.00 USDT`\n"
-                                            f"• *Prezzo Esecuzione:* `${res_order.get('price'):.2f}`\n"
-                                            f"• *Take Profit:* `${res_order.get('take_profit')}` (+3.0%)\n"
-                                            f"• *Stop Loss:* `${res_order.get('stop_loss')}` (-1.5%)\n\n"
-                                            "💡 _Massimizzazione del conto demo Bybit (50.000 USDT)._"
-                                        ),
-                                        parse_mode="Markdown"
-                                    )
-                                except Exception:
-                                    pass
-                            break
-                    except Exception as ex_b:
-                        print(f"[!] Errore screening Bybit {b_sym}: {ex_b}")
-        except Exception as e_bybit:
-            print(f"[!] Errore Bybit background engine: {e_bybit}")
+                    if "error" not in res_order:
+                        for uid in AUTHORIZED_USER_IDS:
+                            try:
+                                await application.bot.send_message(
+                                    chat_id=uid,
+                                    text=(
+                                        f"{order_icon} *BYBIT FUTURES DEMO — NUOVO TRADE 24/7* 🚀\n"
+                                        "────────────────────────\n"
+                                        f"• *Contratto:* `{b_sym}`\n"
+                                        f"• *Operazione:* `{order_type_label}`\n"
+                                        f"• *Controvalore:* `$5,000.00 USDT`\n"
+                                        f"• *Prezzo Esecuzione:* `${res_order.get('price'):.2f}`\n"
+                                        f"• *Take Profit:* `${res_order.get('take_profit')}` (+3.0%)\n"
+                                        f"• *Stop Loss:* `${res_order.get('stop_loss')}` (-1.5%)\n\n"
+                                        "💡 _Massimizzazione del conto demo Bybit (50.000 USDT)._"
+                                    ),
+                                    parse_mode="Markdown"
+                                )
+                            except Exception:
+                                pass
+                        break
+                except Exception as ex_b:
+                    print(f"[!] Errore screening Bybit {b_sym}: {ex_b}")
 
     except Exception as e:
         print(f"[!] Errore crypto_auto_risk_manager_job: {e}")
