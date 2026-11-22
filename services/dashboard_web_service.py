@@ -1,11 +1,11 @@
 """
 Web Dashboard Service for Market Sentinel.
-Design: Native iPhone First & Desktop Pro Financial Terminal
-- Ottimizzato al 100% per iPhone con Safe Area Insets (iOS Dynamic Island / Home Bar)
-- Bottom Navigation Bar mobile-first con tap target di 48px
-- Grafico Chart.js touch-responsive calibrato per viewport stretti (375px - 430px)
-- Zero orizzontal scroll indesiderato, contrasti AAA su display OLED Retina
-- Card compatte ad alta densità con badge di stato grandi e leggibili con il pollice
+Design: PURE FINANCIAL TERMINAL (Anti-AI-Slop assoluto, zero decorazioni, zero fuffa).
+Ispirato a: IBKR Mobile, TradingView watchlist e terminale Bloomberg.
+- Nessun box colorato giocattolo, nessun gradiente, nessun effetto glow, nessun badge finto.
+- Sfondo nero puro (#000000) come le app di trading professionali su iPhone OLED.
+- Tipografia di sistema iOS (-apple-system / SF Pro) con numeri monospazio tabulari (SF Mono / Courier / monospace).
+- Struttura ultra-compatta: lista ticker a riga singola con prezzi, PnL e stop chiari, esattamente come l'app di un broker reale.
 """
 
 import json
@@ -22,620 +22,574 @@ _bybit_service: BybitExecutionService = None
 _alpaca_service: AlpacaExecutionService = None
 
 DASHBOARD_HTML = """<!DOCTYPE html>
-<html lang="it" class="dark">
+<html lang="it">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <meta name="theme-color" content="#080B11">
-    <title>SENTINEL // DESK TRADING</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://unpkg.com/lucide@latest"></script>
+    <meta name="apple-mobile-web-app-status-bar-style" content="black">
+    <meta name="theme-color" content="#000000">
+    <title>TERMINAL // SENTINEL</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Roboto+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <script>
-        tailwind.config = {
-            darkMode: 'class',
-            theme: {
-                extend: {
-                    fontFamily: {
-                        sans: ['"Inter"', '-apple-system', 'BlinkMacSystemFont', '"SF Pro Display"', 'Roboto', 'sans-serif'],
-                        mono: ['"Roboto Mono"', 'ui-monospace', 'monospace'],
-                    },
-                    colors: {
-                        desk: {
-                            bg: '#080B11',
-                            card: '#0F141F',
-                            elevated: '#161D2C',
-                            border: '#1F293D',
-                            borderSubtle: '#172030',
-                            textMuted: '#94A3B8',
-                            textDim: '#64748B',
-                            textMain: '#F1F5F9',
-                            textBright: '#FFFFFF',
-                            bybitTag: '#F59E0B',
-                            alpacaTag: '#3B82F6',
-                            long: '#10B981',
-                            short: '#EF4444'
-                        }
-                    }
-                }
-            }
-        }
-    </script>
     <style>
+        :root {
+            --bg: #000000;
+            --surface: #0a0a0a;
+            --border: #1a1a1a;
+            --border-subtle: #121212;
+            --text-main: #f0f0f0;
+            --text-muted: #737373;
+            --text-dim: #454545;
+            --green: #22c55e;
+            --green-bg: #052e16;
+            --red: #ef4444;
+            --red-bg: #450a0a;
+            --amber: #f59e0b;
+            --blue: #3b82f6;
+        }
         * {
-            -webkit-tap-highlight-color: transparent;
             box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            -webkit-tap-highlight-color: transparent;
         }
         body {
-            background-color: #080B11;
-            color: #F1F5F9;
-            font-family: 'Inter', -apple-system, sans-serif;
-            font-feature-settings: "cv02", "cv03", "cv04", "cv11", "tnum";
+            background-color: var(--bg);
+            color: var(--text-main);
+            font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", Roboto, sans-serif;
+            font-size: 13px;
+            line-height: 1.4;
             padding-top: env(safe-area-inset-top, 0px);
-            padding-bottom: calc(env(safe-area-inset-bottom, 20px) + 72px);
+            padding-bottom: calc(env(safe-area-inset-bottom, 20px) + 56px);
             overflow-x: hidden;
         }
-        .mono-val {
-            font-family: 'Roboto Mono', monospace;
-            font-feature-settings: "tnum" 1, "zero" 1;
+        .mono {
+            font-family: "SF Mono", Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+            font-feature-settings: "tnum" 1;
         }
-        .desk-card {
-            background-color: #0F141F;
-            border: 1px solid #1F293D;
+
+        /* Top Bar */
+        .topbar {
+            background: #000000;
+            border-bottom: 1px solid var(--border);
+            padding: 10px 16px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            position: sticky;
+            top: 0;
+            z-index: 50;
         }
-        .touch-target {
-            min-height: 48px;
-            min-width: 48px;
-            touch-action: manipulation;
+        .topbar-title {
+            font-weight: 700;
+            font-size: 14px;
+            letter-spacing: 0.5px;
+            color: #fff;
+            display: flex;
+            align-items: center;
+            gap: 8px;
         }
-        /* Bottom bar for iOS */
-        .bottom-nav {
-            padding-bottom: env(safe-area-inset-bottom, 12px);
+        .status-dot {
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            background: var(--green);
+            display: inline-block;
         }
-        .bottom-nav-item {
+        .refresh-btn {
+            background: #111;
+            border: 1px solid #262626;
+            color: #ccc;
+            font-size: 11px;
+            font-weight: 600;
+            padding: 6px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-family: inherit;
+        }
+        .refresh-btn:active {
+            background: #222;
+        }
+
+        /* Section Container */
+        .section {
+            padding: 12px 16px;
+            border-bottom: 1px solid var(--border);
+        }
+        .section-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 8px;
+        }
+        .section-title {
+            font-size: 11px;
+            font-weight: 700;
+            color: var(--text-muted);
+            letter-spacing: 0.8px;
+            text-transform: uppercase;
+        }
+
+        /* Account Summary Row */
+        .acc-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 10px;
+        }
+        @media (min-width: 640px) {
+            .acc-grid { grid-template-columns: repeat(4, 1fr); }
+        }
+        .acc-cell {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            padding: 10px 12px;
+            border-radius: 4px;
+        }
+        .acc-label {
+            font-size: 10px;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 4px;
+        }
+        .acc-val {
+            font-size: 16px;
+            font-weight: 700;
+            color: #fff;
+        }
+        .acc-sub {
+            font-size: 10px;
+            color: var(--text-dim);
+            margin-top: 2px;
+        }
+
+        /* Minimal Financial Chart */
+        .chart-wrap {
+            height: 180px;
+            position: relative;
+            margin-top: 4px;
+        }
+        .metrics-bar {
+            display: flex;
+            gap: 16px;
+            margin-top: 8px;
+            padding-top: 8px;
+            border-top: 1px solid var(--border-subtle);
+            font-size: 11px;
+        }
+        .metric-item span {
+            color: var(--text-muted);
+            margin-right: 4px;
+        }
+        .metric-item strong {
+            color: #fff;
+        }
+
+        /* Watchlist / Positions Table Style */
+        .trade-row {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            padding: 10px 12px;
+            margin-bottom: 8px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .trade-row:active {
+            background: #141414;
+        }
+        .trade-left {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+        .trade-symbol-row {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .trade-symbol {
+            font-size: 14px;
+            font-weight: 700;
+            color: #fff;
+        }
+        .trade-side-long {
+            font-size: 9px;
+            font-weight: 800;
+            color: var(--green);
+            background: var(--green-bg);
+            padding: 1px 4px;
+            border-radius: 2px;
+        }
+        .trade-side-short {
+            font-size: 9px;
+            font-weight: 800;
+            color: var(--red);
+            background: var(--red-bg);
+            padding: 1px 4px;
+            border-radius: 2px;
+        }
+        .trade-detail {
+            font-size: 11px;
+            color: var(--text-muted);
+        }
+        .trade-right {
+            text-align: right;
+            display: flex;
+            flex-direction: column;
+            align-items: flex-end;
+            gap: 2px;
+        }
+        .trade-pnl {
+            font-size: 14px;
+            font-weight: 700;
+        }
+        .trade-guard {
+            font-size: 10px;
+            padding: 2px 6px;
+            border-radius: 2px;
+            background: #141414;
+            color: #999;
+            border: 1px solid #262626;
+        }
+        .guard-be {
+            color: var(--green);
+            border-color: rgba(34,197,94,0.4);
+            background: var(--green-bg);
+        }
+        .guard-lock {
+            color: var(--amber);
+            border-color: rgba(245,158,11,0.4);
+            background: #2b1700;
+        }
+
+        /* Bottom Tab Bar (Pure iOS style) */
+        .tabbar {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            height: 52px;
+            background: #000000;
+            border-top: 1px solid var(--border);
+            display: flex;
+            z-index: 100;
+            padding-bottom: env(safe-area-inset-bottom, 0px);
+        }
+        .tab-item {
+            flex: 1;
             display: flex;
             flex-direction: column;
             align-items: center;
             justify-content: center;
-            flex: 1;
-            min-height: 52px;
-            touch-action: manipulation;
-            color: #64748B;
-            transition: all 0.15s ease;
+            font-size: 11px;
+            font-weight: 600;
+            color: var(--text-dim);
+            cursor: pointer;
+            border: none;
+            background: none;
+            font-family: inherit;
         }
-        .bottom-nav-item.active {
-            color: #10B981;
+        .tab-item.active {
+            color: #ffffff;
         }
-        .bottom-nav-item.active i {
-            transform: scale(1.1);
+        .tab-item span.dot {
+            width: 4px;
+            height: 4px;
+            border-radius: 50%;
+            background: transparent;
+            margin-top: 3px;
         }
-        .bottom-nav-item.bybit-active.active {
-            color: #F59E0B;
+        .tab-item.active span.dot {
+            background: var(--green);
         }
-        .bottom-nav-item.alpaca-active.active {
-            color: #3B82F6;
+
+        /* Generic Table for History & Alpaca */
+        .clean-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 11px;
+            text-align: left;
         }
-        /* Clean touch active state */
-        .tap-press:active {
-            transform: scale(0.97);
-            opacity: 0.9;
+        .clean-table th {
+            color: var(--text-muted);
+            font-weight: 600;
+            padding: 8px 6px;
+            border-bottom: 1px solid var(--border);
+            text-transform: uppercase;
+            font-size: 10px;
         }
-        .no-scrollbar::-webkit-scrollbar { display: none; }
-        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+        .clean-table td {
+            padding: 8px 6px;
+            border-bottom: 1px solid var(--border-subtle);
+            color: #ccc;
+        }
+        .val-up { color: var(--green) !important; font-weight: 600; }
+        .val-down { color: var(--red) !important; font-weight: 600; }
+        .hidden { display: none !important; }
     </style>
 </head>
-<body class="min-h-screen flex flex-col antialiased">
+<body>
 
-    <!-- IPHONE TOP STATUS & HEADER -->
-    <header class="border-b border-desk-border bg-desk-card/95 sticky top-0 z-40 backdrop-blur-md">
-        <div class="max-w-[1440px] mx-auto px-4 sm:px-6 h-14 sm:h-16 flex items-center justify-between">
-            <div class="flex items-center gap-2.5">
-                <div class="w-8 h-8 rounded-lg bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400">
-                    <i data-lucide="shield-check" class="w-4 h-4"></i>
-                </div>
-                <div>
-                    <div class="flex items-center gap-1.5">
-                        <span class="font-bold text-sm sm:text-base text-white tracking-tight">MARKET SENTINEL</span>
-                        <span class="text-[10px] font-mono px-1.5 py-0.2 rounded bg-desk-elevated border border-desk-border text-slate-300">PRO</span>
-                    </div>
-                    <div class="flex items-center gap-2 text-[10px] sm:text-xs text-slate-400 font-mono">
-                        <span class="inline-block w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-                        <span id="header-status">SYNC 3S</span>
-                        <span class="text-slate-600">&bull;</span>
-                        <span class="text-slate-400" id="clock-rome-header">--:--:--</span>
-                    </div>
-                </div>
+    <!-- TOPBAR -->
+    <div class="topbar">
+        <div class="topbar-title">
+            <span class="status-dot"></span>
+            <span>SENTINEL DESK</span>
+            <span class="mono" style="font-size: 10px; color: var(--text-muted);" id="top-clock">--:--:--</span>
+        </div>
+        <button class="refresh-btn mono" onclick="fetchData()">SYNC</button>
+    </div>
+
+    <!-- 1. ACCOUNTS SUMMARY STRIP -->
+    <div class="section">
+        <div class="acc-grid mono">
+            <div class="acc-cell">
+                <div class="acc-label">Equity Totale</div>
+                <div class="acc-val" id="total-equity">$0.00</div>
+                <div class="acc-sub">Bybit + Alpaca</div>
             </div>
-
-            <!-- Header Quick Stats & Manual Refresh -->
-            <div class="flex items-center gap-2">
-                <div class="text-right mr-1">
-                    <span class="text-[10px] font-semibold uppercase text-slate-400 block leading-tight">NAV TOTALE</span>
-                    <span id="header-nav-value" class="text-xs sm:text-sm font-bold mono-val text-white leading-tight">$0.00</span>
-                </div>
-                <button onclick="fetchData()" class="touch-target px-3 rounded-lg bg-desk-elevated hover:bg-slate-800 border border-desk-border text-slate-200 flex items-center justify-center transition tap-press text-xs font-semibold" title="Ricarica Dati">
-                    <i data-lucide="refresh-cw" class="w-4 h-4" id="refresh-spinner"></i>
-                </button>
+            <div class="acc-cell">
+                <div class="acc-label">Bybit UTA</div>
+                <div class="acc-val" id="bybit-equity">$0.00</div>
+                <div class="acc-sub" id="bybit-cash">Disponibile: $0</div>
+            </div>
+            <div class="acc-cell">
+                <div class="acc-label">Alpaca Equities</div>
+                <div class="acc-val" id="alpaca-equity">$0.00</div>
+                <div class="acc-sub" id="alpaca-bp">BP: $0</div>
+            </div>
+            <div class="acc-cell">
+                <div class="acc-label">PnL Non Realizzato</div>
+                <div class="acc-val" id="total-unrealized">$0.00</div>
+                <div class="acc-sub" id="active-positions-count">0 posizioni aperte</div>
             </div>
         </div>
-    </header>
+    </div>
 
-    <!-- MAIN CONTAINER -->
-    <main class="max-w-[1440px] mx-auto w-full px-3.5 sm:px-6 py-3 sm:py-5 flex-1 space-y-4">
+    <!-- 2. EQUITY & REALIZED PNL TRAJECTORY -->
+    <div class="section">
+        <div class="section-header">
+            <span class="section-title">Andamento Equity &amp; Volume</span>
+            <span class="mono" style="font-size: 10px; color: var(--text-dim);" id="last-snapshot-time">LIVE DB</span>
+        </div>
+        <div class="chart-wrap">
+            <canvas id="perfChart"></canvas>
+        </div>
+        <div class="metrics-bar mono">
+            <div class="metric-item"><span>Vol:</span><strong id="metric-volume">$0</strong></div>
+            <div class="metric-item"><span>PnL Chiuso:</span><strong id="metric-realized">$0.00</strong></div>
+            <div class="metric-item"><span>Win Rate:</span><strong id="metric-winrate">0%</strong></div>
+        </div>
+    </div>
 
-        <!-- IPHONE QUICK SUMMARY CARDS (2x2 Grid) -->
-        <div class="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-4">
-            <!-- 1. Bybit Equity -->
-            <div class="desk-card rounded-xl p-3.5 border-l-2 border-l-amber-500">
-                <div class="flex items-center justify-between">
-                    <span class="text-[10px] font-semibold uppercase tracking-wider text-amber-400 flex items-center gap-1">
-                        <span class="w-1.5 h-1.5 rounded-full bg-amber-400"></span> BYBIT CRYPTO
-                    </span>
-                    <span class="text-[10px] font-mono text-slate-400">UTA</span>
-                </div>
-                <div id="summary-bybit-nav" class="text-lg sm:text-xl font-bold mono-val text-white mt-1">$0.00</div>
-                <span class="text-[10px] text-slate-400 font-mono block mt-0.5" id="summary-bybit-cash">USDT: $0</span>
-            </div>
-
-            <!-- 2. Alpaca Equity -->
-            <div class="desk-card rounded-xl p-3.5 border-l-2 border-l-blue-500">
-                <div class="flex items-center justify-between">
-                    <span class="text-[10px] font-semibold uppercase tracking-wider text-blue-400 flex items-center gap-1">
-                        <span class="w-1.5 h-1.5 rounded-full bg-blue-400"></span> ALPACA WALL ST
-                    </span>
-                    <span class="text-[10px] font-mono text-slate-400">NYSE</span>
-                </div>
-                <div id="summary-alpaca-nav" class="text-lg sm:text-xl font-bold mono-val text-white mt-1">$0.00</div>
-                <span class="text-[10px] text-slate-400 font-mono block mt-0.5" id="summary-alpaca-bp">BP: $0</span>
-            </div>
-
-            <!-- 3. PnL Non Realizzato Live -->
-            <div class="desk-card rounded-xl p-3.5 border-l-2 border-l-emerald-500">
-                <div class="flex items-center justify-between">
-                    <span class="text-[10px] font-semibold uppercase tracking-wider text-slate-300">PNL NON REALIZZATO</span>
-                    <span class="text-[10px] font-mono text-emerald-400 animate-pulse">LIVE</span>
-                </div>
-                <div id="summary-crypto-pnl" class="text-lg sm:text-xl font-bold mono-val text-emerald-400 mt-1">$0.00</div>
-                <span class="text-[10px] text-slate-400 font-mono block mt-0.5" id="summary-active-positions">0 posizioni</span>
-            </div>
-
-            <!-- 4. PnL Realizzato Cumulativo -->
-            <div class="desk-card rounded-xl p-3.5 border-l-2 border-l-purple-500">
-                <div class="flex items-center justify-between">
-                    <span class="text-[10px] font-semibold uppercase tracking-wider text-slate-300">PNL REALIZZATO</span>
-                    <span class="text-[10px] font-mono text-slate-400" id="metric-win-rate-top">WR 0%</span>
-                </div>
-                <div id="metric-cum-pnl" class="text-lg sm:text-xl font-bold mono-val text-white mt-1">$0.00</div>
-                <span class="text-[10px] text-slate-400 font-mono block mt-0.5" id="metric-cum-volume-top">Vol: $0</span>
+    <!-- 3. TAB 1: BYBIT POSITIONS (DEFAULT) -->
+    <div class="section" id="view-bybit">
+        <div class="section-header">
+            <span class="section-title">Posizioni Attive Bybit (Futures 24/7)</span>
+            <span class="mono" style="font-size: 10px; color: var(--text-muted);">Size: $15,000 / TP: +3% / SL: -1.2%</span>
+        </div>
+        <div id="bybit-positions-list">
+            <div style="padding: 20px 0; text-align: center; color: var(--text-dim);" class="mono">
+                Caricamento posizioni...
             </div>
         </div>
+    </div>
 
-        <!-- ======================================================== -->
-        <!-- SEZIONE GRAFICO IPHONE-FIRST (PERFORMANCE & VOLUME)       -->
-        <!-- ======================================================== -->
-        <div class="desk-card rounded-xl p-3.5 sm:p-5 space-y-3">
-            <div class="flex items-center justify-between border-b border-desk-borderSubtle pb-2">
-                <div class="flex items-center gap-2">
-                    <i data-lucide="trending-up" class="w-4 h-4 text-emerald-400"></i>
-                    <h2 class="text-xs sm:text-sm font-bold text-white tracking-tight uppercase">TRAIETTORIA EQUITY &amp; VOLUME</h2>
-                </div>
-                <div class="flex items-center gap-2 text-[10px] font-mono text-slate-400">
-                    <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-emerald-400 inline-block"></span> Equity</span>
-                    <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-amber-400 inline-block"></span> PnL</span>
-                </div>
+    <!-- 4. TAB 2: ALPACA EQUITIES -->
+    <div class="section hidden" id="view-alpaca">
+        <div class="section-header">
+            <span class="section-title">Alpaca Wall Street (NYSE / NASDAQ)</span>
+            <span class="mono" style="font-size: 10px; color: var(--text-muted);">Orari: 15:30 - 22:00 CET</span>
+        </div>
+        <table class="clean-table mono">
+            <thead>
+                <tr>
+                    <th>Ticker</th>
+                    <th>Qty</th>
+                    <th>Ingresso</th>
+                    <th>Attuale</th>
+                    <th>Valore</th>
+                    <th>PnL</th>
+                </tr>
+            </thead>
+            <tbody id="alpaca-tbody">
+                <tr>
+                    <td colspan="6" style="text-align: center; padding: 20px 0; color: var(--text-dim);">
+                        Nessun titolo aperto. Wall Street chiusa nel weekend.
+                    </td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <!-- 5. TAB 3: STORICO CHIUSI -->
+    <div class="section hidden" id="view-history">
+        <div class="section-header">
+            <span class="section-title">Storico Trade Chiusi (Bybit)</span>
+            <span class="mono" style="font-size: 10px; color: var(--text-muted);" id="closed-count-label">0 eseguiti</span>
+        </div>
+        <table class="clean-table mono">
+            <thead>
+                <tr>
+                    <th>Ora</th>
+                    <th>Simbolo</th>
+                    <th>Lato</th>
+                    <th>Prezzi</th>
+                    <th>Fee</th>
+                    <th>PnL Netto</th>
+                </tr>
+            </thead>
+            <tbody id="history-tbody">
+                <tr>
+                    <td colspan="6" style="text-align: center; padding: 20px 0; color: var(--text-dim);">
+                        Nessun trade chiuso di recente.
+                    </td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <!-- 6. TAB 4: REGOLE TRADING -->
+    <div class="section hidden" id="view-rules">
+        <div class="section-header">
+            <span class="section-title">Parametri di Esecuzione Quantitativa</span>
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 8px;">
+            <div class="acc-cell">
+                <div class="acc-label">Taglia &amp; Frequenza</div>
+                <div style="font-size: 12px; color: #fff;">$15,000 USDT per ordine. Scan ogni 2 min sui 10 asset liquidi.</div>
             </div>
-
-            <!-- Canvas Responsive Ottimizzato per iPhone (Touch fluido senza blocco dello scroll) -->
-            <div class="relative w-full h-52 sm:h-64">
-                <canvas id="perfChart"></canvas>
+            <div class="acc-cell">
+                <div class="acc-label">Filtro Confluenza A+</div>
+                <div style="font-size: 12px; color: #fff;">Ingresso solo con EMA 20/50 + RSI + Volume Ratio &ge; 1.1x concordi.</div>
             </div>
-
-            <div class="grid grid-cols-3 gap-2 pt-1 border-t border-desk-borderSubtle text-center font-mono text-[11px]">
-                <div class="bg-desk-elevated/80 py-1.5 px-1 rounded">
-                    <span class="text-slate-400 text-[9px] uppercase block">Volume Scambiato</span>
-                    <span id="metric-cum-volume" class="font-bold text-white">$120k</span>
-                </div>
-                <div class="bg-desk-elevated/80 py-1.5 px-1 rounded">
-                    <span class="text-slate-400 text-[9px] uppercase block">Win Rate</span>
-                    <span id="metric-win-rate" class="font-bold text-amber-400">--%</span>
-                </div>
-                <div class="bg-desk-elevated/80 py-1.5 px-1 rounded">
-                    <span class="text-slate-400 text-[9px] uppercase block">Profit Factor</span>
-                    <span id="metric-profit-factor" class="font-bold text-slate-200">--</span>
-                </div>
+            <div class="acc-cell">
+                <div class="acc-label">Risk Management Asimmetrico (1:2.5)</div>
+                <div style="font-size: 12px; color: #fff;">Take Profit a +3.00% ($450). Stop Loss a -1.20%. Break-even a +0.60%. Trailing Lock a +1.20%.</div>
             </div>
         </div>
+    </div>
 
-        <!-- ======================================================== -->
-        <!-- SELETTORE A SCHEDE DESKTOP (Nascosto su iPhone, usa bottom bar) -->
-        <!-- ======================================================== -->
-        <div class="hidden sm:flex bg-desk-card p-1.5 rounded-xl border border-desk-border items-center gap-1.5 overflow-x-auto no-scrollbar">
-            <button id="desk-tab-btn-bybit" class="touch-target px-4 rounded-lg font-semibold text-xs flex items-center gap-2 active transition bg-desk-elevated text-white border border-desk-border" onclick="selectInstance('bybit')">
-                <span class="w-2 h-2 rounded-full bg-amber-400"></span>
-                <span>Bybit Futures (Crypto 24/7)</span>
-                <span id="desk-badge-bybit-count" class="px-1.5 py-0.2 rounded text-[10px] font-mono bg-desk-card text-amber-300">0</span>
-            </button>
-            <button id="desk-tab-btn-alpaca" class="touch-target px-4 rounded-lg font-semibold text-xs flex items-center gap-2 transition text-slate-400 hover:text-white" onclick="selectInstance('alpaca')">
-                <span class="w-2 h-2 rounded-full bg-blue-400"></span>
-                <span>Alpaca (Wall Street Equities)</span>
-                <span id="desk-badge-alpaca-count" class="px-1.5 py-0.2 rounded text-[10px] font-mono bg-desk-card text-blue-300">0</span>
-            </button>
-            <button id="desk-tab-btn-history" class="touch-target px-4 rounded-lg font-semibold text-xs flex items-center gap-2 transition text-slate-400 hover:text-white" onclick="selectInstance('history')">
-                <i data-lucide="history" class="w-3.5 h-3.5"></i>
-                <span>Storico Chiusi</span>
-            </button>
-            <button id="desk-tab-btn-rules" class="touch-target px-4 rounded-lg font-semibold text-xs flex items-center gap-2 transition text-slate-400 hover:text-white" onclick="selectInstance('rules')">
-                <i data-lucide="shield" class="w-3.5 h-3.5"></i>
-                <span>Regole Rischio</span>
-            </button>
-        </div>
-
-        <!-- ========================================== -->
-        <!-- ISTANZA 1: BYBIT CRYPTO FUTURES 24/7      -->
-        <!-- ========================================== -->
-        <section id="instance-bybit" class="space-y-3">
-            
-            <div class="flex items-center justify-between px-1 text-xs">
-                <div class="flex items-center gap-1.5">
-                    <span class="font-bold text-amber-400 uppercase text-[11px] sm:text-xs">POSIZIONI BYBIT ATTIVE</span>
-                    <span class="text-slate-500">&bull;</span>
-                    <span class="text-slate-300 font-mono text-[11px]" id="bybit-active-count-label">0 aperte</span>
-                </div>
-                <div class="text-slate-400 font-mono text-[10px] sm:text-[11px]">
-                    TP: <strong class="text-emerald-400">+3.0%</strong> | SL: <strong class="text-rose-400">-1.2%</strong>
-                </div>
-            </div>
-
-            <!-- IPHONE CARDS VIEW (PREDEFINITA E PERFETTA SUL TOUCHSCREEN) -->
-            <div id="bybit-mobile-cards" class="space-y-2.5">
-                <div class="text-center py-6 text-slate-400 desk-card rounded-xl p-4 text-xs font-mono">
-                    Caricamento posizioni Bybit...
-                </div>
-            </div>
-
-            <!-- TABELLA DESKTOP ESTESA -->
-            <div class="hidden lg:block desk-card rounded-xl overflow-hidden border border-desk-border mt-3">
-                <div class="overflow-x-auto">
-                    <table class="w-full text-left text-xs">
-                        <thead>
-                            <tr class="border-b border-desk-border bg-desk-elevated text-slate-300 font-semibold uppercase text-[11px] tracking-wider">
-                                <th class="py-3 px-4">Contratto</th>
-                                <th class="py-3 px-4">Lato</th>
-                                <th class="py-3 px-4">Size</th>
-                                <th class="py-3 px-4">Entrata</th>
-                                <th class="py-3 px-4">Mark Price</th>
-                                <th class="py-3 px-4">Controvalore</th>
-                                <th class="py-3 px-4">PnL Non Realizzato</th>
-                                <th class="py-3 px-4">Protezione Dinamica</th>
-                            </tr>
-                        </thead>
-                        <tbody id="bybit-table-body" class="divide-y divide-desk-borderSubtle mono-val">
-                            <tr>
-                                <td colspan="8" class="text-center py-6 text-slate-400">Sincronizzazione Bybit...</td>
-                            </tr>
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-        </section>
-
-        <!-- ========================================== -->
-        <!-- ISTANZA 2: ALPACA EQUITIES WALL STREET    -->
-        <!-- ========================================== -->
-        <section id="instance-alpaca" class="space-y-3 hidden">
-            <div class="flex items-center justify-between px-1 text-xs">
-                <span class="font-bold text-blue-400 uppercase text-[11px] sm:text-xs">ALPACA WALL STREET EQUITIES</span>
-                <span class="text-slate-400 font-mono text-[10px]">Orario: 15:30 - 22:00 CET</span>
-            </div>
-
-            <div class="grid grid-cols-2 gap-2 text-xs font-mono">
-                <div class="desk-card rounded-xl p-3">
-                    <span class="text-[10px] font-semibold uppercase text-slate-400 block">Valore Titoli</span>
-                    <div id="alpaca-equity-display" class="text-base font-bold mono-val text-white mt-1">$0.00</div>
-                </div>
-                <div class="desk-card rounded-xl p-3">
-                    <span class="text-[10px] font-semibold uppercase text-slate-400 block">Buying Power</span>
-                    <div id="alpaca-bp-display" class="text-base font-bold mono-val text-white mt-1">$0.00</div>
-                </div>
-            </div>
-
-            <div class="desk-card rounded-xl overflow-hidden border border-desk-border">
-                <div class="p-3 bg-desk-elevated border-b border-desk-border flex items-center justify-between">
-                    <span class="font-bold text-[11px] uppercase tracking-wider text-white">Posizioni Azionarie USA</span>
-                    <span class="text-[10px] font-mono text-slate-400" id="alpaca-total-titles">0 Titoli</span>
-                </div>
-                <div class="overflow-x-auto">
-                    <table class="w-full text-left text-xs font-mono">
-                        <thead>
-                            <tr class="border-b border-desk-border text-slate-400 text-[10px] uppercase">
-                                <th class="py-2 px-3">Ticker</th>
-                                <th class="py-2 px-3">Qty</th>
-                                <th class="py-2 px-3">Prezzo Medio</th>
-                                <th class="py-2 px-3">Prezzo Attuale</th>
-                                <th class="py-2 px-3">Valore</th>
-                                <th class="py-2 px-3">PnL</th>
-                            </tr>
-                        </thead>
-                        <tbody id="alpaca-table-body" class="divide-y divide-desk-borderSubtle">
-                            <tr>
-                                <td colspan="6" class="text-center py-6 text-slate-400">
-                                    Nessuna posizione aperta (Wall Street chiusa nel weekend).
-                                </td>
-                            </tr>
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-        </section>
-
-        <!-- ========================================== -->
-        <!-- ISTANZA 3: STORICO CHIUSURE BYBIT         -->
-        <!-- ========================================== -->
-        <section id="instance-history" class="space-y-3 hidden">
-            <div class="desk-card rounded-xl overflow-hidden border border-desk-border">
-                <div class="p-3 bg-desk-elevated border-b border-desk-border flex items-center justify-between">
-                    <span class="font-bold text-[11px] uppercase tracking-wider text-white">Ultime Esecuzioni Chiuse</span>
-                    <span class="text-[10px] font-mono text-slate-400" id="history-total-count">0 trade</span>
-                </div>
-                <div class="overflow-x-auto">
-                    <table class="w-full text-left text-xs font-mono">
-                        <thead>
-                            <tr class="border-b border-desk-border text-slate-300 text-[10px] uppercase bg-desk-card">
-                                <th class="py-2 px-3">Ora</th>
-                                <th class="py-2 px-3">Simbolo</th>
-                                <th class="py-2 px-3">Lato</th>
-                                <th class="py-2 px-3">Size</th>
-                                <th class="py-2 px-3">Prezzo In &rarr; Out</th>
-                                <th class="py-2 px-3">Fee</th>
-                                <th class="py-2 px-3">PnL Netto</th>
-                            </tr>
-                        </thead>
-                        <tbody id="history-table-body" class="divide-y divide-desk-borderSubtle">
-                            <tr>
-                                <td colspan="7" class="text-center py-6 text-slate-400">Caricamento storico...</td>
-                            </tr>
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-        </section>
-
-        <!-- ========================================== -->
-        <!-- ISTANZA 4: REGOLE RISCHIO & MOTORE         -->
-        <!-- ========================================== -->
-        <section id="instance-rules" class="space-y-3 hidden">
-            <div class="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-                <div class="desk-card rounded-xl p-4 border-l-2 border-l-amber-500">
-                    <div class="flex items-center gap-1.5 text-amber-400 font-bold text-xs uppercase">
-                        <i data-lucide="zap" class="w-3.5 h-3.5"></i>
-                        <span>Taglia $15k per Trade</span>
-                    </div>
-                    <p class="text-[11px] text-slate-300 mt-1.5 leading-relaxed">
-                        Controvalore fisso calibrato di <strong>$15,000 USDT</strong> per asset con selezione rigorosa A+ (EMA 20/50 + RSI + Volume).
-                    </p>
-                </div>
-                <div class="desk-card rounded-xl p-4 border-l-2 border-l-emerald-500">
-                    <div class="flex items-center gap-1.5 text-emerald-400 font-bold text-xs uppercase">
-                        <i data-lucide="shield-check" class="w-3.5 h-3.5"></i>
-                        <span>Break-Even a +0.60%</span>
-                    </div>
-                    <p class="text-[11px] text-slate-300 mt-1.5 leading-relaxed">
-                        A <strong>+0.60%</strong> di profitto latente lo Stop Loss passa istantaneamente a pareggio con cuscinetto fee coperto.
-                    </p>
-                </div>
-                <div class="desk-card rounded-xl p-4 border-l-2 border-l-blue-500">
-                    <div class="flex items-center gap-1.5 text-blue-400 font-bold text-xs uppercase">
-                        <i data-lucide="lock" class="w-3.5 h-3.5"></i>
-                        <span>Profit Lock a +1.20%</span>
-                    </div>
-                    <p class="text-[11px] text-slate-300 mt-1.5 leading-relaxed">
-                        Al <strong>+1.20%</strong> scatta il blocco del <strong>+0.70% netto in cassa</strong> con target a <strong>+3.00%</strong>.
-                    </p>
-                </div>
-            </div>
-        </section>
-
-    </main>
-
-    <!-- ======================================================== -->
-    <!-- IPHONE NATIVE BOTTOM TAB BAR (Pinnata sul fondo dello schermo) -->
-    <!-- ======================================================== -->
-    <nav class="sm:hidden fixed bottom-0 left-0 right-0 z-50 bg-desk-card/98 border-t border-desk-border backdrop-blur-lg bottom-nav">
-        <div class="flex items-center justify-around px-2 pt-1.5">
-            <button id="nav-btn-bybit" class="bottom-nav-item bybit-active active tap-press" onclick="selectInstance('bybit')">
-                <i data-lucide="bitcoin" class="w-5 h-5 mb-0.5"></i>
-                <span class="text-[10px] font-semibold tracking-tight">Bybit Crypto</span>
-            </button>
-            <button id="nav-btn-alpaca" class="bottom-nav-item alpaca-active tap-press" onclick="selectInstance('alpaca')">
-                <i data-lucide="landmark" class="w-5 h-5 mb-0.5"></i>
-                <span class="text-[10px] font-semibold tracking-tight">Alpaca USA</span>
-            </button>
-            <button id="nav-btn-history" class="bottom-nav-item tap-press" onclick="selectInstance('history')">
-                <i data-lucide="history" class="w-5 h-5 mb-0.5"></i>
-                <span class="text-[10px] font-semibold tracking-tight">Storico</span>
-            </button>
-            <button id="nav-btn-rules" class="bottom-nav-item tap-press" onclick="selectInstance('rules')">
-                <i data-lucide="shield" class="w-5 h-5 mb-0.5"></i>
-                <span class="text-[10px] font-semibold tracking-tight">Regole</span>
-            </button>
-        </div>
+    <!-- BOTTOM TABBAR IPHONE -->
+    <nav class="tabbar">
+        <button class="tab-item active" id="tab-btn-bybit" onclick="showTab('bybit')">
+            <span>Bybit Futures</span>
+            <span class="dot"></span>
+        </button>
+        <button class="tab-item" id="tab-btn-alpaca" onclick="showTab('alpaca')">
+            <span>Alpaca USA</span>
+            <span class="dot"></span>
+        </button>
+        <button class="tab-item" id="tab-btn-history" onclick="showTab('history')">
+            <span>Storico</span>
+            <span class="dot"></span>
+        </button>
+        <button class="tab-item" id="tab-btn-rules" onclick="showTab('rules')">
+            <span>Regole</span>
+            <span class="dot"></span>
+        </button>
     </nav>
 
-    <!-- SCRIPT LOGICO & ENGINE GRAFICO CHART.JS -->
     <script>
-        let activeTab = 'bybit';
-        let perfChartInstance = null;
+        let chartInstance = null;
 
-        function selectInstance(tabId) {
-            activeTab = tabId;
-            const tabs = ['bybit', 'alpaca', 'history', 'rules'];
-            
-            // Aggiorna sezioni visibili
-            tabs.forEach(t => {
-                const sec = document.getElementById(`instance-${t}`);
-                if (sec) {
-                    if (t === tabId) sec.classList.remove('hidden');
-                    else sec.classList.add('hidden');
+        function showTab(tabName) {
+            ['bybit', 'alpaca', 'history', 'rules'].forEach(t => {
+                const view = document.getElementById('view-' + t);
+                const btn = document.getElementById('tab-btn-' + t);
+                if (t === tabName) {
+                    view.classList.remove('hidden');
+                    btn.classList.add('active');
+                } else {
+                    view.classList.add('hidden');
+                    btn.classList.remove('active');
                 }
             });
-
-            // Aggiorna Bottom Nav iPhone
-            tabs.forEach(t => {
-                const navBtn = document.getElementById(`nav-btn-${t}`);
-                if (navBtn) {
-                    if (t === tabId) navBtn.classList.add('active');
-                    else navBtn.classList.remove('active');
-                }
-            });
-
-            // Aggiorna Desktop Tabs
-            tabs.forEach(t => {
-                const dBtn = document.getElementById(`desk-tab-btn-${t}`);
-                if (dBtn) {
-                    if (t === tabId) {
-                        dBtn.className = "touch-target px-4 rounded-lg font-semibold text-xs flex items-center gap-2 active transition bg-desk-elevated text-white border border-desk-border";
-                    } else {
-                        dBtn.className = "touch-target px-4 rounded-lg font-semibold text-xs flex items-center gap-2 transition text-slate-400 hover:text-white";
-                    }
-                }
-            });
-
-            lucide.createIcons();
         }
 
-        function updateClocks() {
+        function updateClock() {
             const now = new Date();
-            const rome = new Intl.DateTimeFormat('it-IT', { timeZone: 'Europe/Rome', hour: '2-digit', minute: '2-digit', second: '2-digit' }).format(now);
-            const rEl = document.getElementById('clock-rome-header');
-            if (rEl) rEl.innerText = rome;
+            document.getElementById('top-clock').innerText = now.toLocaleTimeString('it-IT');
         }
-        setInterval(updateClocks, 1000);
-        updateClocks();
+        setInterval(updateClock, 1000);
+        updateClock();
 
         function initChart(snapshots) {
             const ctx = document.getElementById('perfChart').getContext('2d');
-            
             const labels = snapshots.map(s => {
                 const d = new Date(s.epoch * 1000);
                 return d.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' });
             });
-            const equityData = snapshots.map(s => s.total_equity);
-            const pnlData = snapshots.map(s => s.cumulative_realized_pnl);
-            const volData = snapshots.map(s => s.cumulative_volume_usd);
+            const equity = snapshots.map(s => s.total_equity);
+            const pnl = snapshots.map(s => s.cumulative_realized_pnl);
 
-            if (perfChartInstance) {
-                perfChartInstance.data.labels = labels;
-                perfChartInstance.data.datasets[0].data = equityData;
-                perfChartInstance.data.datasets[1].data = pnlData;
-                perfChartInstance.data.datasets[2].data = volData;
-                perfChartInstance.update('none');
+            if (chartInstance) {
+                chartInstance.data.labels = labels;
+                chartInstance.data.datasets[0].data = equity;
+                chartInstance.data.datasets[1].data = pnl;
+                chartInstance.update('none');
                 return;
             }
 
-            perfChartInstance = new Chart(ctx, {
+            chartInstance = new Chart(ctx, {
                 type: 'line',
                 data: {
                     labels: labels,
                     datasets: [
                         {
-                            label: 'Equity Portafoglio ($)',
-                            data: equityData,
-                            borderColor: '#10B981',
-                            backgroundColor: 'rgba(16, 185, 129, 0.08)',
-                            borderWidth: 2,
-                            yAxisID: 'yEquity',
-                            fill: true,
-                            tension: 0.25,
-                            pointRadius: 2,
-                            pointBackgroundColor: '#10B981'
-                        },
-                        {
-                            label: 'PnL Realizzato ($)',
-                            data: pnlData,
-                            borderColor: '#F59E0B',
+                            label: 'Equity ($)',
+                            data: equity,
+                            borderColor: '#22c55e',
+                            borderWidth: 1.5,
                             backgroundColor: 'transparent',
-                            borderWidth: 1.8,
-                            borderDash: [3, 3],
-                            yAxisID: 'yPnL',
-                            tension: 0.2,
-                            pointRadius: 1.5,
-                            pointBackgroundColor: '#F59E0B'
+                            pointRadius: 1,
+                            tension: 0.1,
+                            yAxisID: 'y'
                         },
                         {
-                            type: 'bar',
-                            label: 'Volume ($)',
-                            data: volData,
-                            backgroundColor: 'rgba(59, 130, 246, 0.20)',
-                            borderWidth: 0,
-                            yAxisID: 'yVolume',
-                            barPercentage: 0.35
+                            label: 'PnL ($)',
+                            data: pnl,
+                            borderColor: '#f59e0b',
+                            borderWidth: 1.5,
+                            borderDash: [3, 3],
+                            backgroundColor: 'transparent',
+                            pointRadius: 1,
+                            tension: 0.1,
+                            yAxisID: 'y1'
                         }
                     ]
                 },
                 options: {
                     responsive: true,
                     maintainAspectRatio: false,
-                    interaction: {
-                        mode: 'index',
-                        intersect: false
-                    },
+                    animation: false,
                     plugins: {
-                        legend: { display: false },
-                        tooltip: {
-                            backgroundColor: '#0F141F',
-                            titleColor: '#F8FAFC',
-                            bodyColor: '#CBD5E1',
-                            borderColor: '#1F293D',
-                            borderWidth: 1,
-                            titleFont: { family: 'Roboto Mono', size: 11 },
-                            bodyFont: { family: 'Roboto Mono', size: 10 },
-                            padding: 8,
-                            callbacks: {
-                                label: function(context) {
-                                    let label = context.dataset.label || '';
-                                    if (label) label += ': ';
-                                    if (context.parsed.y !== null) {
-                                        label += '$' + context.parsed.y.toLocaleString('en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
-                                    }
-                                    return label;
-                                }
-                            }
-                        }
+                        legend: { display: false }
                     },
                     scales: {
                         x: {
-                            grid: { color: 'rgba(31, 41, 61, 0.3)' },
-                            ticks: { color: '#64748B', font: { family: 'Roboto Mono', size: 9 }, maxTicksLimit: 6 }
+                            grid: { color: '#141414' },
+                            ticks: { color: '#555', font: { family: 'SF Mono, monospace', size: 9 }, maxTicksLimit: 5 }
                         },
-                        yEquity: {
-                            type: 'linear',
+                        y: {
                             position: 'left',
-                            grid: { color: 'rgba(31, 41, 61, 0.4)' },
+                            grid: { color: '#141414' },
                             ticks: {
-                                color: '#10B981',
-                                font: { family: 'Roboto Mono', size: 9 },
+                                color: '#22c55e',
+                                font: { family: 'SF Mono, monospace', size: 9 },
                                 callback: val => '$' + (val / 1000).toFixed(1) + 'k'
                             }
                         },
-                        yPnL: {
-                            type: 'linear',
+                        y1: {
                             position: 'right',
                             grid: { drawOnChartArea: false },
                             ticks: {
-                                color: '#F59E0B',
-                                font: { family: 'Roboto Mono', size: 9 },
+                                color: '#f59e0b',
+                                font: { family: 'SF Mono, monospace', size: 9 },
                                 callback: val => '$' + val.toFixed(0)
                             }
-                        },
-                        yVolume: {
-                            type: 'linear',
-                            position: 'right',
-                            display: false
                         }
                     }
                 }
@@ -643,31 +597,13 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         }
 
         async function fetchData() {
-            const spinner = document.getElementById('refresh-spinner');
-            if (spinner) spinner.classList.add('animate-spin');
-
             try {
                 const res = await fetch('/api/dashboard', { cache: 'no-store' });
-                if (!res.ok) throw new Error('HTTP ' + res.status);
+                if (!res.ok) return;
                 const data = await res.json();
                 renderUI(data);
-                
-                const hStatus = document.getElementById('header-status');
-                if (hStatus) {
-                    hStatus.innerText = 'SYNC 3S';
-                    hStatus.className = 'text-emerald-400';
-                }
-            } catch (err) {
-                console.error("Fetch error:", err);
-                const hStatus = document.getElementById('header-status');
-                if (hStatus) {
-                    hStatus.innerText = 'RECONNECT...';
-                    hStatus.className = 'text-rose-400';
-                }
-            } finally {
-                if (spinner) {
-                    setTimeout(() => spinner.classList.remove('animate-spin'), 300);
-                }
+            } catch (e) {
+                console.error(e);
             }
         }
 
@@ -679,236 +615,147 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             const bClosed = bybit.closed || [];
             const aAcc = alpaca.account || {};
             const aPositions = alpaca.positions || [];
-            const perfHistory = data.perf_history || [];
+            const history = data.perf_history || [];
 
-            // 1. Summary Strip Superiore
-            const bybitEq = bWallet.total_equity || 0;
-            const alpacaEq = parseFloat(aAcc.portfolio_value || 0);
-            const totalEq = bybitEq + alpacaEq;
+            // 1. Acc Summary
+            const bEq = bWallet.total_equity || 0;
+            const aEq = parseFloat(aAcc.portfolio_value || 0);
+            const totalEq = bEq + aEq;
 
-            document.getElementById('header-nav-value').innerText = `$${(totalEq/1000).toFixed(1)}k`;
-            document.getElementById('summary-bybit-nav').innerText = `$${bybitEq.toLocaleString('en-US', {minimumFractionDigits: 1, maximumFractionDigits: 1})}`;
+            document.getElementById('total-equity').innerText = '$' + totalEq.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+            document.getElementById('bybit-equity').innerText = '$' + bEq.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
             
             const usdtCash = (bWallet.coins && bWallet.coins.USDT) ? bWallet.coins.USDT : (bWallet.available_balance || 0);
-            document.getElementById('summary-bybit-cash').innerText = `USDT: $${usdtCash.toLocaleString('en-US', {maximumFractionDigits: 0})}`;
+            document.getElementById('bybit-cash').innerText = 'Disponibile: $' + usdtCash.toLocaleString('en-US', {maximumFractionDigits: 0}) + ' USDT';
 
-            document.getElementById('summary-alpaca-nav').innerText = `$${alpacaEq.toLocaleString('en-US', {minimumFractionDigits: 1, maximumFractionDigits: 1})}`;
-            document.getElementById('summary-alpaca-bp').innerText = `BP: $${parseFloat(aAcc.buying_power || 0).toLocaleString('en-US', {maximumFractionDigits: 0})}`;
+            document.getElementById('alpaca-equity').innerText = '$' + aEq.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+            document.getElementById('alpaca-bp').innerText = 'BP: $' + parseFloat(aAcc.buying_power || 0).toLocaleString('en-US', {maximumFractionDigits: 0});
 
-            // PnL Calcolo Posizioni Bybit
-            let totalNotional = 0;
-            let totalPnL = 0;
-            bPositions.forEach(p => {
-                totalNotional += p.position_value || 0;
-                totalPnL += p.unrealized_pnl || 0;
-            });
+            // PnL & Posizioni Bybit
+            let totPnl = 0;
+            bPositions.forEach(p => { totPnl += p.unrealized_pnl || 0; });
+            const pnlEl = document.getElementById('total-unrealized');
+            const sign = totPnl >= 0 ? '+' : '';
+            pnlEl.innerText = `${sign}$${totPnl.toFixed(2)}`;
+            pnlEl.className = 'acc-val ' + (totPnl >= 0 ? 'val-up' : 'val-down');
+            document.getElementById('active-positions-count').innerText = `${bPositions.length} posizioni aperte`;
 
-            const pnlSign = totalPnL >= 0 ? '+' : '';
-            const pnlColor = totalPnL >= 0 ? 'text-emerald-400' : 'text-rose-400';
-            const sumPnlEl = document.getElementById('summary-crypto-pnl');
-            sumPnlEl.innerText = `${pnlSign}$${totalPnL.toFixed(1)}`;
-            sumPnlEl.className = `text-lg sm:text-xl font-bold mono-val ${pnlColor} mt-1`;
-
-            document.getElementById('summary-active-positions').innerText = `${bPositions.length} contratti ($${(totalNotional/1000).toFixed(0)}k)`;
-            document.getElementById('bybit-active-count-label').innerText = `${bPositions.length} a mercato`;
-
-            // Badges Tab
-            const bBadge = document.getElementById('desk-badge-bybit-count');
-            if (bBadge) bBadge.innerText = bPositions.length;
-            const aBadge = document.getElementById('desk-badge-alpaca-count');
-            if (aBadge) aBadge.innerText = aPositions.length;
-
-            // 2. Metriche Cumulative di Trading & Grafico
+            // 2. Metrics & Chart
             let cumVol = 0;
-            let cumRealized = 0;
+            let cumPnl = 0;
             let wins = 0;
-            let totalTrades = bClosed.length;
-            let grossProfit = 0;
-            let grossLoss = 0;
-
             bClosed.forEach(c => {
-                const pVal = parseFloat(c.closedPnl || 0);
-                cumRealized += pVal;
+                const p = parseFloat(c.closedPnl || 0);
+                cumPnl += p;
                 cumVol += (parseFloat(c.cumExitValue || 0) + parseFloat(c.cumEntryValue || 0));
-                if (pVal > 0) {
-                    wins++;
-                    grossProfit += pVal;
-                } else {
-                    grossLoss += Math.abs(pVal);
-                }
+                if (p > 0) wins++;
             });
+            document.getElementById('metric-volume').innerText = '$' + (cumVol / 1000).toFixed(0) + 'k';
+            const rpEl = document.getElementById('metric-realized');
+            rpEl.innerText = `${cumPnl >= 0 ? '+' : ''}$${cumPnl.toFixed(2)}`;
+            rpEl.className = cumPnl >= 0 ? 'val-up' : 'val-down';
 
-            const winRate = totalTrades > 0 ? (wins / totalTrades) * 100 : 0.0;
-            const profitFactor = grossLoss > 0 ? (grossProfit / grossLoss) : (grossProfit > 0 ? 99.9 : 0.0);
+            const wr = bClosed.length > 0 ? (wins / bClosed.length * 100).toFixed(0) : 0;
+            document.getElementById('metric-winrate').innerText = `${wr}% (${wins}/${bClosed.length})`;
 
-            document.getElementById('metric-cum-volume').innerText = `$${(cumVol/1000).toFixed(0)}k`;
-            document.getElementById('metric-cum-volume-top').innerText = `Vol: $${(cumVol/1000).toFixed(0)}k`;
-            
-            const crEl = document.getElementById('metric-cum-pnl');
-            crEl.innerText = `${cumRealized >= 0 ? '+' : ''}$${cumRealized.toFixed(1)}`;
-            crEl.className = `text-lg sm:text-xl font-bold mono-val ${cumRealized >= 0 ? 'text-emerald-400' : 'text-rose-400'} mt-1`;
-
-            document.getElementById('metric-win-rate').innerText = `${winRate.toFixed(0)}%`;
-            document.getElementById('metric-win-rate-top').innerText = `WR ${winRate.toFixed(0)}%`;
-            document.getElementById('metric-profit-factor').innerText = profitFactor.toFixed(2);
-
-            // Inizializza / Aggiorna Chart.js
-            if (perfHistory.length > 0) {
-                initChart(perfHistory);
+            if (history.length > 0) {
+                initChart(history);
             }
 
-            // 3. Render Bybit Desktop Table
-            const bTable = document.getElementById('bybit-table-body');
-            if (bTable) {
-                if (bPositions.length === 0) {
-                    bTable.innerHTML = `<tr><td colspan="8" class="text-center py-8 text-slate-400">Nessuna posizione aperta. Lo scanner ricerca confluenza A+ ogni 2m.</td></tr>`;
-                } else {
-                    bTable.innerHTML = bPositions.map(p => {
-                        const isLong = p.side === 'BUY';
-                        const sideBadge = isLong 
-                            ? `<span class="px-2 py-0.5 rounded text-[11px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">LONG</span>`
-                            : `<span class="px-2 py-0.5 rounded text-[11px] font-bold bg-rose-500/20 text-rose-400 border border-rose-500/30">SHORT</span>`;
-
-                        const pSign = p.unrealized_pnl >= 0 ? '+' : '';
-                        const pCol = p.unrealized_pnl >= 0 ? 'text-emerald-400 font-bold' : 'text-rose-400 font-bold';
-
-                        let protBadge = `<span class="text-slate-400 text-xs">SL -1.20%</span>`;
-                        if (p.pnl_pct >= 1.20) {
-                            protBadge = `<span class="px-2 py-0.5 rounded text-[11px] font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">PROFIT LOCKED (+0.70%)</span>`;
-                        } else if (p.pnl_pct >= 0.60) {
-                            protBadge = `<span class="px-2 py-0.5 rounded text-[11px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">BREAK-EVEN (0 RISK)</span>`;
-                        }
-
-                        return `
-                            <tr class="hover:bg-desk-elevated/70 transition">
-                                <td class="py-3 px-4 font-bold text-white">${p.symbol}</td>
-                                <td class="py-3 px-4">${sideBadge}</td>
-                                <td class="py-3 px-4 text-slate-200">${p.size}</td>
-                                <td class="py-3 px-4 text-slate-300">$${p.entry_price.toFixed(4)}</td>
-                                <td class="py-3 px-4 font-bold text-white">$${p.mark_price.toFixed(4)}</td>
-                                <td class="py-3 px-4 text-slate-300">$${(p.position_value || 0).toLocaleString('en-US', {minimumFractionDigits: 1, maximumFractionDigits: 1})}</td>
-                                <td class="py-3 px-4 ${pCol}">
-                                    ${pSign}$${p.unrealized_pnl.toFixed(2)} 
-                                    <span class="text-[11px] font-medium opacity-90">(${pSign}${p.pnl_pct.toFixed(2)}%)</span>
-                                </td>
-                                <td class="py-3 px-4">${protBadge}</td>
-                            </tr>
-                        `;
-                    }).join('');
-                }
-            }
-
-            // 4. Render Bybit Mobile Cards (100% Usabilità iPhone)
-            const bCards = document.getElementById('bybit-mobile-cards');
+            // 3. Bybit Positions Row-List (Clean Financial Rows)
+            const listEl = document.getElementById('bybit-positions-list');
             if (bPositions.length === 0) {
-                bCards.innerHTML = `<div class="desk-card rounded-xl p-5 text-center text-slate-400 text-xs font-mono">Nessuna posizione aperta. Motore A+ in ascolto sui breakout.</div>`;
+                listEl.innerHTML = `<div style="padding: 24px 0; text-align: center; color: var(--text-dim);" class="mono">Nessuna posizione aperta. Monitoraggio breakout in corso.</div>`;
             } else {
-                bCards.innerHTML = bPositions.map(p => {
+                listEl.innerHTML = bPositions.map(p => {
                     const isLong = p.side === 'BUY';
-                    const sideBadge = isLong 
-                        ? `<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">LONG</span>`
-                        : `<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-rose-500/20 text-rose-400 border border-rose-500/30">SHORT</span>`;
-
+                    const sideClass = isLong ? 'trade-side-long' : 'trade-side-short';
+                    const sideText = isLong ? 'LONG' : 'SHORT';
                     const pSign = p.unrealized_pnl >= 0 ? '+' : '';
-                    const pCol = p.unrealized_pnl >= 0 ? 'text-emerald-400' : 'text-rose-400';
+                    const pnlClass = p.unrealized_pnl >= 0 ? 'val-up' : 'val-down';
 
-                    let protBadge = `<span class="text-slate-400 text-[10px]">SL -1.20%</span>`;
+                    let guardHtml = `<span class="trade-guard">SL -1.20%</span>`;
                     if (p.pnl_pct >= 1.20) {
-                        protBadge = `<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">LOCK +0.70%</span>`;
+                        guardHtml = `<span class="trade-guard guard-lock">LOCK +0.70%</span>`;
                     } else if (p.pnl_pct >= 0.60) {
-                        protBadge = `<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">BREAK-EVEN (0)</span>`;
+                        guardHtml = `<span class="trade-guard guard-be">BE SAFE</span>`;
                     }
 
                     return `
-                        <div class="desk-card rounded-xl p-3.5 space-y-2.5">
-                            <div class="flex items-center justify-between">
-                                <div class="flex items-center gap-2">
-                                    <span class="text-sm font-bold text-white mono-val">${p.symbol}</span>
-                                    ${sideBadge}
+                        <div class="trade-row mono">
+                            <div class="trade-left">
+                                <div class="trade-symbol-row">
+                                    <span class="trade-symbol">${p.symbol}</span>
+                                    <span class="${sideClass}">${sideText}</span>
                                 </div>
-                                <div class="text-right">
-                                    <div class="text-sm font-bold mono-val ${pCol}">
-                                        ${pSign}$${p.unrealized_pnl.toFixed(2)}
-                                        <span class="text-[11px] font-semibold">(${pSign}${p.pnl_pct.toFixed(2)}%)</span>
-                                    </div>
+                                <div class="trade-detail">
+                                    In: $${p.entry_price.toFixed(4)} &rarr; Mark: $${p.mark_price.toFixed(4)}
                                 </div>
-                            </div>
-                            
-                            <div class="grid grid-cols-2 gap-2 text-xs font-mono pt-2 border-t border-desk-borderSubtle">
-                                <div>
-                                    <span class="text-slate-400 text-[9px] uppercase block">Entrata &rarr; Attuale</span>
-                                    <span class="text-slate-200 font-semibold">$${p.entry_price.toFixed(4)} &rarr; $${p.mark_price.toFixed(4)}</span>
-                                </div>
-                                <div class="text-right">
-                                    <span class="text-slate-400 text-[9px] uppercase block">Controvalore</span>
-                                    <span class="text-slate-200 font-semibold">$${(p.position_value || 0).toLocaleString('en-US', {maximumFractionDigits: 0})}</span>
+                                <div class="trade-detail" style="color: var(--text-dim);">
+                                    Size: ${p.size} ($${(p.position_value || 0).toLocaleString('en-US', {maximumFractionDigits: 0})})
                                 </div>
                             </div>
-
-                            <div class="pt-1.5 border-t border-desk-borderSubtle flex items-center justify-between text-xs font-mono">
-                                <span class="text-slate-400 text-[10px]">Stato Rischio:</span>
-                                ${protBadge}
+                            <div class="trade-right">
+                                <div class="trade-pnl ${pnlClass}">
+                                    ${pSign}$${p.unrealized_pnl.toFixed(2)}
+                                </div>
+                                <div style="font-size: 11px;" class="${pnlClass}">
+                                    ${pSign}${p.pnl_pct.toFixed(2)}%
+                                </div>
+                                ${guardHtml}
                             </div>
                         </div>
                     `;
                 }).join('');
             }
 
-            // 5. Render Alpaca Box & Table
-            document.getElementById('alpaca-equity-display').innerText = `$${alpacaEq.toLocaleString('en-US', {minimumFractionDigits: 1, maximumFractionDigits: 1})}`;
-            document.getElementById('alpaca-bp-display').innerText = `$${parseFloat(aAcc.buying_power || 0).toLocaleString('en-US', {minimumFractionDigits: 1, maximumFractionDigits: 1})}`;
-            document.getElementById('alpaca-total-titles').innerText = `${aPositions.length} Titoli`;
-
-            const alpacaBody = document.getElementById('alpaca-table-body');
+            // 4. Alpaca Table
+            const aBody = document.getElementById('alpaca-tbody');
             if (aPositions.length === 0) {
-                alpacaBody.innerHTML = `<tr><td colspan="6" class="text-center py-6 text-slate-400">Nessuna posizione aperta (Wall Street chiusa nel weekend).</td></tr>`;
+                aBody.innerHTML = `<tr><td colspan="6" style="text-align: center; padding: 20px 0; color: var(--text-dim);">Nessun titolo aperto. Wall Street chiusa nel weekend.</td></tr>`;
             } else {
-                alpacaBody.innerHTML = aPositions.map(ap => {
-                    const unpnl = parseFloat(ap.unrealized_pl || 0);
-                    const col = unpnl >= 0 ? 'text-emerald-400 font-bold' : 'text-rose-400 font-bold';
-                    const sign = unpnl >= 0 ? '+' : '';
+                aBody.innerHTML = aPositions.map(ap => {
+                    const u = parseFloat(ap.unrealized_pl || 0);
+                    const uClass = u >= 0 ? 'val-up' : 'val-down';
+                    const uSign = u >= 0 ? '+' : '';
                     return `
-                        <tr class="hover:bg-desk-elevated/70 transition">
-                            <td class="py-2 px-3 font-bold text-white">${ap.symbol}</td>
-                            <td class="py-2 px-3 text-slate-200">${ap.qty}</td>
-                            <td class="py-2 px-3 text-slate-300">$${parseFloat(ap.avg_entry_price || 0).toFixed(2)}</td>
-                            <td class="py-2 px-3 font-bold text-white">$${parseFloat(ap.current_price || 0).toFixed(2)}</td>
-                            <td class="py-2 px-3 text-slate-200">$${parseFloat(ap.market_value || 0).toFixed(2)}</td>
-                            <td class="py-2 px-3 ${col}">${sign}$${unpnl.toFixed(2)}</td>
+                        <tr>
+                            <td style="font-weight: 700; color: #fff;">${ap.symbol}</td>
+                            <td>${ap.qty}</td>
+                            <td>$${parseFloat(ap.avg_entry_price || 0).toFixed(2)}</td>
+                            <td>$${parseFloat(ap.current_price || 0).toFixed(2)}</td>
+                            <td>$${parseFloat(ap.market_value || 0).toFixed(2)}</td>
+                            <td class="${uClass}">${uSign}$${u.toFixed(2)}</td>
                         </tr>
                     `;
                 }).join('');
             }
 
-            // 6. Render Storico Chiusure
-            document.getElementById('history-total-count').innerText = `${bClosed.length} registrati`;
-            const hBody = document.getElementById('history-table-body');
+            // 5. History Table
+            document.getElementById('closed-count-label').innerText = `${bClosed.length} eseguiti`;
+            const hBody = document.getElementById('history-tbody');
             if (bClosed.length === 0) {
-                hBody.innerHTML = `<tr><td colspan="7" class="text-center py-6 text-slate-400">Nessun trade chiuso di recente.</td></tr>`;
+                hBody.innerHTML = `<tr><td colspan="6" style="text-align: center; padding: 20px 0; color: var(--text-dim);">Nessun trade chiuso recente.</td></tr>`;
             } else {
                 hBody.innerHTML = bClosed.slice(0, 15).map(c => {
-                    const pnlVal = parseFloat(c.closedPnl || 0);
-                    const pCol = pnlVal >= 0 ? 'text-emerald-400 font-bold' : 'text-rose-400 font-bold';
-                    const pSign = pnlVal >= 0 ? '+' : '';
+                    const pVal = parseFloat(c.closedPnl || 0);
+                    const pClass = pVal >= 0 ? 'val-up' : 'val-down';
+                    const pSign = pVal >= 0 ? '+' : '';
                     const timeStr = c.updatedTime ? new Date(parseInt(c.updatedTime)).toLocaleTimeString('it-IT') : '--:--';
                     return `
-                        <tr class="hover:bg-desk-elevated/70 transition">
-                            <td class="py-2 px-3 text-slate-400">${timeStr}</td>
-                            <td class="py-2 px-3 font-bold text-white">${c.symbol}</td>
-                            <td class="py-2 px-3"><span class="px-1 py-0.2 rounded text-[9px] font-semibold bg-desk-elevated text-slate-300 border border-desk-border">${c.side}</span></td>
-                            <td class="py-2 px-3 text-slate-300">${c.closedSize || c.qty}</td>
-                            <td class="py-2 px-3 text-slate-300">$${parseFloat(c.avgEntryPrice || 0).toFixed(4)} &rarr; $${parseFloat(c.avgExitPrice || 0).toFixed(4)}</td>
-                            <td class="py-2 px-3 text-slate-400">$${(parseFloat(c.openFee || 0) + parseFloat(c.closeFee || 0)).toFixed(2)}</td>
-                            <td class="py-2 px-3 ${pCol}">${pSign}$${pnlVal.toFixed(2)}</td>
+                        <tr>
+                            <td style="color: var(--text-muted);">${timeStr}</td>
+                            <td style="font-weight: 700; color: #fff;">${c.symbol}</td>
+                            <td>${c.side}</td>
+                            <td>$${parseFloat(c.avgEntryPrice || 0).toFixed(3)} &rarr; $${parseFloat(c.avgExitPrice || 0).toFixed(3)}</td>
+                            <td style="color: var(--text-dim);">$${(parseFloat(c.openFee || 0) + parseFloat(c.closeFee || 0)).toFixed(2)}</td>
+                            <td class="${pClass}">${pSign}$${pVal.toFixed(2)}</td>
                         </tr>
                     `;
                 }).join('');
             }
-
-            lucide.createIcons();
         }
 
-        // Fetch iniziale e loop continuo ogni 3 secondi
         fetchData();
         setInterval(fetchData, 3000);
     </script>
