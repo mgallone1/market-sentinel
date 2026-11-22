@@ -384,12 +384,17 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             background: var(--surface);
             border: 1px solid var(--border);
             border-radius: 8px;
-            padding: 10px 14px;
-            margin-bottom: 8px;
+            padding: 12px 14px;
+            margin-bottom: 10px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.02);
+        }
+        .trade-row-top {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            box-shadow: 0 1px 2px rgba(0,0,0,0.02);
         }
         .trade-row:active { background: var(--surface-elevated); }
         .trade-left { display: flex; flex-direction: column; gap: 2px; }
@@ -439,6 +444,47 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             background: var(--amber-bg);
             border-color: var(--amber);
             font-weight: 700;
+        }
+        /* Trade Sparkline & Target Progress */
+        .trade-chart-box {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background: var(--surface-elevated);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 6px 10px;
+            gap: 12px;
+        }
+        .trade-sparkline-canvas {
+            width: 110px;
+            height: 30px;
+            flex-shrink: 0;
+        }
+        .trade-target-levels {
+            display: flex;
+            flex-direction: column;
+            gap: 3px;
+            flex-grow: 1;
+            font-size: 10px;
+        }
+        .target-level-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .target-bar-bg {
+            width: 100%;
+            height: 4px;
+            background: rgba(148, 163, 184, 0.2);
+            border-radius: 2px;
+            overflow: hidden;
+            position: relative;
+        }
+        .target-bar-fill {
+            height: 100%;
+            border-radius: 2px;
+            transition: width 0.3s ease;
         }
 
         
@@ -1466,46 +1512,115 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             if (bPositions.length === 0) {
                 listEl.innerHTML = `<div style="padding: 24px 0; text-align: center; color: var(--text-dim);" class="mono">Nessuna posizione aperta. Monitoraggio breakout in corso.</div>`;
             } else {
-                listEl.innerHTML = bPositions.map(p => {
+                listEl.innerHTML = bPositions.map((p, idx) => {
                     const isLong = p.side === 'BUY';
                     const sideClass = isLong ? 'trade-side-long' : 'trade-side-short';
                     const sideText = isLong ? 'LONG' : 'SHORT';
                     const pSign = p.unrealized_pnl >= 0 ? '+' : '';
                     const pnlClass = p.unrealized_pnl >= 0 ? 'val-up' : 'val-down';
 
-                    let guardHtml = `<span class="trade-guard" data-tip="Stop Loss attivo: chiusura automatica protettiva se la posizione perde l'1.20% (-$180)">SL -1.20%</span>`;
+                    let guardHtml = `<span class="trade-guard" data-tip="Stop Loss attivo: chiusura automatica protettiva se la posizione perde l'1.20%">SL -1.20%</span>`;
                     if (p.pnl_pct >= 1.60) {
-                        guardHtml = `<span class="trade-guard guard-lock" data-tip="Trailing Profit Lock attivo: lo stop è stato alzato per garantire almeno il +1.00% netto di guadagno">LOCK +1.00%</span>`;
+                        guardHtml = `<span class="trade-guard guard-lock" data-tip="Trailing Profit Lock attivo: stop alzato per garantire almeno il +1.00% netto">LOCK +1.00%</span>`;
                     } else if (p.pnl_pct >= 0.80) {
-                        guardHtml = `<span class="trade-guard guard-be" data-tip="Break-Even Safe attivo: rischio azzerato, stop spostato a +0.20% a copertura delle commissioni">BE SAFE +0.20%</span>`;
+                        guardHtml = `<span class="trade-guard guard-be" data-tip="Break-Even Safe attivo: rischio azzerato, stop a +0.20% netto">BE SAFE +0.20%</span>`;
                     }
+
+                    // Calcolo Target Progress Bar
+                    const entry = p.entry_price || 1;
+                    const mark = p.mark_price || entry;
+                    const sl = p.stop_loss || (isLong ? entry * 0.988 : entry * 1.012);
+                    const tp = p.take_profit || (isLong ? entry * 1.036 : entry * 0.964);
+
+                    // Calcolo percentuale di completamento verso TP (+3.60%)
+                    const pctGain = p.pnl_pct || 0;
+                    const tpProgress = Math.max(0, Math.min(100, (pctGain / 3.60) * 100));
+                    const progressColor = pctGain >= 1.60 ? 'var(--amber)' : (pctGain > 0 ? 'var(--green)' : 'var(--red)');
+
+                    // Canvas ID per mini-candlestick / sparkline
+                    const sparkId = `sparkline-pos-${idx}`;
 
                     return `
                         <div class="trade-row mono">
-                            <div class="trade-left">
-                                <div class="trade-symbol-row">
-                                    <span class="trade-symbol">${p.symbol}</span>
-                                    <span class="${sideClass}">${sideText}</span>
+                            <div class="trade-row-top">
+                                <div class="trade-left">
+                                    <div class="trade-symbol-row">
+                                        <span class="trade-symbol">${p.symbol}</span>
+                                        <span class="${sideClass}">${sideText}</span>
+                                    </div>
+                                    <div class="trade-detail">
+                                        In: $${entry.toFixed(4)} &rarr; Mark: $${mark.toFixed(4)}
+                                    </div>
+                                    <div class="trade-detail" style="color: var(--text-dim);">
+                                        Size: ${p.size} ($${(p.position_value || 0).toLocaleString('en-US', {maximumFractionDigits: 0})})
+                                    </div>
                                 </div>
-                                <div class="trade-detail">
-                                    In: $${p.entry_price.toFixed(4)} &rarr; Mark: $${p.mark_price.toFixed(4)}
-                                </div>
-                                <div class="trade-detail" style="color: var(--text-dim);">
-                                    Size: ${p.size} ($${(p.position_value || 0).toLocaleString('en-US', {maximumFractionDigits: 0})})
+                                <div class="trade-right">
+                                    <div class="trade-pnl ${pnlClass}" data-tip="PnL non realizzato fluttuante in dollari">
+                                        ${pSign}$${p.unrealized_pnl.toFixed(2)}
+                                    </div>
+                                    <div style="font-size: 11px;" class="${pnlClass}" data-tip="Rendimento percentuale calcolato sul notionale dinamico (10% equity)">
+                                        ${pSign}${p.pnl_pct.toFixed(2)}%
+                                    </div>
+                                    ${guardHtml}
                                 </div>
                             </div>
-                            <div class="trade-right">
-                                <div class="trade-pnl ${pnlClass}" data-tip="PnL non realizzato: profitto o perdita fluttuante in dollari su questa specifica posizione">
-                                    ${pSign}$${p.unrealized_pnl.toFixed(2)}
+
+                            <!-- Mini Sparkline Candlestick & Target R:R Progress -->
+                            <div class="trade-chart-box">
+                                <canvas id="${sparkId}" class="trade-sparkline-canvas" width="110" height="30"></canvas>
+                                <div class="trade-target-levels">
+                                    <div class="target-level-row">
+                                        <span style="color: var(--text-dim);">TP (+3.6%): <b style="color: var(--green);">$${tp.toFixed(4)}</b></span>
+                                        <span style="color: var(--text-dim);">SL (-1.2%): <b style="color: var(--red);">$${sl.toFixed(4)}</b></span>
+                                    </div>
+                                    <div class="target-bar-bg" data-tip="Avanzamento verso il Target Take Profit istituzionale (+3.60%)">
+                                        <div class="target-bar-fill" style="width: ${tpProgress.toFixed(0)}%; background: ${progressColor};"></div>
+                                    </div>
+                                    <div class="target-level-row" style="color: var(--text-dim); font-size: 9px;">
+                                        <span>Distanza TP: ${(3.60 - pctGain).toFixed(2)}%</span>
+                                        <span>Progresso: ${tpProgress.toFixed(0)}%</span>
+                                    </div>
                                 </div>
-                                <div style="font-size: 11px;" class="${pnlClass}" data-tip="Rendimento percentuale calcolato sul controvalore nozionale dinamico (10% equity)">
-                                    ${pSign}${p.pnl_pct.toFixed(2)}%
-                                </div>
-                                ${guardHtml}
                             </div>
                         </div>
                     `;
                 }).join('');
+
+                // Renderizza le mini-sparkline su ciascun canvas
+                bPositions.forEach((p, idx) => {
+                    const sparkEl = document.getElementById(`sparkline-pos-${idx}`);
+                    if (!sparkEl || !p.sparkline || p.sparkline.length < 2) return;
+                    const sCtx = sparkEl.getContext('2d');
+                    const pts = p.sparkline;
+                    const w = sparkEl.width;
+                    const h = sparkEl.height;
+                    const minP = Math.min(...pts);
+                    const maxP = Math.max(...pts);
+                    const range = (maxP - minP) || 0.0001;
+
+                    sCtx.clearRect(0, 0, w, h);
+                    sCtx.beginPath();
+                    sCtx.lineWidth = 1.8;
+                    const isGain = p.unrealized_pnl >= 0;
+                    sCtx.strokeStyle = isGain ? '#10b981' : '#ef4444';
+
+                    pts.forEach((pt, i) => {
+                        const x = (i / (pts.length - 1)) * (w - 6) + 3;
+                        const y = h - 4 - ((pt - minP) / range) * (h - 8);
+                        if (i === 0) sCtx.moveTo(x, y);
+                        else sCtx.lineTo(x, y);
+                    });
+                    sCtx.stroke();
+
+                    // Disegna punto finale live
+                    const lastX = w - 3;
+                    const lastY = h - 4 - ((pts[pts.length - 1] - minP) / range) * (h - 8);
+                    sCtx.beginPath();
+                    sCtx.arc(lastX, lastY, 2.5, 0, Math.PI * 2);
+                    sCtx.fillStyle = isGain ? '#10b981' : '#ef4444';
+                    sCtx.fill();
+                });
             }
 
             // 6. Alpaca Table

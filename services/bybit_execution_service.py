@@ -53,16 +53,30 @@ class BybitExecutionService:
                 for p in pos_list:
                     size = float(p.get("size", 0.0))
                     if size > 0:
+                        sym = p.get("symbol")
+                        # Recupera candele recenti (15m, ultimi 12 periodi) per mini sparkline
+                        sparkline = []
+                        try:
+                            k_res = self.session.get_kline(category="linear", symbol=sym, interval="15", limit=12)
+                            if k_res.get("retCode") == 0:
+                                k_list = k_res.get("result", {}).get("list", [])
+                                sparkline = [float(k[4]) for k in reversed(k_list)]
+                        except Exception:
+                            pass
+
                         active.append({
-                            "symbol": p.get("symbol"),
+                            "symbol": sym,
                             "side": p.get("side").upper(), # 'BUY' -> Long, 'SELL' -> Short
                             "size": size,
                             "entry_price": float(p.get("avgPrice", 0.0)),
                             "mark_price": float(p.get("markPrice", 0.0)),
+                            "take_profit": float(p.get("takeProfit", 0.0) or 0.0),
+                            "stop_loss": float(p.get("stopLoss", 0.0) or 0.0),
                             "unrealized_pnl": float(p.get("unrealisedPnl", 0.0)),
                             "pnl_pct": (float(p.get("unrealisedPnl", 0.0)) / (float(p.get("positionValue", 1.0)) or 1.0)) * 100,
                             "position_value": float(p.get("positionValue", 0.0)),
-                            "leverage": p.get("leverage")
+                            "leverage": p.get("leverage"),
+                            "sparkline": sparkline
                         })
                 return active
             return []
