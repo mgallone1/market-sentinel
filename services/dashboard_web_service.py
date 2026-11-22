@@ -1097,7 +1097,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                     <strong>• Grafico Sovrapposto a Più Curve:</strong> Mostra in tempo reale la serie storica reale (azzurro), la curva di traslazione <strong>Hurst FLD</strong> (oro tratteggiato), la sinusoide a 4 tempi del <strong>Battleplan Migliorino</strong> (ciano) e il cono stocastico <strong>Monte Carlo P50</strong> a 15 giorni con intervallo di confidenza al 95%.<br>
                     <strong>• Hurst FLD (Future Line of Demarcation):</strong> Trasla il prezzo di mezzo periodo (T/2). Se il prezzo incrocia la FLD dal basso, convalida il minimo ciclico proiettando il target al rialzo; se la buca dall'alto, avverte di debolezza ciclica verso il minimo.<br>
                     <strong>• Battleplan &amp; Vincoli di Migliorino:</strong> Mostra il tempo ciclico su 4 tempi (T, T+1, T+2, T+3) e segnala se il ciclo è libero o vincolato al ribasso (un ciclo che rompe il proprio minimo di partenza non può più superare il proprio massimo).<br>
-                    <strong>• Onde di Elliott Frattali:</strong> Riconosce la fase frattale (Onda 1-2-3-4-5 d'impulso o correzione A-B-C) e misura i ritracciamenti di Fibonacci.<br>
+                    <strong>• Onde di Elliott Frattali &amp; Target Fibonacci:</strong> Riconosce la fase frattale (Onda 1-2-3-4-5 d'impulso o correzione A-B-C) e calcola in tempo reale i livelli di ritracciamento di Fibonacci (38.2%, 50.0% Mediana e 61.8% Golden Pocket).<br>
                     <strong>• Simulazione Monte Carlo a 15 Giorni:</strong> Calcola su 10.000 iterazioni stocastiche la distribuzione di probabilità con percentili P05, P50 e P95.
                 </div>
             </div>
@@ -1195,6 +1195,23 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                             <div id="wave-migl-status" style="font-weight: 700; color: var(--cyan);">T+2 (32gg)</div>
                         </div>
                     </div>
+
+                    <!-- Griglia Target Ritracciamento Fibonacci & Golden Pocket -->
+                    <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; text-align: center; margin-top: 6px; margin-bottom: 6px; font-size: 10px;">
+                        <div style="background: var(--surface); border: 1px solid var(--border); border-radius: 4px; padding: 3px 2px;">
+                            <div style="color: var(--text-muted); font-size: 8px;">FIB 38.2%</div>
+                            <div id="fib-382-val" style="font-weight: 700; color: var(--text-main); font-size: 9px;">--</div>
+                        </div>
+                        <div style="background: var(--surface); border: 1px solid var(--border); border-radius: 4px; padding: 3px 2px;">
+                            <div style="color: var(--text-muted); font-size: 8px;">FIB 50.0% (MEDIANA)</div>
+                            <div id="fib-500-val" style="font-weight: 700; color: var(--blue); font-size: 9px;">--</div>
+                        </div>
+                        <div style="background: var(--surface); border: 1px solid var(--border); border-radius: 4px; padding: 3px 2px;">
+                            <div style="color: var(--text-muted); font-size: 8px;">GOLDEN POCKET 61.8%</div>
+                            <div id="fib-618-val" style="font-weight: 700; color: var(--amber); font-size: 9px;">--</div>
+                        </div>
+                    </div>
+
                     <div id="modal-elliott-deep-desc" style="color: var(--text-dim); font-size: 10px; line-height: 1.4;">
                         Analisi frattale automatica basata sul modello a 8 onde di Ralph Nelson Elliott combinata con la Future Line of Demarcation (FLD) di J.M. Hurst e i 4 sottocicli del Battleplan di Giuseppe Migliorino.
                     </div>
@@ -2036,6 +2053,15 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 if (deepDesc && el.analysis) {
                     deepDesc.innerText = `${el.analysis} ${c.descrizione_battleplan || ''}`;
                 }
+
+                // Popola Target Fibonacci
+                const fibObj = el.fib_levels || {};
+                const fib382El = document.getElementById('fib-382-val');
+                const fib500El = document.getElementById('fib-500-val');
+                const fib618El = document.getElementById('fib-618-val');
+                if (fib382El && fibObj.fib_382) fib382El.innerText = `$${Number(fibObj.fib_382).toLocaleString('en-US', {maximumFractionDigits: 2})}`;
+                if (fib500El && fibObj.fib_500) fib500El.innerText = `$${Number(fibObj.fib_500).toLocaleString('en-US', {maximumFractionDigits: 2})}`;
+                if (fib618El && fibObj.fib_618) fib618El.innerText = `$${Number(fibObj.fib_618).toLocaleString('en-US', {maximumFractionDigits: 2})}`;
 
                 // Popola Monte Carlo
                 const mc = data.monte_carlo || {};

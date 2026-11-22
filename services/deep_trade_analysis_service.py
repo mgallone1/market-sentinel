@@ -129,7 +129,13 @@ def get_deep_trade_forecast(symbol: str) -> Dict[str, Any]:
             },
             "elliott": {
                 "wave_label": elliott.get("wave_label", "Onde in consolidamento"),
-                "analysis": elliott.get("analysis", "Struttura frattale in evoluzione.")
+                "analysis": elliott.get("analysis", "Struttura frattale in evoluzione."),
+                "fib_levels": {
+                    "fib_382": fib.get("fib_382_eur", round(last_price * 1.05, 2)),
+                    "fib_500": fib.get("fib_50_eur", round(last_price * 1.08, 2)),
+                    "fib_618": fib.get("fib_618_golden_pocket_eur", round(last_price * 1.12, 2)),
+                    "fvg_note": fib.get("fvg_note", "Nessun Fair Value Gap aperto.")
+                }
             },
             "wyckoff": {
                 "phase": wyckoff.get("phase", "Neutro"),
