@@ -343,13 +343,30 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             border-color: var(--blue);
         }
         .chart-wrap {
-            height: 180px;
+            height: 260px;
             position: relative;
             margin-top: 8px;
             background: var(--surface);
             border: 1px solid var(--border);
             border-radius: 8px;
-            padding: 8px;
+            padding: 10px 12px;
+            box-shadow: inset 0 1px 2px rgba(0,0,0,0.02);
+        }
+        .chart-hud {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 6px 12px;
+            background: var(--surface-elevated);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            margin-bottom: 8px;
+            font-size: 11px;
+        }
+        .chart-hud-stat {
+            display: flex;
+            align-items: center;
+            gap: 6px;
         }
         .metrics-bar {
             display: flex;
@@ -689,6 +706,22 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 <button class="tf-btn" id="btn-tf-1M" onclick="setTimeframe('1M')">1MO</button>
             </div>
         </div>
+        <!-- HUD Tecnico Istituzionale (Valore Live, Massimo, Minimo) -->
+        <div class="chart-hud mono">
+            <div class="chart-hud-stat">
+                <span style="color: var(--text-muted);">LIVE:</span>
+                <strong id="hud-live-val" style="color: var(--blue); font-size: 12px;">$0.00</strong>
+            </div>
+            <div class="chart-hud-stat">
+                <span style="color: var(--text-muted);">RANGE:</span>
+                <span id="hud-range-val" style="color: var(--text-main); font-size: 10px;">L: $0 &bull; H: $0</span>
+            </div>
+            <div class="chart-hud-stat">
+                <span style="color: var(--text-muted);">TREND:</span>
+                <strong id="hud-trend-badge" class="badge mono" style="font-size: 9px; padding: 2px 5px; border-radius: 3px; background: var(--green-bg); color: var(--green);">STABILE</strong>
+            </div>
+        </div>
+
         <div class="chart-wrap">
             <canvas id="perfChart"></canvas>
         </div>
@@ -1052,25 +1085,72 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                     }
                 }
 
-                const gradient = ctx.createLinearGradient(0, 0, 0, 220);
+                // Calcolo statistiche HUD tecnico (Live, Min, Max)
+                try {
+                    const validEq = equity.filter(v => typeof v === 'number' && !isNaN(v));
+                    if (validEq.length > 0) {
+                        const curVal = validEq[validEq.length - 1];
+                        const minVal = Math.min(...validEq);
+                        const maxVal = Math.max(...validEq);
+                        const firstVal = validEq[0];
+                        const isUp = curVal >= firstVal;
+
+                        const hudLive = document.getElementById('hud-live-val');
+                        if (hudLive) {
+                            hudLive.innerText = (chartMode === 'pct') ? (curVal >= 0 ? '+' : '') + curVal.toFixed(2) + '%' : '$' + curVal.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+                        }
+                        const hudRange = document.getElementById('hud-range-val');
+                        if (hudRange) {
+                            if (chartMode === 'pct') {
+                                hudRange.innerText = `L: ${minVal.toFixed(2)}% • H: ${maxVal.toFixed(2)}%`;
+                            } else {
+                                hudRange.innerText = `L: $${(minVal/1000).toFixed(1)}k • H: $${(maxVal/1000).toFixed(1)}k`;
+                            }
+                        }
+                        const hudTrend = document.getElementById('hud-trend-badge');
+                        if (hudTrend) {
+                            hudTrend.innerText = isUp ? 'RIALZISTA ↗' : 'FLESSIONE ↘';
+                            hudTrend.style.background = isUp ? 'var(--green-bg)' : 'var(--red-bg)';
+                            hudTrend.style.color = isUp ? 'var(--green)' : 'var(--red)';
+                        }
+                    }
+                } catch (e_hud) {
+                    console.error("HUD error:", e_hud);
+                }
+
+                // Media Mobile Semplice a 9 periodi per evidenziare la direzione tecnica del trend
+                const smaPeriod = 9;
+                const smaData = equity.map((val, idx, arr) => {
+                    if (idx < smaPeriod - 1) return null;
+                    const slice = arr.slice(idx - smaPeriod + 1, idx + 1);
+                    const avg = slice.reduce((a, b) => a + b, 0) / smaPeriod;
+                    return parseFloat(avg.toFixed(3));
+                });
+
+                const gradient = ctx.createLinearGradient(0, 0, 0, 250);
                 if (isDark) {
-                    gradient.addColorStop(0, 'rgba(59, 130, 246, 0.25)');
+                    gradient.addColorStop(0, 'rgba(59, 130, 246, 0.28)');
                     gradient.addColorStop(1, 'rgba(59, 130, 246, 0.00)');
                 } else {
                     gradient.addColorStop(0, 'rgba(37, 99, 235, 0.16)');
                     gradient.addColorStop(1, 'rgba(37, 99, 235, 0.00)');
                 }
 
-                const lineColor = isDark ? '#60a5fa' : '#2563eb';
-                const pnlColor = isDark ? '#34d399' : '#16a34a';
+                const lineColor = isDark ? '#38bdf8' : '#0284c7';
+                const smaColor = isDark ? '#fbbf24' : '#d97706';
+                const pnlColor = isDark ? '#4ade80' : '#16a34a';
 
                 if (chartInstance) {
                     chartInstance.data.labels = labels;
                     chartInstance.data.datasets[0].data = equity;
+                    chartInstance.data.datasets[0].label = labelName;
                     chartInstance.data.datasets[0].borderColor = lineColor;
                     chartInstance.data.datasets[0].backgroundColor = gradient;
-                    chartInstance.data.datasets[1].data = pnl;
-                    chartInstance.data.datasets[1].borderColor = pnlColor;
+                    chartInstance.data.datasets[1].data = smaData;
+                    chartInstance.data.datasets[1].borderColor = smaColor;
+                    chartInstance.data.datasets[2].data = pnl;
+                    chartInstance.data.datasets[2].label = pnlName;
+                    chartInstance.data.datasets[2].borderColor = pnlColor;
                     chartInstance.update('none');
                     return;
                 }
@@ -1084,23 +1164,34 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                                 label: labelName,
                                 data: equity,
                                 borderColor: lineColor,
-                                borderWidth: 2.2,
+                                borderWidth: 2.4,
                                 backgroundColor: gradient,
                                 pointRadius: 0,
                                 pointHoverRadius: 5,
                                 pointHoverBackgroundColor: lineColor,
                                 pointHoverBorderColor: '#fff',
                                 pointHoverBorderWidth: 2,
-                                tension: 0.25,
+                                tension: 0.15,
                                 fill: true,
+                                yAxisID: 'y'
+                            },
+                            {
+                                label: 'Media Mobile SMA (9)',
+                                data: smaData,
+                                borderColor: smaColor,
+                                borderWidth: 1.6,
+                                borderDash: [5, 4],
+                                backgroundColor: 'transparent',
+                                pointRadius: 0,
+                                pointHoverRadius: 0,
+                                tension: 0.2,
                                 yAxisID: 'y'
                             },
                             {
                                 label: pnlName,
                                 data: pnl,
                                 borderColor: pnlColor,
-                                borderWidth: 1.8,
-                                borderDash: [4, 4],
+                                borderWidth: 1.6,
                                 backgroundColor: 'transparent',
                                 pointRadius: 0,
                                 pointHoverRadius: 4,
