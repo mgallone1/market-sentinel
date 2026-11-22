@@ -671,7 +671,14 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 <button class="tf-btn" id="btn-inst-total" onclick="setChartInstance('total')">🌐 TOTALE</button>
             </div>
         </div>
-        <div style="display: flex; justify-content: flex-end; margin-bottom: 8px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; flex-wrap: wrap; gap: 6px;">
+            <!-- Toggle Modalità Scala: Dollari $ vs Percentuale % -->
+            <div class="chart-controls mono">
+                <button class="tf-btn active" id="btn-mode-usd" onclick="setChartMode('usd')" data-tip="Mostra il grafico in valori monetari assoluti ($ Dollari)">$ DOLLARI</button>
+                <button class="tf-btn" id="btn-mode-pct" onclick="setChartMode('pct')" data-tip="Mostra il grafico in rendimento percentuale progressivo (% Yield)">% PERCENTUALE</button>
+            </div>
+
+            <!-- Controlli Timeframe e Reset Zoom -->
             <div class="chart-controls mono">
                 <button class="tf-btn" id="btn-reset-zoom" onclick="resetChartZoom()" style="display: none; background: var(--amber); color: #fff; border-color: var(--amber);" data-tip="Ripristina la vista panoramica del grafico originale">🔍 RESET ZOOM</button>
                 <button class="tf-btn active" id="btn-tf-3s" onclick="setTimeframe('3s')">3S</button>
@@ -866,6 +873,18 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         let chartInstance = null;
         let currentTimeframe = '3s';
         let currentInstance = 'bybit'; // 'bybit' | 'alpaca' | 'total'
+        let chartMode = 'usd'; // 'usd' | 'pct'
+
+        function setChartMode(mode) {
+            chartMode = mode;
+            document.getElementById('btn-mode-usd').classList.toggle('active', mode === 'usd');
+            document.getElementById('btn-mode-pct').classList.toggle('active', mode === 'pct');
+            if (chartInstance) {
+                chartInstance.destroy();
+                chartInstance = null;
+            }
+            fetchData();
+        }
 
         function resetChartZoom() {
             if (chartInstance && typeof chartInstance.resetZoom === 'function') {
@@ -993,21 +1012,44 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 let labelName = 'Capitale Bybit ($)';
                 let pnlName = 'PnL Chiuso Bybit ($)';
 
-                if (currentInstance === 'bybit') {
-                    equity = snapshots.map(s => s.bybit_equity);
-                    pnl = snapshots.map(s => s.cumulative_realized_pnl);
-                    labelName = 'Capitale Bybit ($)';
-                    pnlName = 'PnL Realizzato Bybit ($)';
-                } else if (currentInstance === 'alpaca') {
-                    equity = snapshots.map(s => s.alpaca_equity);
-                    pnl = snapshots.map(s => 0); // Wall Street equities PnL non mescolato con Crypto
-                    labelName = 'Portfolio Alpaca ($)';
-                    pnlName = 'PnL Alpaca ($)';
+                const baseEq = (currentInstance === 'bybit' ? snapshots[0].bybit_equity : (currentInstance === 'alpaca' ? snapshots[0].alpaca_equity : snapshots[0].total_equity)) || 1.0;
+
+                if (chartMode === 'pct') {
+                    // Modalità %: calcola la variazione percentuale progressiva rispetto all'inizio del grafico
+                    if (currentInstance === 'bybit') {
+                        equity = snapshots.map(s => parseFloat(((s.bybit_equity - baseEq) / baseEq * 100).toFixed(3)));
+                        pnl = snapshots.map(s => parseFloat((s.cumulative_realized_pnl / baseEq * 100).toFixed(3)));
+                        labelName = 'Rendimento Bybit (%)';
+                        pnlName = 'PnL Chiuso Bybit (%)';
+                    } else if (currentInstance === 'alpaca') {
+                        equity = snapshots.map(s => parseFloat(((s.alpaca_equity - baseEq) / baseEq * 100).toFixed(3)));
+                        pnl = snapshots.map(s => 0);
+                        labelName = 'Rendimento Alpaca (%)';
+                        pnlName = 'PnL Alpaca (%)';
+                    } else {
+                        equity = snapshots.map(s => parseFloat(((s.total_equity - baseEq) / baseEq * 100).toFixed(3)));
+                        pnl = snapshots.map(s => parseFloat((s.cumulative_realized_pnl / baseEq * 100).toFixed(3)));
+                        labelName = 'Rendimento Totale (%)';
+                        pnlName = 'PnL Consolidato (%)';
+                    }
                 } else {
-                    equity = snapshots.map(s => s.total_equity);
-                    pnl = snapshots.map(s => s.cumulative_realized_pnl);
-                    labelName = 'Capitale Totale ($)';
-                    pnlName = 'PnL Consolidato ($)';
+                    // Modalità $: visualizza in Dollari
+                    if (currentInstance === 'bybit') {
+                        equity = snapshots.map(s => s.bybit_equity);
+                        pnl = snapshots.map(s => s.cumulative_realized_pnl);
+                        labelName = 'Capitale Bybit ($)';
+                        pnlName = 'PnL Realizzato Bybit ($)';
+                    } else if (currentInstance === 'alpaca') {
+                        equity = snapshots.map(s => s.alpaca_equity);
+                        pnl = snapshots.map(s => 0);
+                        labelName = 'Portfolio Alpaca ($)';
+                        pnlName = 'PnL Alpaca ($)';
+                    } else {
+                        equity = snapshots.map(s => s.total_equity);
+                        pnl = snapshots.map(s => s.cumulative_realized_pnl);
+                        labelName = 'Capitale Totale ($)';
+                        pnlName = 'PnL Consolidato ($)';
+                    }
                 }
 
                 const gradient = ctx.createLinearGradient(0, 0, 0, 220);
@@ -1123,7 +1165,12 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                                         let label = context.dataset.label || '';
                                         if (label) label += ': ';
                                         if (context.parsed.y !== null) {
-                                            label += '$' + context.parsed.y.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                                            if (chartMode === 'pct') {
+                                                const s = context.parsed.y >= 0 ? '+' : '';
+                                                label += s + context.parsed.y.toFixed(2) + '%';
+                                            } else {
+                                                label += '$' + context.parsed.y.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                                            }
                                         }
                                         return label;
                                     }
@@ -1141,7 +1188,12 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                                 ticks: {
                                     color: lineColor,
                                     font: { family: 'SF Mono, monospace', size: 9 },
-                                    callback: val => '$' + (val / 1000).toFixed(1) + 'k'
+                                    callback: function(val) {
+                                        if (chartMode === 'pct') {
+                                            return (val >= 0 ? '+' : '') + val.toFixed(2) + '%';
+                                        }
+                                        return '$' + (val / 1000).toFixed(1) + 'k';
+                                    }
                                 }
                             },
                             y1: {
@@ -1150,7 +1202,12 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                                 ticks: {
                                     color: pnlColor,
                                     font: { family: 'SF Mono, monospace', size: 9 },
-                                    callback: val => (val >= 0 ? '+' : '') + '$' + val.toFixed(0)
+                                    callback: function(val) {
+                                        if (chartMode === 'pct') {
+                                            return (val >= 0 ? '+' : '') + val.toFixed(2) + '%';
+                                        }
+                                        return (val >= 0 ? '+' : '') + '$' + val.toFixed(0);
+                                    }
                                 }
                             }
                         }
