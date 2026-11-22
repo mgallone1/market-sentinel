@@ -191,6 +191,24 @@ class BybitExecutionService:
         except Exception as e:
             return {"error": str(e)}
 
+    def update_stop_loss(self, symbol: str, new_stop_loss: float) -> Dict[str, Any]:
+        """Aggiorna lo Stop Loss di una posizione aperta (es. spostamento a Break-Even protettivo)."""
+        clean_sym = symbol.upper().replace("/", "").replace("-", "")
+        if not clean_sym.endswith("USDT"):
+            clean_sym = f"{clean_sym}USDT"
+        try:
+            res = self.session.set_trading_stop(
+                category="linear",
+                symbol=clean_sym,
+                stopLoss=str(round(new_stop_loss, 4)),
+                tpslMode="Full"
+            )
+            if res.get("retCode") == 0:
+                return {"status": "success", "symbol": clean_sym, "new_stop_loss": new_stop_loss}
+            return {"error": res.get("retMsg", "Errore aggiornamento stop loss")}
+        except Exception as e:
+            return {"error": str(e)}
+
     def close_position(self, symbol: str) -> Dict[str, Any]:
         """Chiude a mercato qualsiasi posizione aperta (Long o Short) su un asset."""
         clean_sym = symbol.upper().replace("/", "").replace("-", "")

@@ -1783,7 +1783,7 @@ async def _handle_text_message_core(update: Update, context: ContextTypes.DEFAUL
             action_label = "LONG (Rialzista)" if side_bybit == "Buy" else "SHORT (Ribassista)"
             action_icon = "🟢" if side_bybit == "Buy" else "🔻"
 
-            res_order = bybit_service.place_order(symbol=bybit_sym, side=side_bybit, notional_usd=notional_amt, take_profit_pct=3.0, stop_loss_pct=1.5)
+            res_order = bybit_service.place_order(symbol=bybit_sym, side=side_bybit, notional_usd=notional_amt, take_profit_pct=0.8, stop_loss_pct=0.6)
             if "error" in res_order:
                 await status_order_msg.edit_text(
                     f"⚠️ *Errore ordine Crypto su Bybit:*\n`{res_order['error']}`",
@@ -1797,10 +1797,11 @@ async def _handle_text_message_core(update: Update, context: ContextTypes.DEFAUL
                     f"• *Operazione:* `{action_label}`\n"
                     f"• *Importo Notionale:* `${notional_amt:,.2f} USDT`\n"
                     f"• *Prezzo Esecuzione:* `${res_order.get('price'):.2f}`\n"
-                    f"• *Take Profit:* `${res_order.get('take_profit')}` (+3.0%)\n"
-                    f"• *Stop Loss:* `${res_order.get('stop_loss')}` (-1.5%)\n"
+                    f"• *Take Profit:* `${res_order.get('take_profit')}` (+0.80% ~+$120 USDT)\n"
+                    f"• *Stop Loss:* `${res_order.get('stop_loss')}` (-0.60%)\n"
+                    f"• *Protezione Break-Even:* Attiva al +0.30%\n"
                     f"• *Status:* `APERTO SUL CONTO DEMO BYBIT` 🎯\n\n"
-                    f"💡 _Visualizza il saldo e le posizioni aggiornate con `/crypto`._",
+                    f"💡 _Visualizza il saldo e le posizioni con `/crypto`._",
                     parse_mode="Markdown"
                 )
             return
@@ -2910,16 +2911,28 @@ async def crypto_auto_risk_manager_job(application):
     try:
         # 1. Bybit Perpetual Futures Engine (Long & SHORT nativo 24/7)
         bybit_positions = bybit_service.get_open_positions()
-        # Monitor dinamico Take Profit (+3.0%) e Stop Loss (-1.5%) sulle posizioni Bybit
+        # Monitor dinamico Take Profit (+0.80%), Stop Loss (-0.60%) e Break-Even Protettivo (+0.30%) sulle posizioni Bybit
         for bp in bybit_positions:
             bsym = bp["symbol"]
             pnl_pct = bp["pnl_pct"]
             unrealized = bp["unrealized_pnl"]
             bside = bp["side"]
-            # TP al +3.0% e SL al -1.5%
-            if pnl_pct >= 3.0 or pnl_pct <= -1.5:
+            entry_p = bp["entry_price"]
+            
+            # PROTEZIONE BREAK-EVEN: Se il trade supera il +0.30% (coprendo abbondantemente tutte le commissioni di ~0.11%),
+            # blocca il profitto spostando lo Stop Loss al prezzo di pareggio (+0.08% per coprire fee e spread).
+            if pnl_pct >= 0.30:
+                be_sl = round(entry_p * 1.0008, 4) if bside == "BUY" else round(entry_p * 0.9992, 4)
+                # Verifica se non è già stato aggiornato
+                curr_sl = float(bp.get("stop_loss", 0.0) or 0.0)
+                if (bside == "BUY" and curr_sl < entry_p) or (bside == "SELL" and (curr_sl <= 0 or curr_sl > entry_p)):
+                    bybit_service.update_stop_loss(bsym, be_sl)
+                    print(f"🛡️ [Bybit Break-Even] Spostato Stop Loss su {bsym} [{bside}] a Break-Even ({be_sl}) dopo aver superato le commissioni!")
+
+            # TP Scalping a +0.80% (o superiore) e SL di protezione a -0.60%
+            if pnl_pct >= 0.80 or pnl_pct <= -0.60:
                 bybit_service.close_position(bsym)
-                action_label = f"🎯 *BYBIT TAKE PROFIT RAGGIUNTO (+{pnl_pct:.2f}%)*" if pnl_pct >= 3.0 else f"🛑 *BYBIT STOP LOSS ESEGUITO ({pnl_pct:.2f}%)*"
+                action_label = f"🎯 *BYBIT SCALPING TAKE PROFIT INCASSATO (+{pnl_pct:.2f}%)*" if pnl_pct >= 0.80 else f"🛑 *BYBIT STOP LOSS ESEGUITO ({pnl_pct:.2f}%)*"
                 for uid in AUTHORIZED_USER_IDS:
                     try:
                         await application.bot.send_message(
@@ -2928,8 +2941,8 @@ async def crypto_auto_risk_manager_job(application):
                                 f"{action_label}\n"
                                 f"────────────────────────\n"
                                 f"• *Asset:* `{bsym}` [{bside}]\n"
-                                f"• *Risultato Netto:* `${unrealized:+.2f}` ({pnl_pct:+.2f}%)\n"
-                                "Posizione futures demo liquidata con successo su Bybit."
+                                f"• *Risultato Netto Incassato:* `${unrealized:+.2f} USDT` ({pnl_pct:+.2f}%)\n"
+                                "Operazione conclusa e liquidata a mercato su Bybit."
                             ),
                             parse_mode="Markdown"
                         )
@@ -2969,14 +2982,14 @@ async def crypto_auto_risk_manager_job(application):
 
                     # Segnale SHORT: RSI elevato (>= 60) oppure rottura ribassista sotto le medie
                     if rsi >= 60 or (last_c < ema20 < ema50):
-                        print(f"📉 [Bybit Futures] Rilevato segnale SHORT su {b_sym} (RSI: {rsi:.1f}). Invio ordine Short $15,000...")
-                        res_order = bybit_service.place_order(b_sym, side="Sell", notional_usd=15000.0, take_profit_pct=3.0, stop_loss_pct=1.5)
+                        print(f"📉 [Bybit Futures] Rilevato segnale SHORT su {b_sym} (RSI: {rsi:.1f}). Invio ordine Short Scalping $15,000...")
+                        res_order = bybit_service.place_order(b_sym, side="Sell", notional_usd=15000.0, take_profit_pct=0.8, stop_loss_pct=0.6)
                         order_type_label = "SHORT (Ribassista)"
                         order_icon = "🔻"
                     # Segnale LONG: RSI favorevole con trend rialzista
                     elif rsi <= 55 and (last_c > ema20 > ema50):
-                        print(f"📈 [Bybit Futures] Rilevato segnale LONG su {b_sym} (RSI: {rsi:.1f}). Invio ordine Long $15,000...")
-                        res_order = bybit_service.place_order(b_sym, side="Buy", notional_usd=15000.0, take_profit_pct=3.0, stop_loss_pct=1.5)
+                        print(f"📈 [Bybit Futures] Rilevato segnale LONG su {b_sym} (RSI: {rsi:.1f}). Invio ordine Long Scalping $15,000...")
+                        res_order = bybit_service.place_order(b_sym, side="Buy", notional_usd=15000.0, take_profit_pct=0.8, stop_loss_pct=0.6)
                         order_type_label = "LONG (Rialzista)"
                         order_icon = "🟢"
                     else:
@@ -2988,15 +3001,16 @@ async def crypto_auto_risk_manager_job(application):
                                 await application.bot.send_message(
                                     chat_id=uid,
                                     text=(
-                                        f"{order_icon} *BYBIT FUTURES DEMO — NUOVO TRADE 24/7* 🚀\n"
+                                        f"{order_icon} *BYBIT FUTURES DEMO — NUOVO TRADE SCALPING 24/7* 🚀\n"
                                         "────────────────────────\n"
                                         f"• *Contratto:* `{b_sym}`\n"
                                         f"• *Operazione:* `{order_type_label}`\n"
                                         f"• *Controvalore:* `$15,000.00 USDT`\n"
                                         f"• *Prezzo Esecuzione:* `${res_order.get('price'):.2f}`\n"
-                                        f"• *Take Profit:* `${res_order.get('take_profit')}` (+3.0%)\n"
-                                        f"• *Stop Loss:* `${res_order.get('stop_loss')}` (-1.5%)\n\n"
-                                        "💡 _Massimizzazione del conto demo Bybit (50.000 USDT)._"
+                                        f"• *Take Profit:* `${res_order.get('take_profit')}` (+0.80% ~+$120 USDT)\n"
+                                        f"• *Stop Loss:* `${res_order.get('stop_loss')}` (-0.60%)\n"
+                                        f"• *Protezione Fee:* Break-Even automatico al +0.30%\n\n"
+                                        "💡 _Scalping rapido ad alta frequenza sul conto Bybit._"
                                     ),
                                     parse_mode="Markdown"
                                 )
