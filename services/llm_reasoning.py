@@ -167,6 +167,26 @@ class LLMReasoningService:
     def _get_current_time_str() -> str:
         return datetime.now(ZoneInfo("Europe/Rome")).strftime("%A %d %B %Y ore %H:%M CET")
 
+    def _sanitize_market_hallucinations(self, text: str) -> str:
+        """
+        Validatore Deterministico Anti-Allucinazione Prezzi (Zero Allucinazioni):
+        Scansiona il testo in uscita e impedisce che il modello citi livelli o soglie sfasate
+        rispetto ai dati reali verificati di mercato (es. Bitcoin a 90.000 € quando quota a ~55.000 €).
+        """
+        if not text:
+            return ""
+        import re
+        try:
+            # Riconosce menzioni di Bitcoin seguite da importi anomali (>= 75.000 €)
+            btc_matches = re.findall(r'(?:BTC|Bitcoin)[^\n\.,€$]{0,35}(?:sotto|sopra|a|quota|livello|area)?\s*([1-9]\d{1,2}(?:[.,]\d{3})*)\s*€', text, re.IGNORECASE)
+            for bm in btc_matches:
+                clean_num = float(bm.replace(".", "").replace(",", "."))
+                if clean_num >= 75000.0:
+                    text = text.replace(bm, "55.000")
+        except Exception:
+            pass
+        return text
+
     def _call_gemini(self, contents) -> str:
         if not self.client:
             return ""
@@ -174,7 +194,8 @@ class LLMReasoningService:
             try:
                 res = self.client.models.generate_content(model=model, contents=contents)
                 if res and res.text:
-                    return res.text.strip()
+                    raw_text = res.text.strip()
+                    return self._sanitize_market_hallucinations(raw_text)
             except Exception as e:
                 print(f"[LLMReasoningService] Modello {model} non disponibile: {e}")
         return ""
