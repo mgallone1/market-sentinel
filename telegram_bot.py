@@ -2899,9 +2899,45 @@ async def auto_flatten_overnight_job(application):
     except Exception as e:
         print(f"[!] Errore auto_flatten_overnight_job: {e}")
 
-def _sync_crypto_risk_and_screening():
-    """Worker sincrono eseguito in thread separato via asyncio.to_thread per non bloccare l'event loop."""
+def _get_btc_macro_bias():
+    """Determina il bias direzionale macro (BULLISH o BEARISH) controllando EMA 20 e 50 sul timeframe 4 Ore di BTC."""
     try:
+        res = bybit_service.session.get_kline(category="linear", symbol="BTCUSDT", interval="240", limit=50)
+        candles = res.get("result", {}).get("list", [])
+        if not candles or len(candles) < 30:
+            return "NEUTRAL"
+        candles_rev = list(reversed(candles))
+        closes = [float(c[4]) for c in candles_rev]
+        
+        # Calcola EMA 20 e 50
+        def _ema(vals, span):
+            a = 2.0 / (span + 1.0)
+            e = vals[0]
+            for v in vals[1:]:
+                e = a * v + (1.0 - a) * e
+            return e
+
+        ema20 = _ema(closes, 20)
+        ema50 = _ema(closes, 50)
+        last_c = closes[-1]
+
+        if last_c > ema50 and ema20 >= ema50:
+            return "BULLISH"
+        elif last_c < ema50:
+            return "BEARISH"
+        return "NEUTRAL"
+    except Exception as e_bias:
+        print(f"[!] Errore calcolo bias BTC macro: {e_bias}")
+        return "NEUTRAL"
+
+def _sync_crypto_risk_and_screening():
+    """Motore quantitativo istituzionale: allineamento Macro BTC, gestione R:R 1:3 e zero conflitto portafoglio."""
+    try:
+        # 1. Leggi trend macro da BTC (Timeframe 4 Ore)
+        macro_bias = _get_btc_macro_bias()
+        print(f"🌊 [Macro Bias BTC 4H] Direzione di mercato: {macro_bias}")
+
+        # 2. Gestione posizioni aperte Bybit
         bybit_positions = bybit_service.get_open_positions()
         for bp in bybit_positions:
             bsym = bp["symbol"]
@@ -2911,27 +2947,46 @@ def _sync_crypto_risk_and_screening():
             entry_p = bp["entry_price"]
             curr_sl = float(bp.get("stop_loss", 0.0) or 0.0)
 
-            if 0.60 <= pnl_pct < 1.20:
-                be_sl = round(entry_p * 1.0015, 4) if bside == "BUY" else round(entry_p * 0.9985, 4)
+            # A. Se la posizione è in conflitto totale col bias macro (es. LONG aperto durante downtrend macro) ed è in perdita,
+            # chiudila per evitare accumulo di perdite contro-trend
+            if macro_bias == "BEARISH" and bside == "BUY" and pnl_pct < -0.10:
+                print(f"🛑 [Macro Shield] Chiusura posizione Long contro-trend su {bsym} (Macro: BEARISH).")
+                bybit_service.close_position(bsym)
+                continue
+            elif macro_bias == "BULLISH" and bside == "SELL" and pnl_pct < -0.10:
+                print(f"🛑 [Macro Shield] Chiusura posizione Short contro-trend su {bsym} (Macro: BULLISH).")
+                bybit_service.close_position(bsym)
+                continue
+
+            # B. Break-Even Protettivo (scatta al +0.80% e protegge +0.20% netto)
+            if 0.80 <= pnl_pct < 1.60:
+                be_sl = round(entry_p * 1.0020, 4) if bside == "BUY" else round(entry_p * 0.9980, 4)
                 if (bside == "BUY" and curr_sl < entry_p) or (bside == "SELL" and (curr_sl <= 0 or curr_sl > entry_p)):
                     bybit_service.update_stop_loss(bsym, be_sl)
+                    print(f"🛡️ [Day-Trader Break-Even] Spostato Stop Loss su {bsym} a BE protetto ({be_sl})!")
 
-            elif pnl_pct >= 1.20:
-                trail_sl = round(entry_p * 1.0070, 4) if bside == "BUY" else round(entry_p * 0.9930, 4)
+            # C. Trailing Lock (scatta al +1.60% e blocca +1.00% netto)
+            elif pnl_pct >= 1.60:
+                trail_sl = round(entry_p * 1.0100, 4) if bside == "BUY" else round(entry_p * 0.9900, 4)
                 if (bside == "BUY" and curr_sl < trail_sl) or (bside == "SELL" and (curr_sl <= 0 or curr_sl > trail_sl)):
                     bybit_service.update_stop_loss(bsym, trail_sl)
+                    print(f"🚀 [Trailing Lock] Spostato Stop Loss su {bsym} a +1.00% netto ({trail_sl})!")
 
-            if pnl_pct >= 3.00 or pnl_pct <= -1.20:
+            # D. Target Istituzionale 1:3 (+3.60% TP / -1.20% SL)
+            if pnl_pct >= 3.60 or pnl_pct <= -1.20:
                 bybit_service.close_position(bsym)
 
-        if len(bybit_positions) < 3:
+        # 3. Screening ingressi selettivi A+ (Massimo 3 posizioni, SOLO nella direzione del Macro Bias)
+        bybit_positions = bybit_service.get_open_positions()
+        if len(bybit_positions) < 3 and macro_bias in ["BULLISH", "BEARISH"]:
             active_bybit_syms = {bp["symbol"] for bp in bybit_positions}
             bybit_candidates = [
                 ("SOLUSDT", "SOL-USD", "Solana"),
                 ("BTCUSDT", "BTC-USD", "Bitcoin"),
                 ("ETHUSDT", "ETH-USD", "Ethereum"),
                 ("LINKUSDT", "LINK-USD", "Chainlink"),
-                ("AVAXUSDT", "AVAX-USD", "Avalanche")
+                ("AVAXUSDT", "AVAX-USD", "Avalanche"),
+                ("XRPUSDT", "XRP-USD", "Ripple")
             ]
             for b_sym, b_yf, b_name in bybit_candidates:
                 if b_sym in active_bybit_syms or len(active_bybit_syms) >= 3:
@@ -2939,7 +2994,7 @@ def _sync_crypto_risk_and_screening():
                 try:
                     import yfinance as yf
                     import pandas as pd
-                    df = yf.download(b_yf, period="2d", interval="15m", progress=False)
+                    df = yf.download(b_yf, period="3d", interval="15m", progress=False)
                     if df.empty or len(df) < 35:
                         continue
                     close = df["Close"].iloc[:, 0] if isinstance(df["Close"], pd.DataFrame) else df["Close"]
@@ -2962,13 +3017,18 @@ def _sync_crypto_risk_and_screening():
                     or_high = float(high.iloc[-5:-1].max())
                     or_low = float(low.iloc[-5:-1].min())
 
-                    if (last_c < or_low) and (last_c < ema20 < ema50) and (rsi < 45) and (vol_ratio >= 1.1):
-                        bybit_service.place_order(b_sym, side="Sell", notional_usd=15000.0, take_profit_pct=3.0, stop_loss_pct=1.2)
+                    # INGRESSO SHORT (Ammesso solo se Macro Bias è BEARISH)
+                    if macro_bias == "BEARISH" and (last_c < or_low) and (last_c < ema20 < ema50) and (rsi < 45) and (vol_ratio >= 1.15):
+                        print(f"📉 [Setup A+ SHORT Confluente] {b_sym} con Macro BEARISH (RSI: {rsi:.1f}, VolRatio: {vol_ratio:.2f}x). Ordine $15,000...")
+                        bybit_service.place_order(b_sym, side="Sell", notional_usd=15000.0, take_profit_pct=3.6, stop_loss_pct=1.2)
                         break
-                    elif (last_c > or_high) and (last_c > ema20 > ema50) and (rsi > 55) and (vol_ratio >= 1.1):
-                        bybit_service.place_order(b_sym, side="Buy", notional_usd=15000.0, take_profit_pct=3.0, stop_loss_pct=1.2)
+
+                    # INGRESSO LONG (Ammesso solo se Macro Bias è BULLISH)
+                    elif macro_bias == "BULLISH" and (last_c > or_high) and (last_c > ema20 > ema50) and (rsi > 55) and (vol_ratio >= 1.15):
+                        print(f"📈 [Setup A+ LONG Confluente] {b_sym} con Macro BULLISH (RSI: {rsi:.1f}, VolRatio: {vol_ratio:.2f}x). Ordine $15,000...")
+                        bybit_service.place_order(b_sym, side="Buy", notional_usd=15000.0, take_profit_pct=3.6, stop_loss_pct=1.2)
                         break
-                except Exception:
+                except Exception as ex:
                     pass
     except Exception as e:
         print(f"[!] Errore sync crypto worker: {e}")

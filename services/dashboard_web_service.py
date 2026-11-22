@@ -640,7 +640,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     <div class="section" id="view-bybit">
         <div class="section-header">
             <span class="section-title">Posizioni Attive Bybit (Futures 24/7)</span>
-            <span class="mono" style="font-size: 10px; color: var(--text-muted);">Size: $15k / TP: +3% / SL: -1.2%</span>
+            <span class="mono" style="font-size: 10px; color: var(--text-muted);">Size: $15k / Macro BTC Shield / TP: +3.6% (1:3 R:R) / SL: -1.2% / BE: +0.8%</span>
         </div>
         <div id="bybit-positions-list">
             <div style="padding: 20px 0; text-align: center; color: var(--text-dim);" class="mono">
@@ -1115,10 +1115,10 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                     const pnlClass = p.unrealized_pnl >= 0 ? 'val-up' : 'val-down';
 
                     let guardHtml = `<span class="trade-guard">SL -1.20%</span>`;
-                    if (p.pnl_pct >= 1.20) {
-                        guardHtml = `<span class="trade-guard guard-lock">LOCK +0.70%</span>`;
-                    } else if (p.pnl_pct >= 0.60) {
-                        guardHtml = `<span class="trade-guard guard-be">BE SAFE</span>`;
+                    if (p.pnl_pct >= 1.60) {
+                        guardHtml = `<span class="trade-guard guard-lock">LOCK +1.00%</span>`;
+                    } else if (p.pnl_pct >= 0.80) {
+                        guardHtml = `<span class="trade-guard guard-be">BE SAFE +0.20%</span>`;
                     }
 
                     return `
