@@ -2857,28 +2857,38 @@ async def send_scheduled_briefing(app, slot: str, force: bool = False):
 
 async def auto_flatten_overnight_job(application):
     """
-    Regola tassativa Day-Trading: Flat by 21:55 CET (15:55 EST).
-    Chiude forzatamente tutte le posizioni aperte a margine (es. azioni)
-    per evitare commissioni di overnight e drawdown da gap notturni.
+    Regola tassativa Day-Trading per azioni tradizionali: Flat by 21:55 CET (15:55 EST).
+    Chiude forzatamente le posizioni azionarie aperte a margine prima della chiusura di Wall Street
+    per evitare commissioni di overnight e gap notturni.
+    LE CRYPTO SONO ESCLUSE: il mercato crypto scambia 24/7 ed è gestito dal bot dedicato.
     """
     try:
         summary = alpaca_service.get_account_summary()
         positions = summary.get("positions", [])
-        if positions:
-            print(f"🛑 [Auto-Flatten 21:55] Rilevate {len(positions)} posizioni aperte. Liquidazione forzata anti-overnight in corso...")
-            alpaca_service.close_all_positions()
+        stock_positions = []
+        for p in positions:
+            sym = p.get("symbol", "")
+            # Se non è una crypto (non contiene USD/EUR e non appartiene alla classe crypto)
+            is_crypto = p.get("asset_class") == "crypto" or "/" in sym or sym.endswith("USD") and any(sym.startswith(c) for c in ["BTC", "ETH", "SOL", "ADA", "XRP", "DOGE"])
+            if not is_crypto:
+                stock_positions.append(sym)
+
+        if stock_positions:
+            print(f"🛑 [Auto-Flatten 21:55] Rilevate {len(stock_positions)} posizioni azionarie. Liquidazione forzata anti-overnight in corso...")
+            for s in stock_positions:
+                alpaca_service.close_position(s)
             # Invia notifica di sicurezza
             for user_id in AUTHORIZED_USER_IDS:
                 try:
                     await application.bot.send_message(
                         chat_id=user_id,
                         text=(
-                            "🛑 *PROTEZIONE ANTI-OVERNIGHT ATTIVATA (21:55 CET)*\n"
+                            "🛑 *PROTEZIONE ANTI-OVERNIGHT AZIONARIA ATTIVATA (21:55 CET)*\n"
                             "────────────────────────\n"
-                            f"Liquidate automaticamente *{len(positions)} posizioni azionarie* aperte prima della chiusura di Wall Street.\n"
+                            f"Liquidate automaticamente *{len(stock_positions)} posizioni su azioni* aperte prima della chiusura di Wall Street.\n"
                             "• Zero commissioni di prestito overnight a margine.\n"
                             "• Zero rischio di gap down all'apertura successiva.\n"
-                            "Portafoglio rientrato 100% in liquidità."
+                            "💡 *Nota:* Le posizioni *Crypto 24/7* restano attive e gestite dal risk manager continuo."
                         ),
                         parse_mode="Markdown"
                     )
@@ -2889,16 +2899,23 @@ async def auto_flatten_overnight_job(application):
 
 async def crypto_auto_risk_manager_job(application):
     """
-    Monitor attivo 24/7 sulle posizioni Crypto aperte:
-    Se la posizione tocca il Take Profit (+2.5%) o lo Stop Loss (-1.5%),
-    la chiude automaticamente a mercato e notifica Michele su Telegram.
+    Motore autonomo 24/7 di trading e risk management Crypto:
+    1. Gestione dinamica posizioni aperte:
+       - Take Profit (+2.5%) o Stop Loss (-1.5%) chiudono a mercato la posizione incassando il profitto o proteggendo il capitale.
+    2. Apertura autonoma e continua (Always in Trading):
+       - Se non ci sono posizioni crypto attive o se il numero di posizioni è < 2,
+         effettua una scansione quantitativa (RSI, trend EMA20/50 e momentum) sui principali asset (SOL, BTC, ETH)
+         e piazza un ordine a mercato di $2.500 mantenendo sempre attivo il trading su Alpaca anche nel weekend.
     """
     try:
         summary = alpaca_service.get_account_summary()
         positions = summary.get("positions", [])
+        crypto_positions = []
         for p in positions:
             sym = p.get("symbol", "")
-            if "/" in sym or "USD" in sym and sym.startswith(("BTC", "ETH", "SOL", "ADA", "XRP", "DOGE")):
+            is_crypto = p.get("asset_class") == "crypto" or "/" in sym or sym.endswith("USD") and any(sym.startswith(c) for c in ["BTC", "ETH", "SOL", "ADA", "XRP", "DOGE"])
+            if is_crypto:
+                crypto_positions.append(p)
                 plpc = float(p.get("unrealized_plpc", 0.0)) * 100
                 qty = float(p.get("qty", 0.0))
                 pl = float(p.get("unrealized_pl", 0.0))
@@ -2907,7 +2924,7 @@ async def crypto_auto_risk_manager_job(application):
                 # Trigger Take Profit (+2.5%) o Stop Loss (-1.5%)
                 if plpc >= 2.5 or plpc <= -1.5:
                     alpaca_service.close_position(sym)
-                    action_label = "🎯 *TAKE PROFIT RAGGIUNTO (+2.5%)*" if plpc >= 2.5 else "🛑 *STOP LOSS PROTETTIVO ESEGUITO (-1.5%)*"
+                    action_label = "🎯 *TAKE PROFIT CRYPTO RAGGIUNTO (+2.5%)*" if plpc >= 2.5 else "🛑 *STOP LOSS PROTETTIVO CRYPTO (-1.5%)*"
                     for uid in AUTHORIZED_USER_IDS:
                         try:
                             await application.bot.send_message(
@@ -2918,12 +2935,88 @@ async def crypto_auto_risk_manager_job(application):
                                     f"• *Asset Chiuso:* `{sym}`\n"
                                     f"• *Prezzo Esecuzione:* `${curr_p:.2f}`\n"
                                     f"• *Risultato Netto:* `${pl:+.2f}` ({plpc:+.2f}%)\n"
-                                    f"Posizione liquidata con successo sul conto Alpaca."
+                                    f"Posizione liquidata e reinvestimento automatico pronto sul prossimo segnale."
                                 ),
                                 parse_mode="Markdown"
                             )
                         except Exception:
                             pass
+
+        # 2. Controllo Always in Trading: se abbiamo meno di 1 posizione crypto aperta, cerchiamo il miglior setup e apriamo
+        if len(crypto_positions) == 0:
+            active_symbols = {p.get("symbol", "").replace("/", "").upper() for p in crypto_positions}
+            candidates = [
+                ("SOL/USD", "SOLUSD", "SOL-USD", "Solana"),
+                ("BTC/USD", "BTCUSD", "BTC-USD", "Bitcoin"),
+                ("ETH/USD", "ETHUSD", "ETH-USD", "Ethereum")
+            ]
+
+            best_candidate = None
+            best_score = -999
+
+            for pair_slash, pair_clean, yf_sym, name in candidates:
+                if pair_clean in active_symbols or pair_slash in active_symbols:
+                    continue
+                try:
+                    import yfinance as yf
+                    import pandas as pd
+                    df = yf.download(yf_sym, period="5d", interval="15m", progress=False)
+                    if df.empty or len(df) < 25:
+                        continue
+                    close = df["Close"].iloc[:, 0] if isinstance(df["Close"], pd.DataFrame) else df["Close"]
+                    delta = close.diff()
+                    gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+                    loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+                    rs = gain / (loss + 1e-9)
+                    rsi = float((100 - (100 / (1 + rs))).iloc[-1])
+                    ema20 = float(close.ewm(span=20, adjust=False).mean().iloc[-1])
+                    ema50 = float(close.ewm(span=50, adjust=False).mean().iloc[-1])
+                    last_c = float(close.iloc[-1])
+
+                    score = 0
+                    if last_c > ema20:
+                        score += 2
+                    if ema20 > ema50:
+                        score += 2
+                    if 35 <= rsi <= 70:
+                        score += 2
+                    elif rsi < 35:
+                        score += 3 # Potenziale rimbalzo da ipervenduto
+
+                    if score > best_score:
+                        best_score = score
+                        best_candidate = (pair_slash, name, last_c, rsi)
+                except Exception as ex_candle:
+                    print(f"[!] Errore analisi candele {yf_sym}: {ex_candle}")
+
+            # Se abbiamo trovato un candidato valido (o fallback su SOL/USD)
+            target_pair = best_candidate[0] if best_candidate else "SOL/USD"
+            target_name = best_candidate[1] if best_candidate else "Solana"
+            target_price = best_candidate[2] if best_candidate else 0.0
+
+            print(f"🪙 [Crypto Always-Trading] Nessuna posizione crypto attiva. Apertura automatica di $2.500 su {target_pair} (Score: {best_score})...")
+            res_order = alpaca_service.place_crypto_order(symbol=target_pair, notional=2500.0, side="buy")
+            if "error" not in res_order:
+                for uid in AUTHORIZED_USER_IDS:
+                    try:
+                        await application.bot.send_message(
+                            chat_id=uid,
+                            text=(
+                                "⚡ *CRYPTO TRADING 24/7 ATTIVO — NUOVO INGRESSO AUTOMATICO* 🚀\n"
+                                "────────────────────────\n"
+                                f"• *Asset:* *{target_name}* (`{target_pair}`)\n"
+                                f"• *Importo Operazione:* `$2,500.00`\n"
+                                f"• *Strategia:* Always in Trading 24/7 (TP: +2.5% | SL: -1.5%)\n"
+                                f"• *Status Ordine:* `{res_order.get('status', 'inviato').upper()}`\n\n"
+                                "💡 _Posizione sotto monitoraggio automatico continuo h24._"
+                            ),
+                            parse_mode="Markdown"
+                        )
+                    except Exception:
+                        pass
+            else:
+                print(f"[!] Errore ordine automatico crypto: {res_order.get('error')}")
+
     except Exception as e:
         print(f"[!] Errore crypto_auto_risk_manager_job: {e}")
 
