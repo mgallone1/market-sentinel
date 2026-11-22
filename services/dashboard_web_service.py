@@ -1,13 +1,8 @@
 """
 Web Dashboard Service for Market Sentinel.
-Design Istituzionale Pro-Terminal (Anti-AI-Slop):
-- Ispirato a Tabler Dashboard, Tremor Analytics e Bloomberg Terminal
-- Regola aurea (phi = 1.618) per scala tipografica e proporzioni
-- Zero sfocature glassmorphism cliché, zero gradienti viola/blu generici
-- Tavolozza precisa: #0B0E14 (Slate Deep), bordi #1E2638, superfici #121824
-- Badge di stato rigorosi (LONG/SHORT, Break-even, Trailing Lock, Closed)
-- Visualizzazione multi-tab (Posizioni Live Bybit, Storico Trade Chiusi, Portafoglio Alpaca Equities, Stato Engine)
-- Gestione dei 6 stati (Loading skeleton, Empty, Error, Active, Disabled, Data Live)
+Design: Pro Financial Terminal con Separazione Netta delle Istanze (Bybit Crypto Futures vs Alpaca Wall Street)
+Ottimizzato per iPhone (Touch target 44px, safe area insets, mobile card views) e Desktop.
+Tipografia nitida ad alto contrasto (Inter + Roboto Mono), zero AI-slop.
 """
 
 import json
@@ -26,38 +21,37 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 <html lang="it" class="dark">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SENTINEL // QUANT TERMINAL</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>SENTINEL // DESK TRADING</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Roboto+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
     <script>
         tailwind.config = {
             darkMode: 'class',
             theme: {
                 extend: {
                     fontFamily: {
-                        sans: ['"Plus Jakarta Sans"', '-apple-system', 'BlinkMacSystemFont', 'sans-serif'],
-                        mono: ['"JetBrains Mono"', 'monospace'],
+                        sans: ['"Inter"', '-apple-system', 'BlinkMacSystemFont', '"Segoe UI"', 'Roboto', 'sans-serif'],
+                        mono: ['"Roboto Mono"', 'ui-monospace', 'monospace'],
                     },
                     colors: {
-                        terminal: {
-                            base: '#0B0E14',
-                            surface: '#111622',
-                            elevated: '#171F30',
+                        desk: {
+                            bg: '#080B11',
+                            card: '#0F141F',
+                            elevated: '#161D2C',
                             border: '#1F293D',
-                            borderSubtle: '#182133',
-                            muted: '#64748B',
-                            text: '#E2E8F0',
-                            textBright: '#F8FAFC',
-                            buy: '#10B981',
-                            buyMuted: '#064E3B',
-                            sell: '#F43F5E',
-                            sellMuted: '#881337',
-                            accent: '#F59E0B',
-                            cyan: '#06B6D4'
+                            borderSubtle: '#172030',
+                            textMuted: '#94A3B8',
+                            textDim: '#64748B',
+                            textMain: '#F1F5F9',
+                            textBright: '#FFFFFF',
+                            bybitTag: '#F59E0B',
+                            alpacaTag: '#3B82F6',
+                            long: '#10B981',
+                            short: '#EF4444'
                         }
                     }
                 }
@@ -65,210 +59,201 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         }
     </script>
     <style>
+        * {
+            -webkit-tap-highlight-color: transparent;
+            box-sizing: border-box;
+        }
         body {
-            background-color: #0B0E14;
-            color: #E2E8F0;
+            background-color: #080B11;
+            color: #F1F5F9;
+            font-family: 'Inter', sans-serif;
+            font-feature-settings: "cv02", "cv03", "cv04", "cv11", "tnum";
+            padding-bottom: env(safe-area-inset-bottom, 24px);
+        }
+        .mono-val {
+            font-family: 'Roboto Mono', monospace;
             font-feature-settings: "tnum" 1, "zero" 1;
         }
-        .phi-card {
-            background-color: #111622;
+        .desk-card {
+            background-color: #0F141F;
             border: 1px solid #1F293D;
         }
-        .phi-card-interactive {
-            transition: border-color 0.15s cubic-bezier(0.16, 1, 0.3, 1), background-color 0.15s ease;
+        .touch-pill {
+            min-height: 44px;
+            touch-action: manipulation;
         }
-        .phi-card-interactive:hover {
-            border-color: #2D3B55;
-            background-color: #141B29;
-        }
-        .btn-tab {
-            padding: 8px 16px;
-            font-size: 13px;
+        .desk-tab {
+            min-height: 44px;
+            font-size: 14px;
             font-weight: 600;
-            border-radius: 6px;
-            transition: all 0.12s ease;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 8px;
+            padding: 8px 16px;
             cursor: pointer;
+            transition: all 0.15s ease;
+            touch-action: manipulation;
         }
-        .btn-tab.active {
-            background-color: #1F293D;
-            color: #F8FAFC;
-            box-shadow: inset 0 1px 0 rgba(255,255,255,0.08);
+        .desk-tab.active {
+            background-color: #161D2C;
+            color: #FFFFFF;
+            border: 1px solid #2D3B55;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.4);
         }
-        .btn-tab:not(.active) {
-            color: #64748B;
+        .desk-tab:not(.active) {
+            color: #94A3B8;
+            border: 1px solid transparent;
         }
-        .btn-tab:not(.active):hover {
-            color: #CBD5E1;
-            background-color: #141B29;
+        .desk-tab:not(.active):hover {
+            color: #E2E8F0;
+            background-color: #121824;
         }
-        .live-ping {
-            animation: terminalPing 2.4s cubic-bezier(0, 0, 0.2, 1) infinite;
-        }
-        @keyframes terminalPing {
-            75%, 100% {
-                transform: scale(2);
-                opacity: 0;
-            }
-        }
-        /* Custom subtle scrollbar */
-        ::-webkit-scrollbar { width: 6px; height: 6px; }
-        ::-webkit-scrollbar-track { background: #0B0E14; }
-        ::-webkit-scrollbar-thumb { background: #1F293D; border-radius: 3px; }
-        ::-webkit-scrollbar-thumb:hover { background: #2E3E5B; }
+        /* Mobile horizontal scroll containment */
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
     </style>
 </head>
-<body class="min-h-screen flex flex-col antialiased selection:bg-terminal-border selection:text-white">
+<body class="min-h-screen flex flex-col antialiased">
 
-    <!-- TOP BAR: Strict Status, Latency & Clocks -->
-    <header class="border-b border-terminal-border bg-terminal-surface/90 sticky top-0 z-50">
-        <div class="max-w-[1540px] mx-auto px-4 lg:px-6 h-14 flex items-center justify-between">
-            <div class="flex items-center gap-4">
-                <div class="flex items-center gap-2.5">
-                    <div class="w-3 h-3 rounded-sm bg-terminal-buy flex items-center justify-center">
-                        <div class="w-1.5 h-1.5 rounded-full bg-terminal-base"></div>
-                    </div>
-                    <span class="font-mono font-bold tracking-wider text-sm text-terminal-textBright">MARKET SENTINEL</span>
-                    <span class="text-xs px-1.5 py-0.5 rounded font-mono font-medium text-slate-400 bg-terminal-elevated border border-terminal-border">v2.4-PRO</span>
+    <!-- TOP HEADER -->
+    <header class="border-b border-desk-border bg-desk-card/95 sticky top-0 z-50 backdrop-blur-md">
+        <div class="max-w-[1440px] mx-auto px-3.5 sm:px-6 h-14 sm:h-16 flex items-center justify-between">
+            <div class="flex items-center gap-3">
+                <div class="w-8 h-8 rounded-lg bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400">
+                    <i data-lucide="shield-check" class="w-4 h-4"></i>
                 </div>
-                <div class="hidden md:flex items-center gap-2 pl-4 border-l border-terminal-border">
-                    <span class="relative flex h-2 w-2">
-                        <span class="live-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                        <span class="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
-                    </span>
-                    <span class="text-[11px] font-mono tracking-wide uppercase text-emerald-400 font-semibold" id="sys-status">SYS OPERATIONAL</span>
-                    <span class="text-slate-600">&bull;</span>
-                    <span class="text-[11px] font-mono text-slate-400" id="sys-latency">BYBIT DEMO UTA</span>
+                <div>
+                    <div class="flex items-center gap-2">
+                        <span class="font-bold text-sm sm:text-base text-white tracking-tight">MARKET SENTINEL</span>
+                        <span class="hidden xs:inline-block text-[11px] font-mono px-1.5 py-0.2 rounded bg-desk-elevated border border-desk-border text-slate-300">PRO DESK</span>
+                    </div>
+                    <div class="flex items-center gap-2 text-[11px] text-slate-400 font-mono">
+                        <span class="inline-block w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                        <span id="header-status">LIVE SYNC 3S</span>
+                        <span class="text-slate-600">&bull;</span>
+                        <span class="hidden sm:inline">RAILWAY EU-WEST</span>
+                    </div>
                 </div>
             </div>
 
-            <div class="flex items-center gap-4 text-xs font-mono">
-                <div class="hidden sm:flex items-center gap-3 bg-terminal-elevated px-3 py-1.5 rounded border border-terminal-border">
-                    <span class="text-slate-500 uppercase">ROMA</span>
-                    <span class="font-semibold text-terminal-text" id="clock-rome">--:--:--</span>
+            <!-- Clocks & Refresh -->
+            <div class="flex items-center gap-2 sm:gap-4">
+                <div class="hidden sm:flex items-center gap-3 bg-desk-elevated px-3 py-1.5 rounded-lg border border-desk-border text-xs font-mono">
+                    <span class="text-slate-400">ROMA <strong class="text-white ml-1" id="clock-rome">--:--:--</strong></span>
                     <span class="text-slate-600">|</span>
-                    <span class="text-slate-500 uppercase">NYC</span>
-                    <span class="font-semibold text-slate-300" id="clock-nyc">--:--:--</span>
+                    <span class="text-slate-400">NYC <strong class="text-white ml-1" id="clock-nyc">--:--:--</strong></span>
                 </div>
-                <button onclick="fetchData()" class="flex items-center gap-1.5 px-2.5 py-1.5 rounded bg-terminal-elevated hover:bg-terminal-border text-slate-300 transition active:scale-95 border border-terminal-border" title="Forza Refresh">
-                    <i data-lucide="refresh-cw" class="w-3.5 h-3.5" id="refresh-spinner"></i>
-                    <span class="text-[11px] font-semibold uppercase tracking-wider hidden sm:inline">Sync</span>
+                <button onclick="fetchData()" class="touch-pill px-3 rounded-lg bg-desk-elevated hover:bg-slate-800 border border-desk-border text-slate-200 flex items-center justify-center gap-2 transition active:scale-95 text-xs font-semibold" title="Ricarica Dati">
+                    <i data-lucide="refresh-cw" class="w-4 h-4" id="refresh-spinner"></i>
+                    <span class="hidden md:inline">AGGIORNA</span>
                 </button>
             </div>
         </div>
     </header>
 
-    <!-- MAIN TERMINAL BODY -->
-    <main class="max-w-[1540px] mx-auto w-full px-4 lg:px-6 py-6 flex-1 space-y-6">
+    <!-- MAIN WRAPPER -->
+    <main class="max-w-[1440px] mx-auto w-full px-3.5 sm:px-6 py-4 sm:py-6 flex-1 space-y-5">
 
-        <!-- PRIMARY METRICS ROW (Golden Ratio Proportions & Tremor Style) -->
-        <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3.5">
-            <!-- Combined Equity -->
-            <div class="phi-card rounded-lg p-4 col-span-2 sm:col-span-1 lg:col-span-2">
-                <div class="flex items-center justify-between text-xs text-slate-400 font-medium">
-                    <span class="uppercase tracking-wider">NAV TOTALE PORTAFOGLIO</span>
-                    <span class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-terminal-elevated text-slate-400 border border-terminal-borderSubtle">USD</span>
+        <!-- GLOBAL SUMMARY STRIP -->
+        <div class="desk-card rounded-xl p-4 sm:p-5">
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4 divide-y sm:divide-y-0 sm:divide-x divide-desk-borderSubtle">
+                <!-- NAV Totale -->
+                <div class="pr-2 pt-1 sm:pt-0">
+                    <span class="text-[11px] font-semibold uppercase tracking-wider text-desk-textMuted block">Patrimonio Totale (USD)</span>
+                    <div id="summary-total-equity" class="text-xl sm:text-2xl font-bold mono-val text-white mt-1">$0.00</div>
+                    <span class="text-[11px] text-slate-400 font-mono">Bybit UTA + Alpaca Eq</span>
                 </div>
-                <div class="mt-2.5 flex items-baseline gap-2">
-                    <span id="kpi-total-equity" class="text-2xl lg:text-3xl font-bold font-mono tracking-tight text-white">$0.00</span>
+                <!-- Bybit Nav -->
+                <div class="pl-0 sm:pl-4 pt-1 sm:pt-0">
+                    <div class="flex items-center gap-1.5">
+                        <span class="w-2 h-2 rounded-full bg-amber-400"></span>
+                        <span class="text-[11px] font-semibold uppercase tracking-wider text-amber-400">Bybit Crypto Futures</span>
+                    </div>
+                    <div id="summary-bybit-nav" class="text-lg sm:text-xl font-bold mono-val text-white mt-1">$0.00</div>
+                    <span class="text-[11px] text-slate-400 font-mono" id="summary-bybit-cash">Disponibile: $0 USDT</span>
                 </div>
-                <div class="mt-2 pt-2 border-t border-terminal-borderSubtle flex items-center justify-between text-[11px] font-mono text-slate-400">
-                    <span>Bybit UTA: <strong id="kpi-bybit-sub" class="text-slate-300 font-semibold">$0</strong></span>
-                    <span>Alpaca Eq: <strong id="kpi-alpaca-sub" class="text-slate-300 font-semibold">$0</strong></span>
+                <!-- Alpaca Nav -->
+                <div class="pl-0 sm:pl-4 pt-3 sm:pt-0">
+                    <div class="flex items-center gap-1.5">
+                        <span class="w-2 h-2 rounded-full bg-blue-400"></span>
+                        <span class="text-[11px] font-semibold uppercase tracking-wider text-blue-400">Alpaca Wall Street</span>
+                    </div>
+                    <div id="summary-alpaca-nav" class="text-lg sm:text-xl font-bold mono-val text-white mt-1">$0.00</div>
+                    <span class="text-[11px] text-slate-400 font-mono" id="summary-alpaca-bp">Buying Power: $0</span>
                 </div>
-            </div>
-
-            <!-- Available Cash USDT -->
-            <div class="phi-card rounded-lg p-4">
-                <div class="text-xs text-slate-400 font-medium uppercase tracking-wider">Liquidità Bybit</div>
-                <div class="mt-2.5">
-                    <span id="kpi-usdt-cash" class="text-xl lg:text-2xl font-bold font-mono tracking-tight text-white">$0.00</span>
-                </div>
-                <div class="mt-2 pt-2 border-t border-terminal-borderSubtle text-[11px] font-mono text-slate-400">
-                    Margine: <span id="kpi-margin-balance" class="text-slate-300">$0</span>
-                </div>
-            </div>
-
-            <!-- Open Positions Count -->
-            <div class="phi-card rounded-lg p-4">
-                <div class="text-xs text-slate-400 font-medium uppercase tracking-wider">Esposizione Contratti</div>
-                <div class="mt-2.5 flex items-baseline gap-2">
-                    <span id="kpi-positions-count" class="text-xl lg:text-2xl font-bold font-mono text-white">0</span>
-                    <span class="text-xs text-slate-500 font-mono">attivi</span>
-                </div>
-                <div class="mt-2 pt-2 border-t border-terminal-borderSubtle text-[11px] font-mono text-slate-400">
-                    Notional: <span id="kpi-notional-active" class="text-slate-300 font-semibold">$0</span>
-                </div>
-            </div>
-
-            <!-- Net Unrealized PnL -->
-            <div class="phi-card rounded-lg p-4 col-span-2 sm:col-span-1 lg:col-span-2" id="pnl-kpi-container">
-                <div class="flex items-center justify-between text-xs font-medium">
-                    <span class="text-slate-400 uppercase tracking-wider">PNL NON REALIZZATO (LIVE)</span>
-                    <span id="pnl-status-tag" class="text-[10px] font-mono px-1.5 py-0.5 rounded font-bold uppercase bg-slate-800 text-slate-300">CALCOLO</span>
-                </div>
-                <div class="mt-2.5 flex items-baseline gap-3">
-                    <span id="kpi-unrealized-pnl" class="text-2xl lg:text-3xl font-bold font-mono text-white">$0.00</span>
-                    <span id="kpi-unrealized-pct" class="text-sm font-bold font-mono text-slate-400">0.00%</span>
-                </div>
-                <div class="mt-2 pt-2 border-t border-terminal-borderSubtle flex items-center justify-between text-[11px] font-mono text-slate-400">
-                    <span>Scalp Mode: <strong class="text-amber-400">+1.50%</strong></span>
-                    <span>Safety Stop: <strong class="text-rose-400">-0.60%</strong></span>
+                <!-- Live PnL -->
+                <div class="pl-0 sm:pl-4 pt-3 sm:pt-0">
+                    <span class="text-[11px] font-semibold uppercase tracking-wider text-desk-textMuted block">PnL Non Realizzato Crypto</span>
+                    <div id="summary-crypto-pnl" class="text-lg sm:text-xl font-bold mono-val text-emerald-400 mt-1">$0.00</div>
+                    <span class="text-[11px] font-mono text-slate-400" id="summary-active-positions">0 posizioni a mercato</span>
                 </div>
             </div>
         </div>
 
-        <!-- NAVIGATION TABS -->
-        <div class="flex items-center justify-between border-b border-terminal-border pb-3">
-            <div class="flex items-center gap-1.5 bg-terminal-surface p-1 rounded-md border border-terminal-border">
-                <button class="btn-tab active flex items-center gap-2" id="tab-btn-positions" onclick="switchTab('positions')">
-                    <i data-lucide="layers" class="w-3.5 h-3.5"></i>
-                    <span>Posizioni Live Bybit</span>
-                    <span id="tab-count-positions" class="ml-1 text-[10px] font-mono px-1.5 py-0.2 rounded bg-terminal-elevated text-slate-300 border border-terminal-border">0</span>
-                </button>
-                <button class="btn-tab flex items-center gap-2" id="tab-btn-history" onclick="switchTab('history')">
-                    <i data-lucide="history" class="w-3.5 h-3.5"></i>
-                    <span>Storico Esecuzioni</span>
-                    <span id="tab-count-closed" class="ml-1 text-[10px] font-mono px-1.5 py-0.2 rounded bg-terminal-elevated text-slate-300 border border-terminal-border">0</span>
-                </button>
-                <button class="btn-tab flex items-center gap-2" id="tab-btn-alpaca" onclick="switchTab('alpaca')">
-                    <i data-lucide="landmark" class="w-3.5 h-3.5"></i>
-                    <span>Equities Wall St (Alpaca)</span>
-                </button>
-                <button class="btn-tab flex items-center gap-2" id="tab-btn-rules" onclick="switchTab('rules')">
-                    <i data-lucide="shield" class="w-3.5 h-3.5"></i>
-                    <span>Regole Motore & Risk Guard</span>
-                </button>
-            </div>
-            <div class="hidden lg:flex items-center gap-2 text-xs font-mono text-slate-400">
-                <span class="w-2 h-2 rounded-full bg-emerald-500"></span>
-                <span>Auto-Refresh: <strong class="text-slate-200">3s</strong></span>
-            </div>
+        <!-- MAIN INSTANCE SELECTOR (TABS CON TARGET TOUCH ERGONOMICI 44PX) -->
+        <div class="bg-desk-card p-1.5 rounded-xl border border-desk-border flex items-center gap-1.5 overflow-x-auto no-scrollbar">
+            <button id="tab-btn-bybit" class="desk-tab active flex-1 sm:flex-initial" onclick="selectInstance('bybit')">
+                <span class="w-2.5 h-2.5 rounded-full bg-amber-400 mr-2"></span>
+                <span>Bybit Futures (Crypto 24/7)</span>
+                <span id="badge-bybit-count" class="ml-2 px-2 py-0.5 rounded text-xs font-mono bg-desk-elevated text-amber-300 border border-amber-500/30">0</span>
+            </button>
+            <button id="tab-btn-alpaca" class="desk-tab flex-1 sm:flex-initial" onclick="selectInstance('alpaca')">
+                <span class="w-2.5 h-2.5 rounded-full bg-blue-400 mr-2"></span>
+                <span>Alpaca (Wall Street Equities)</span>
+                <span id="badge-alpaca-count" class="ml-2 px-2 py-0.5 rounded text-xs font-mono bg-desk-elevated text-blue-300 border border-blue-500/30">0</span>
+            </button>
+            <button id="tab-btn-history" class="desk-tab flex-1 sm:flex-initial" onclick="selectInstance('history')">
+                <i data-lucide="history" class="w-4 h-4 mr-1.5 text-slate-400"></i>
+                <span>Storico Chiusi</span>
+            </button>
+            <button id="tab-btn-rules" class="desk-tab flex-1 sm:flex-initial hidden sm:inline-flex" onclick="selectInstance('rules')">
+                <i data-lucide="shield" class="w-4 h-4 mr-1.5 text-slate-400"></i>
+                <span>Regole Rischio</span>
+            </button>
         </div>
 
-        <!-- TAB 1: LIVE POSITIONS TABLE -->
-        <section id="tab-content-positions" class="space-y-3">
-            <div class="phi-card rounded-lg overflow-hidden border border-terminal-border">
+        <!-- ========================================== -->
+        <!-- ISTANZA 1: BYBIT CRYPTO FUTURES 24/7      -->
+        <!-- ========================================== -->
+        <section id="instance-bybit" class="space-y-4">
+            
+            <!-- Sotto-barra info Bybit -->
+            <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 bg-desk-elevated/60 px-4 py-3 rounded-lg border border-desk-borderSubtle text-xs">
+                <div class="flex items-center gap-2">
+                    <span class="font-bold text-amber-400">BYBIT UNIFIED TRADING (DEMO UTA)</span>
+                    <span class="text-slate-500">&bull;</span>
+                    <span class="text-slate-300 font-mono">10 Asset Monitorati (BTC, ETH, SOL, LINK, AVAX, XRP, DOGE, SUI, NEAR, BNB)</span>
+                </div>
+                <div class="flex items-center gap-3 text-slate-400 font-mono text-[11px]">
+                    <span>Taglia: <strong class="text-white">$15,000 / trade</strong></span>
+                    <span>TP: <strong class="text-emerald-400">+1.50%</strong></span>
+                    <span>SL: <strong class="text-rose-400">-0.60%</strong></span>
+                </div>
+            </div>
+
+            <!-- TABELLA DESKTOP / TABLET (Nascosta su mobile stretto) -->
+            <div class="hidden md:block desk-card rounded-xl overflow-hidden border border-desk-border">
                 <div class="overflow-x-auto">
                     <table class="w-full text-left text-xs">
                         <thead>
-                            <tr class="border-b border-terminal-border bg-terminal-elevated text-slate-400 font-mono uppercase text-[11px] tracking-wider">
-                                <th class="py-3 px-4 font-semibold">Asset / Contratto</th>
-                                <th class="py-3 px-4 font-semibold">Direzione</th>
-                                <th class="py-3 px-4 font-semibold">Quantità (Size)</th>
-                                <th class="py-3 px-4 font-semibold">Prezzo Entrata</th>
-                                <th class="py-3 px-4 font-semibold">Mark Price</th>
-                                <th class="py-3 px-4 font-semibold">Notional Value</th>
-                                <th class="py-3 px-4 font-semibold">PnL Non Realizzato</th>
-                                <th class="py-3 px-4 font-semibold">Stato Protezione Rischio</th>
+                            <tr class="border-b border-desk-border bg-desk-elevated text-slate-300 font-semibold uppercase text-[11px] tracking-wider">
+                                <th class="py-3 px-4">Contratto</th>
+                                <th class="py-3 px-4">Lato</th>
+                                <th class="py-3 px-4">Quantità (Size)</th>
+                                <th class="py-3 px-4">Prezzo Entrata</th>
+                                <th class="py-3 px-4">Mark Price</th>
+                                <th class="py-3 px-4">Controvalore</th>
+                                <th class="py-3 px-4">PnL Non Realizzato</th>
+                                <th class="py-3 px-4">Protezione Dinamica</th>
                             </tr>
                         </thead>
-                        <tbody id="positions-table-body" class="divide-y divide-terminal-borderSubtle font-mono">
-                            <!-- Loading Skeleton -->
+                        <tbody id="bybit-table-body" class="divide-y divide-desk-borderSubtle mono-val">
                             <tr>
-                                <td colspan="8" class="text-center py-12 text-slate-500">
-                                    <div class="flex flex-col items-center justify-center gap-2">
-                                        <i data-lucide="loader-2" class="w-5 h-5 animate-spin text-slate-400"></i>
-                                        <span>Caricamento feed ordini in corso...</span>
+                                <td colspan="8" class="text-center py-10 text-slate-400">
+                                    <div class="flex items-center justify-center gap-2">
+                                        <i data-lucide="loader-2" class="w-4 h-4 animate-spin text-slate-400"></i>
+                                        <span>Sincronizzazione posizioni Bybit...</span>
                                     </div>
                                 </td>
                             </tr>
@@ -276,66 +261,64 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                     </table>
                 </div>
             </div>
-        </section>
 
-        <!-- TAB 2: CLOSED TRADES HISTORY -->
-        <section id="tab-content-history" class="space-y-3 hidden">
-            <div class="phi-card rounded-lg overflow-hidden border border-terminal-border">
-                <div class="overflow-x-auto">
-                    <table class="w-full text-left text-xs">
-                        <thead>
-                            <tr class="border-b border-terminal-border bg-terminal-elevated text-slate-400 font-mono uppercase text-[11px] tracking-wider">
-                                <th class="py-3 px-4 font-semibold">Data / Timestamp</th>
-                                <th class="py-3 px-4 font-semibold">Simbolo</th>
-                                <th class="py-3 px-4 font-semibold">Direzione</th>
-                                <th class="py-3 px-4 font-semibold">Dimensione</th>
-                                <th class="py-3 px-4 font-semibold">Prezzo Ingresso &rarr; Uscita</th>
-                                <th class="py-3 px-4 font-semibold">Commissioni (Fee)</th>
-                                <th class="py-3 px-4 font-semibold">PnL Netto Realizzato</th>
-                            </tr>
-                        </thead>
-                        <tbody id="closed-trades-body" class="divide-y divide-terminal-borderSubtle font-mono">
-                            <tr>
-                                <td colspan="7" class="text-center py-8 text-slate-500">Nessuna chiusura recente trovata.</td>
-                            </tr>
-                        </tbody>
-                    </table>
+            <!-- CARDS MOBILE OTTIMIZZATE PER IPHONE (Visibili solo su mobile) -->
+            <div id="bybit-mobile-cards" class="md:hidden space-y-3">
+                <div class="text-center py-8 text-slate-400 desk-card rounded-xl p-4 text-xs font-mono">
+                    Caricamento posizioni Bybit...
                 </div>
             </div>
         </section>
 
-        <!-- TAB 3: ALPACA EQUITIES -->
-        <section id="tab-content-alpaca" class="space-y-4 hidden">
-            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div class="phi-card rounded-lg p-5">
-                    <span class="text-xs text-slate-400 font-medium uppercase tracking-wider">Valore Portafoglio Azionario</span>
-                    <h4 id="alpaca-portfolio-val" class="text-2xl font-bold font-mono text-white mt-2">$0.00</h4>
-                    <p class="text-xs text-slate-400 mt-1 font-mono">Paper Trading Wall Street (NYSE/NASDAQ)</p>
+        <!-- ========================================== -->
+        <!-- ISTANZA 2: ALPACA EQUITIES WALL STREET    -->
+        <!-- ========================================== -->
+        <section id="instance-alpaca" class="space-y-4 hidden">
+            <!-- Sotto-barra info Alpaca -->
+            <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 bg-desk-elevated/60 px-4 py-3 rounded-lg border border-desk-borderSubtle text-xs">
+                <div class="flex items-center gap-2">
+                    <span class="font-bold text-blue-400">ALPACA EQUITIES (NYSE / NASDAQ)</span>
+                    <span class="text-slate-500">&bull;</span>
+                    <span class="text-slate-300 font-mono" id="alpaca-account-badge">Conto Paper: PA3WDUE2F</span>
                 </div>
-                <div class="phi-card rounded-lg p-5">
-                    <span class="text-xs text-slate-400 font-medium uppercase tracking-wider">Buying Power Disponibile</span>
-                    <h4 id="alpaca-buying-power" class="text-2xl font-bold font-mono text-white mt-2">$0.00</h4>
-                    <p class="text-xs text-slate-400 mt-1 font-mono">Liquidità operativa per ordini azionari</p>
+                <div class="flex items-center gap-3 text-slate-400 font-mono text-[11px]">
+                    <span>Orari: <strong class="text-white">15:30 - 22:00 CET</strong></span>
+                    <span>Weekend: <strong class="text-amber-400">Mercati Chiusi</strong></span>
                 </div>
-                <div class="phi-card rounded-lg p-5">
-                    <span class="text-xs text-slate-400 font-medium uppercase tracking-wider">Stato Conto Alpaca</span>
-                    <div class="flex items-center gap-2 mt-2">
-                        <span class="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
-                        <h4 id="alpaca-status-val" class="text-xl font-bold font-mono text-emerald-400">ATTIVO</h4>
+            </div>
+
+            <!-- KPI Box Alpaca -->
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div class="desk-card rounded-xl p-4">
+                    <span class="text-[11px] font-semibold uppercase tracking-wider text-desk-textMuted">Valore Azioni in Portafoglio</span>
+                    <div id="alpaca-equity-display" class="text-xl sm:text-2xl font-bold mono-val text-white mt-1">$0.00</div>
+                    <span class="text-[11px] text-slate-400 font-mono">Alpaca Portfolio Value</span>
+                </div>
+                <div class="desk-card rounded-xl p-4">
+                    <span class="text-[11px] font-semibold uppercase tracking-wider text-desk-textMuted">Buying Power Azionario</span>
+                    <div id="alpaca-bp-display" class="text-xl sm:text-2xl font-bold mono-val text-white mt-1">$0.00</div>
+                    <span class="text-[11px] text-slate-400 font-mono">Capacità d'acquisto</span>
+                </div>
+                <div class="desk-card rounded-xl p-4">
+                    <span class="text-[11px] font-semibold uppercase tracking-wider text-desk-textMuted">Stato Connessione API</span>
+                    <div class="text-xl font-bold text-emerald-400 mt-1 flex items-center gap-2">
+                        <span class="w-2.5 h-2.5 rounded-full bg-emerald-400"></span>
+                        <span>ATTIVO &amp; CONNESSO</span>
                     </div>
-                    <p class="text-xs text-slate-400 mt-1 font-mono" id="alpaca-account-num">Account: PA3WDUE2F</p>
+                    <span class="text-[11px] text-slate-400 font-mono">Auto-Flatten attivo ore 21:55 CET</span>
                 </div>
             </div>
 
-            <div class="phi-card rounded-lg overflow-hidden border border-terminal-border">
-                <div class="p-4 border-b border-terminal-border flex items-center justify-between bg-terminal-elevated">
-                    <span class="font-mono text-xs uppercase tracking-wider font-semibold text-slate-300">Posizioni Azionarie Wall Street Aperte</span>
-                    <span class="text-xs font-mono text-slate-400" id="alpaca-pos-count">0 Titoli</span>
+            <!-- Tabella Titoli Alpaca -->
+            <div class="desk-card rounded-xl overflow-hidden border border-desk-border">
+                <div class="p-3.5 bg-desk-elevated border-b border-desk-border flex items-center justify-between">
+                    <span class="font-bold text-xs uppercase tracking-wider text-white">Posizioni Azionarie Wall Street</span>
+                    <span class="text-xs font-mono text-slate-400" id="alpaca-total-titles">0 Titoli</span>
                 </div>
                 <div class="overflow-x-auto">
                     <table class="w-full text-left text-xs font-mono">
                         <thead>
-                            <tr class="border-b border-terminal-border text-slate-400 text-[11px] uppercase">
+                            <tr class="border-b border-desk-border text-slate-400 text-[11px] uppercase">
                                 <th class="py-2.5 px-4">Ticker</th>
                                 <th class="py-2.5 px-4">Quantità</th>
                                 <th class="py-2.5 px-4">Prezzo Medio</th>
@@ -344,9 +327,11 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                                 <th class="py-2.5 px-4">PnL Non Realizzato</th>
                             </tr>
                         </thead>
-                        <tbody id="alpaca-positions-body" class="divide-y divide-terminal-borderSubtle">
+                        <tbody id="alpaca-table-body" class="divide-y divide-desk-borderSubtle">
                             <tr>
-                                <td colspan="6" class="text-center py-6 text-slate-500">Nessuna posizione azionaria attualmente aperta (mercato azionario NYSE chiuso nel weekend).</td>
+                                <td colspan="6" class="text-center py-8 text-slate-400">
+                                    Nessuna posizione azionaria attualmente aperta su Alpaca (Wall Street chiusa nel weekend).
+                                </td>
                             </tr>
                         </tbody>
                     </table>
@@ -354,36 +339,68 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             </div>
         </section>
 
-        <!-- TAB 4: RISK RULES & SPECS -->
-        <section id="tab-content-rules" class="space-y-4 hidden">
-            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                <div class="phi-card rounded-lg p-5 border-l-2 border-l-amber-500">
-                    <div class="flex items-center gap-2 text-amber-400 text-xs font-mono font-bold uppercase">
+        <!-- ========================================== -->
+        <!-- ISTANZA 3: STORICO CHIUSURE BYBIT         -->
+        <!-- ========================================== -->
+        <section id="instance-history" class="space-y-4 hidden">
+            <div class="desk-card rounded-xl overflow-hidden border border-desk-border">
+                <div class="p-3.5 bg-desk-elevated border-b border-desk-border flex items-center justify-between">
+                    <span class="font-bold text-xs uppercase tracking-wider text-white">Ultime Esecuzioni Chiuse (Bybit Futures)</span>
+                    <span class="text-xs font-mono text-slate-400" id="history-total-count">Ultime 15</span>
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left text-xs font-mono">
+                        <thead>
+                            <tr class="border-b border-desk-border text-slate-300 text-[11px] uppercase bg-desk-card">
+                                <th class="py-2.5 px-4">Ora (CET)</th>
+                                <th class="py-2.5 px-4">Simbolo</th>
+                                <th class="py-2.5 px-4">Lato</th>
+                                <th class="py-2.5 px-4">Size</th>
+                                <th class="py-2.5 px-4">Prezzi (In &rarr; Out)</th>
+                                <th class="py-2.5 px-4">Fee Broker</th>
+                                <th class="py-2.5 px-4">PnL Netto</th>
+                            </tr>
+                        </thead>
+                        <tbody id="history-table-body" class="divide-y divide-desk-borderSubtle">
+                            <tr>
+                                <td colspan="7" class="text-center py-8 text-slate-400">Caricamento storico...</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <!-- ========================================== -->
+        <!-- ISTANZA 4: REGOLE RISCHIO & MOTORE         -->
+        <!-- ========================================== -->
+        <section id="instance-rules" class="space-y-4 hidden">
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div class="desk-card rounded-xl p-5 border-l-4 border-l-amber-500">
+                    <div class="flex items-center gap-2 text-amber-400 font-bold text-xs uppercase">
                         <i data-lucide="zap" class="w-4 h-4"></i>
-                        <span>Aggressive Micro-Scalping</span>
+                        <span>Taglia $15k per Trade</span>
                     </div>
                     <p class="text-xs text-slate-300 mt-2 leading-relaxed">
-                        Taglia per posizione fissa a <strong>$15,000 USDT</strong> per asset. Scansione continuativa ogni 2 minuti sui 10 principali contratti liquidi (BTC, ETH, SOL, LINK, AVAX, XRP, DOGE, SUI, NEAR, BNB).
+                        Ogni trade su Bybit UTA entra con un controvalore fisso calibrato di <strong>$15,000 USDT</strong> per massimizzare la monetizzazione sui micro-movimenti 24/7.
                     </p>
                 </div>
-
-                <div class="phi-card rounded-lg p-5 border-l-2 border-l-emerald-500">
-                    <div class="flex items-center gap-2 text-emerald-400 text-xs font-mono font-bold uppercase">
+                <div class="desk-card rounded-xl p-5 border-l-4 border-l-emerald-500">
+                    <div class="flex items-center gap-2 text-emerald-400 font-bold text-xs uppercase">
                         <i data-lucide="shield-check" class="w-4 h-4"></i>
-                        <span>Break-Even Automatico a +0.30%</span>
+                        <span>Break-Even a +0.30%</span>
                     </div>
                     <p class="text-xs text-slate-300 mt-2 leading-relaxed">
-                        Appena il trade raggiunge <strong>+0.30%</strong> di profitto latente, lo Stop Loss viene riposizionato istantaneamente a pareggio (Entry Price + fee buffer). Rischio residuo azzerato.
+                        Appena il profitto latente tocca il <strong>+0.30%</strong>, lo Stop Loss si porta automaticamente a pareggio con cuscinetto commissioni. Rischio zero.
                     </p>
                 </div>
-
-                <div class="phi-card rounded-lg p-5 border-l-2 border-l-blue-500">
-                    <div class="flex items-center gap-2 text-blue-400 text-xs font-mono font-bold uppercase">
+                <div class="desk-card rounded-xl p-5 border-l-4 border-l-blue-500">
+                    <div class="flex items-center gap-2 text-blue-400 font-bold text-xs uppercase">
                         <i data-lucide="lock" class="w-4 h-4"></i>
-                        <span>Trailing Profit Lock a +0.70%</span>
+                        <span>Profit Lock a +0.70%</span>
                     </div>
                     <p class="text-xs text-slate-300 mt-2 leading-relaxed">
-                        Al raggiungimento del <strong>+0.70%</strong>, lo Stop Loss viene alzato a <strong>+0.40%</strong> netto protetto. Il target finale chiude in automatico a <strong>+1.50%</strong>.
+                        Se il trade estende il rialzo a <strong>+0.70%</strong>, scatta il trailing lock blindando un profitto minimo netto del <strong>+0.40%</strong> fino al target finale di <strong>+1.50%</strong>.
                     </p>
                 </div>
             </div>
@@ -391,35 +408,38 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 
     </main>
 
-    <!-- FOOTER: Institutional Metadata -->
-    <footer class="border-t border-terminal-border bg-terminal-surface mt-10 py-4 text-xs font-mono text-slate-500">
-        <div class="max-w-[1540px] mx-auto px-4 lg:px-6 flex flex-col sm:flex-row items-center justify-between gap-3">
-            <div class="flex items-center gap-2">
-                <span>Infrastruttura: <strong class="text-slate-400">Railway Cloud EU-West</strong></span>
-                <span>&bull;</span>
-                <span>Execution: <strong class="text-slate-400">Bybit Unified Trading (Demo)</strong></span>
+    <!-- FOOTER -->
+    <footer class="border-t border-desk-border bg-desk-card py-4 mt-8 text-xs font-mono text-slate-400">
+        <div class="max-w-[1440px] mx-auto px-4 sm:px-6 flex flex-col sm:flex-row items-center justify-between gap-2">
+            <div>
+                <span>Istanza Crypto: <strong class="text-white">Bybit UTA Demo</strong></span>
+                <span class="mx-2">&bull;</span>
+                <span>Istanza Azionario: <strong class="text-white">Alpaca Wall Street</strong></span>
             </div>
-            <div class="text-[11px] text-slate-500">
-                Ultimo pacchetto dati ricevuto: <span id="last-update-time" class="text-slate-300">--:--:--</span>
+            <div>
+                Sincronizzazione: <span id="footer-sync-time" class="text-slate-200">--:--:--</span>
             </div>
         </div>
     </footer>
 
-    <!-- LOGICA JS AUTO-POLLING E RENDERING DETERMINISTICO -->
+    <!-- SCRIPT LOGICO & ENGINE UI -->
     <script>
-        let currentTab = 'positions';
+        let activeTab = 'bybit';
 
-        function switchTab(tabId) {
-            currentTab = tabId;
-            ['positions', 'history', 'alpaca', 'rules'].forEach(t => {
+        function selectInstance(tabId) {
+            activeTab = tabId;
+            const tabs = ['bybit', 'alpaca', 'history', 'rules'];
+            tabs.forEach(t => {
                 const btn = document.getElementById(`tab-btn-${t}`);
-                const sec = document.getElementById(`tab-content-${t}`);
-                if (t === tabId) {
-                    btn.classList.add('active');
-                    sec.classList.remove('hidden');
-                } else {
-                    btn.classList.remove('active');
-                    sec.classList.add('hidden');
+                const sec = document.getElementById(`instance-${t}`);
+                if (btn && sec) {
+                    if (t === tabId) {
+                        btn.classList.add('active');
+                        sec.classList.remove('hidden');
+                    } else {
+                        btn.classList.remove('active');
+                        sec.classList.add('hidden');
+                    }
                 }
             });
             lucide.createIcons();
@@ -427,10 +447,12 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 
         function updateClocks() {
             const now = new Date();
-            const romeTime = new Intl.DateTimeFormat('it-IT', { timeZone: 'Europe/Rome', hour: '2-digit', minute: '2-digit', second: '2-digit' }).format(now);
-            const nycTime = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }).format(now);
-            document.getElementById('clock-rome').innerText = romeTime;
-            document.getElementById('clock-nyc').innerText = nycTime;
+            const rome = new Intl.DateTimeFormat('it-IT', { timeZone: 'Europe/Rome', hour: '2-digit', minute: '2-digit', second: '2-digit' }).format(now);
+            const nyc = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }).format(now);
+            const rEl = document.getElementById('clock-rome');
+            const nEl = document.getElementById('clock-nyc');
+            if (rEl) rEl.innerText = rome;
+            if (nEl) nEl.innerText = nyc;
         }
         setInterval(updateClocks, 1000);
         updateClocks();
@@ -443,14 +465,24 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 const res = await fetch('/api/dashboard', { cache: 'no-store' });
                 if (!res.ok) throw new Error('HTTP ' + res.status);
                 const data = await res.json();
-                renderDashboard(data);
-                document.getElementById('last-update-time').innerText = new Date().toLocaleTimeString('it-IT');
-                document.getElementById('sys-status').innerText = 'SYS OPERATIONAL';
-                document.getElementById('sys-status').className = 'text-[11px] font-mono tracking-wide uppercase text-emerald-400 font-semibold';
+                renderUI(data);
+                
+                const nowTime = new Date().toLocaleTimeString('it-IT');
+                const footerSync = document.getElementById('footer-sync-time');
+                if (footerSync) footerSync.innerText = nowTime;
+                
+                const hStatus = document.getElementById('header-status');
+                if (hStatus) {
+                    hStatus.innerText = 'LIVE SYNC 3S';
+                    hStatus.className = 'text-emerald-400';
+                }
             } catch (err) {
-                console.error("Fetch dashboard error:", err);
-                document.getElementById('sys-status').innerText = 'RECONNECTING...';
-                document.getElementById('sys-status').className = 'text-[11px] font-mono tracking-wide uppercase text-rose-400 font-semibold';
+                console.error("Fetch error:", err);
+                const hStatus = document.getElementById('header-status');
+                if (hStatus) {
+                    hStatus.innerText = 'RICONNESSIONE...';
+                    hStatus.className = 'text-rose-400';
+                }
             } finally {
                 if (spinner) {
                     setTimeout(() => spinner.classList.remove('animate-spin'), 300);
@@ -458,80 +490,64 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             }
         }
 
-        function renderDashboard(data) {
+        function renderUI(data) {
             const bybit = data.bybit || {};
             const alpaca = data.alpaca || {};
             const bWallet = bybit.wallet || {};
-            const positions = bybit.positions || [];
-            const closed = bybit.closed || [];
+            const bPositions = bybit.positions || [];
+            const bClosed = bybit.closed || [];
             const aAcc = alpaca.account || {};
+            const aPositions = alpaca.positions || [];
 
-            // 1. KPI Equity
+            // 1. Summary Strip Superiore
             const bybitEq = bWallet.total_equity || 0;
             const alpacaEq = parseFloat(aAcc.portfolio_value || 0);
             const totalEq = bybitEq + alpacaEq;
 
-            document.getElementById('kpi-total-equity').innerText = `$${totalEq.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
-            document.getElementById('kpi-bybit-sub').innerText = `$${bybitEq.toLocaleString('en-US', {maximumFractionDigits: 0})}`;
-            document.getElementById('kpi-alpaca-sub').innerText = `$${alpacaEq.toLocaleString('en-US', {maximumFractionDigits: 0})}`;
-
-            // Cash & Margine
+            document.getElementById('summary-total-equity').innerText = `$${totalEq.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+            document.getElementById('summary-bybit-nav').innerText = `$${bybitEq.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+            
             const usdtCash = (bWallet.coins && bWallet.coins.USDT) ? bWallet.coins.USDT : (bWallet.available_balance || 0);
-            document.getElementById('kpi-usdt-cash').innerText = `$${usdtCash.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
-            document.getElementById('kpi-margin-balance').innerText = `$${(bWallet.margin_balance || 0).toLocaleString('en-US', {maximumFractionDigits: 0})}`;
+            document.getElementById('summary-bybit-cash').innerText = `Disponibile: $${usdtCash.toLocaleString('en-US', {maximumFractionDigits: 0})} USDT`;
 
-            // Esposizione & PnL
+            document.getElementById('summary-alpaca-nav').innerText = `$${alpacaEq.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+            document.getElementById('summary-alpaca-bp').innerText = `Buying Power: $${parseFloat(aAcc.buying_power || 0).toLocaleString('en-US', {maximumFractionDigits: 0})}`;
+
+            // PnL Calcolo Posizioni Bybit
             let totalNotional = 0;
             let totalPnL = 0;
-
-            positions.forEach(p => {
+            bPositions.forEach(p => {
                 totalNotional += p.position_value || 0;
                 totalPnL += p.unrealized_pnl || 0;
             });
 
-            document.getElementById('kpi-positions-count').innerText = positions.length;
-            document.getElementById('kpi-notional-active').innerText = `$${totalNotional.toLocaleString('en-US', {maximumFractionDigits: 0})}`;
-            document.getElementById('tab-count-positions').innerText = positions.length;
-            document.getElementById('tab-count-closed').innerText = closed.length;
+            const pnlSign = totalPnL >= 0 ? '+' : '';
+            const pnlColor = totalPnL >= 0 ? 'text-emerald-400' : 'text-rose-400';
+            const sumPnlEl = document.getElementById('summary-crypto-pnl');
+            sumPnlEl.innerText = `${pnlSign}$${totalPnL.toFixed(2)}`;
+            sumPnlEl.className = `text-lg sm:text-xl font-bold mono-val ${pnlColor} mt-1`;
 
-            const pnlValEl = document.getElementById('kpi-unrealized-pnl');
-            const pnlPctEl = document.getElementById('kpi-unrealized-pct');
-            const pnlTag = document.getElementById('pnl-status-tag');
-            const pnlCard = document.getElementById('pnl-kpi-container');
+            document.getElementById('summary-active-positions').innerText = `${bPositions.length} posizioni a mercato ($${totalNotional.toLocaleString('en-US', {maximumFractionDigits: 0})})`;
 
-            const pnlPctVal = totalNotional > 0 ? (totalPnL / totalNotional) * 100 : 0.0;
-            const sign = totalPnL >= 0 ? '+' : '';
+            // Badges Tab
+            document.getElementById('badge-bybit-count').innerText = bPositions.length;
+            document.getElementById('badge-alpaca-count').innerText = aPositions.length;
 
-            pnlValEl.innerText = `${sign}$${totalPnL.toFixed(2)}`;
-            pnlPctEl.innerText = `${sign}${pnlPctVal.toFixed(2)}%`;
-
-            if (totalPnL >= 0) {
-                pnlValEl.className = "text-2xl lg:text-3xl font-bold font-mono tracking-tight text-emerald-400";
-                pnlPctEl.className = "text-sm font-bold font-mono text-emerald-400";
-                pnlTag.className = "text-[10px] font-mono px-1.5 py-0.5 rounded font-bold uppercase bg-emerald-500/20 text-emerald-300 border border-emerald-500/30";
-                pnlTag.innerText = "ATTIVO IN PROFITTO";
+            // 2. Render Bybit Desktop Table
+            const bTable = document.getElementById('bybit-table-body');
+            if (bPositions.length === 0) {
+                bTable.innerHTML = `<tr><td colspan="8" class="text-center py-10 text-slate-400">Nessuna posizione aperta. Lo scanner cerca breakout ogni 2m.</td></tr>`;
             } else {
-                pnlValEl.className = "text-2xl lg:text-3xl font-bold font-mono tracking-tight text-rose-400";
-                pnlPctEl.className = "text-sm font-bold font-mono text-rose-400";
-                pnlTag.className = "text-[10px] font-mono px-1.5 py-0.5 rounded font-bold uppercase bg-rose-500/20 text-rose-300 border border-rose-500/30";
-                pnlTag.innerText = "RISK GUARD ATTIVA";
-            }
-
-            // 2. Tabella Posizioni Bybit
-            const tbody = document.getElementById('positions-table-body');
-            if (positions.length === 0) {
-                tbody.innerHTML = `<tr><td colspan="8" class="text-center py-10 text-slate-500 font-mono">Nessuna posizione aperta. Lo scanner ricerca breakout sui 10 asset ogni 2m.</td></tr>`;
-            } else {
-                tbody.innerHTML = positions.map(p => {
+                bTable.innerHTML = bPositions.map(p => {
                     const isLong = p.side === 'BUY';
                     const sideBadge = isLong 
-                        ? `<span class="px-2 py-0.5 rounded text-[11px] font-bold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">LONG</span>`
-                        : `<span class="px-2 py-0.5 rounded text-[11px] font-bold bg-rose-500/15 text-rose-400 border border-rose-500/30">SHORT</span>`;
+                        ? `<span class="px-2 py-0.5 rounded text-[11px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">LONG</span>`
+                        : `<span class="px-2 py-0.5 rounded text-[11px] font-bold bg-rose-500/20 text-rose-400 border border-rose-500/30">SHORT</span>`;
 
-                    const pnlSign = p.unrealized_pnl >= 0 ? '+' : '';
-                    const pnlColor = p.unrealized_pnl >= 0 ? 'text-emerald-400' : 'text-rose-400';
+                    const pSign = p.unrealized_pnl >= 0 ? '+' : '';
+                    const pCol = p.unrealized_pnl >= 0 ? 'text-emerald-400 font-bold' : 'text-rose-400 font-bold';
 
-                    let protBadge = `<span class="text-slate-500 text-[11px]">SL -0.60% (In corso)</span>`;
+                    let protBadge = `<span class="text-slate-400 text-xs">SL -0.60% (In corso)</span>`;
                     if (p.pnl_pct >= 0.70) {
                         protBadge = `<span class="px-2 py-0.5 rounded text-[11px] font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">PROFIT LOCKED (+0.40%)</span>`;
                     } else if (p.pnl_pct >= 0.30) {
@@ -539,16 +555,16 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                     }
 
                     return `
-                        <tr class="hover:bg-terminal-elevated/60 transition">
+                        <tr class="hover:bg-desk-elevated/70 transition">
                             <td class="py-3 px-4 font-bold text-white">${p.symbol}</td>
                             <td class="py-3 px-4">${sideBadge}</td>
-                            <td class="py-3 px-4 text-slate-300">${p.size}</td>
+                            <td class="py-3 px-4 text-slate-200">${p.size}</td>
                             <td class="py-3 px-4 text-slate-300">$${p.entry_price.toFixed(4)}</td>
-                            <td class="py-3 px-4 font-semibold text-white">$${p.mark_price.toFixed(4)}</td>
+                            <td class="py-3 px-4 font-bold text-white">$${p.mark_price.toFixed(4)}</td>
                             <td class="py-3 px-4 text-slate-300">$${(p.position_value || 0).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
-                            <td class="py-3 px-4 font-bold ${pnlColor}">
-                                ${pnlSign}$${p.unrealized_pnl.toFixed(2)} 
-                                <span class="text-[11px] font-normal opacity-90">(${pnlSign}${p.pnl_pct.toFixed(2)}%)</span>
+                            <td class="py-3 px-4 ${pCol}">
+                                ${pSign}$${p.unrealized_pnl.toFixed(2)} 
+                                <span class="text-[11px] font-medium opacity-90">(${pSign}${p.pnl_pct.toFixed(2)}%)</span>
                             </td>
                             <td class="py-3 px-4">${protBadge}</td>
                         </tr>
@@ -556,53 +572,110 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 }).join('');
             }
 
-            // 3. Tabella Chiusure Recenti
-            const closedBody = document.getElementById('closed-trades-body');
-            if (closed.length === 0) {
-                closedBody.innerHTML = `<tr><td colspan="7" class="text-center py-6 text-slate-500 font-mono">Nessuna esecuzione chiusa nello storico recente.</td></tr>`;
+            // 3. Render Bybit Mobile Cards (100% Usabilità iPhone)
+            const bCards = document.getElementById('bybit-mobile-cards');
+            if (bPositions.length === 0) {
+                bCards.innerHTML = `<div class="desk-card rounded-xl p-5 text-center text-slate-400 text-xs font-mono">Nessuna posizione aperta. Lo scanner automatico è in ascolto.</div>`;
             } else {
-                closedBody.innerHTML = closed.slice(0, 10).map(c => {
-                    const pnlVal = parseFloat(c.closedPnl || 0);
-                    const pnlClass = pnlVal >= 0 ? 'text-emerald-400 font-bold' : 'text-rose-400 font-bold';
-                    const pnlSign = pnlVal >= 0 ? '+' : '';
-                    const timeStr = c.updatedTime ? new Date(parseInt(c.updatedTime)).toLocaleTimeString('it-IT') : '--:--';
+                bCards.innerHTML = bPositions.map(p => {
+                    const isLong = p.side === 'BUY';
+                    const sideBadge = isLong 
+                        ? `<span class="px-2 py-0.5 rounded text-xs font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">LONG</span>`
+                        : `<span class="px-2 py-0.5 rounded text-xs font-bold bg-rose-500/20 text-rose-400 border border-rose-500/30">SHORT</span>`;
+
+                    const pSign = p.unrealized_pnl >= 0 ? '+' : '';
+                    const pCol = p.unrealized_pnl >= 0 ? 'text-emerald-400' : 'text-rose-400';
+
+                    let protBadge = `<span class="text-slate-400 text-[11px]">SL -0.60% (In corso)</span>`;
+                    if (p.pnl_pct >= 0.70) {
+                        protBadge = `<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">PROFIT LOCKED (+0.40%)</span>`;
+                    } else if (p.pnl_pct >= 0.30) {
+                        protBadge = `<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">BREAK-EVEN (0 RISK)</span>`;
+                    }
+
                     return `
-                        <tr class="hover:bg-terminal-elevated/60 transition">
-                            <td class="py-2.5 px-4 text-slate-400">${timeStr}</td>
-                            <td class="py-2.5 px-4 font-semibold text-white">${c.symbol}</td>
-                            <td class="py-2.5 px-4"><span class="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-terminal-elevated text-slate-300 border border-terminal-border">${c.side}</span></td>
-                            <td class="py-2.5 px-4 text-slate-300">${c.closedSize || c.qty}</td>
-                            <td class="py-2.5 px-4 text-slate-300">$${parseFloat(c.avgEntryPrice || 0).toFixed(4)} &rarr; $${parseFloat(c.avgExitPrice || 0).toFixed(4)}</td>
-                            <td class="py-2.5 px-4 text-slate-500">$${(parseFloat(c.openFee || 0) + parseFloat(c.closeFee || 0)).toFixed(2)}</td>
-                            <td class="py-2.5 px-4 ${pnlClass}">${pnlSign}$${pnlVal.toFixed(2)}</td>
+                        <div class="desk-card rounded-xl p-4 space-y-3">
+                            <div class="flex items-center justify-between">
+                                <div class="flex items-center gap-2">
+                                    <span class="text-base font-bold text-white mono-val">${p.symbol}</span>
+                                    ${sideBadge}
+                                </div>
+                                <div class="text-right">
+                                    <div class="text-base font-bold mono-val ${pCol}">
+                                        ${pSign}$${p.unrealized_pnl.toFixed(2)}
+                                    </div>
+                                    <div class="text-[11px] font-bold mono-val ${pCol}">
+                                        (${pSign}${p.pnl_pct.toFixed(2)}%)
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div class="grid grid-cols-2 gap-2 text-xs font-mono pt-2 border-t border-desk-borderSubtle">
+                                <div>
+                                    <span class="text-slate-400 text-[10px] uppercase block">Entrata &rarr; Attuale</span>
+                                    <span class="text-slate-200 font-semibold">$${p.entry_price.toFixed(4)} &rarr; $${p.mark_price.toFixed(4)}</span>
+                                </div>
+                                <div class="text-right">
+                                    <span class="text-slate-400 text-[10px] uppercase block">Size &amp; Valore</span>
+                                    <span class="text-slate-200 font-semibold">${p.size} ($${(p.position_value || 0).toLocaleString('en-US', {maximumFractionDigits: 0})})</span>
+                                </div>
+                            </div>
+
+                            <div class="pt-2 border-t border-desk-borderSubtle flex items-center justify-between text-xs font-mono">
+                                <span class="text-slate-400 text-[11px]">Protezione:</span>
+                                ${protBadge}
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+            }
+
+            // 4. Render Alpaca Box & Table
+            document.getElementById('alpaca-equity-display').innerText = `$${alpacaEq.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+            document.getElementById('alpaca-bp-display').innerText = `$${parseFloat(aAcc.buying_power || 0).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+            document.getElementById('alpaca-total-titles').innerText = `${aPositions.length} Titoli`;
+
+            const alpacaBody = document.getElementById('alpaca-table-body');
+            if (aPositions.length === 0) {
+                alpacaBody.innerHTML = `<tr><td colspan="6" class="text-center py-8 text-slate-400">Nessuna posizione azionaria attualmente aperta su Alpaca (Wall Street chiusa nel weekend).</td></tr>`;
+            } else {
+                alpacaBody.innerHTML = aPositions.map(ap => {
+                    const unpnl = parseFloat(ap.unrealized_pl || 0);
+                    const col = unpnl >= 0 ? 'text-emerald-400 font-bold' : 'text-rose-400 font-bold';
+                    const sign = unpnl >= 0 ? '+' : '';
+                    return `
+                        <tr class="hover:bg-desk-elevated/70 transition">
+                            <td class="py-2.5 px-4 font-bold text-white">${ap.symbol}</td>
+                            <td class="py-2.5 px-4 text-slate-200">${ap.qty}</td>
+                            <td class="py-2.5 px-4 text-slate-300">$${parseFloat(ap.avg_entry_price || 0).toFixed(2)}</td>
+                            <td class="py-2.5 px-4 font-bold text-white">$${parseFloat(ap.current_price || 0).toFixed(2)}</td>
+                            <td class="py-2.5 px-4 text-slate-200">$${parseFloat(ap.market_value || 0).toFixed(2)}</td>
+                            <td class="py-2.5 px-4 ${col}">${sign}$${unpnl.toFixed(2)}</td>
                         </tr>
                     `;
                 }).join('');
             }
 
-            // 4. Sezione Alpaca
-            document.getElementById('alpaca-portfolio-val').innerText = `$${alpacaEq.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
-            document.getElementById('alpaca-buying-power').innerText = `$${parseFloat(aAcc.buying_power || 0).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
-            document.getElementById('alpaca-account-num').innerText = `Account: ${aAcc.account_number || 'PA3WDUE2F'}`;
-
-            const aPositions = alpaca.positions || [];
-            document.getElementById('alpaca-pos-count').innerText = `${aPositions.length} Titoli`;
-            const aPosBody = document.getElementById('alpaca-positions-body');
-            if (aPositions.length === 0) {
-                aPosBody.innerHTML = `<tr><td colspan="6" class="text-center py-6 text-slate-500 font-mono">Nessuna posizione azionaria attualmente aperta (Wall Street chiusa nel weekend).</td></tr>`;
+            // 5. Render Storico Chiusure
+            document.getElementById('history-total-count').innerText = `${bClosed.length} registrati`;
+            const hBody = document.getElementById('history-table-body');
+            if (bClosed.length === 0) {
+                hBody.innerHTML = `<tr><td colspan="7" class="text-center py-8 text-slate-400">Nessun trade chiuso di recente.</td></tr>`;
             } else {
-                aPosBody.innerHTML = aPositions.map(ap => {
-                    const unrealized = parseFloat(ap.unrealized_pl || 0);
-                    const pnlColor = unrealized >= 0 ? 'text-emerald-400' : 'text-rose-400';
-                    const pnlSign = unrealized >= 0 ? '+' : '';
+                hBody.innerHTML = bClosed.slice(0, 15).map(c => {
+                    const pnlVal = parseFloat(c.closedPnl || 0);
+                    const pCol = pnlVal >= 0 ? 'text-emerald-400 font-bold' : 'text-rose-400 font-bold';
+                    const pSign = pnlVal >= 0 ? '+' : '';
+                    const timeStr = c.updatedTime ? new Date(parseInt(c.updatedTime)).toLocaleTimeString('it-IT') : '--:--';
                     return `
-                        <tr class="hover:bg-terminal-elevated/60 transition">
-                            <td class="py-2.5 px-4 font-bold text-white">${ap.symbol}</td>
-                            <td class="py-2.5 px-4 text-slate-300">${ap.qty}</td>
-                            <td class="py-2.5 px-4 text-slate-300">$${parseFloat(ap.avg_entry_price || 0).toFixed(2)}</td>
-                            <td class="py-2.5 px-4 font-semibold text-white">$${parseFloat(ap.current_price || 0).toFixed(2)}</td>
-                            <td class="py-2.5 px-4 text-slate-300">$${parseFloat(ap.market_value || 0).toFixed(2)}</td>
-                            <td class="py-2.5 px-4 font-bold ${pnlColor}">${pnlSign}$${unrealized.toFixed(2)}</td>
+                        <tr class="hover:bg-desk-elevated/70 transition">
+                            <td class="py-2.5 px-4 text-slate-400">${timeStr}</td>
+                            <td class="py-2.5 px-4 font-bold text-white">${c.symbol}</td>
+                            <td class="py-2.5 px-4"><span class="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-desk-elevated text-slate-300 border border-desk-border">${c.side}</span></td>
+                            <td class="py-2.5 px-4 text-slate-300">${c.closedSize || c.qty}</td>
+                            <td class="py-2.5 px-4 text-slate-300">$${parseFloat(c.avgEntryPrice || 0).toFixed(4)} &rarr; $${parseFloat(c.avgExitPrice || 0).toFixed(4)}</td>
+                            <td class="py-2.5 px-4 text-slate-400">$${(parseFloat(c.openFee || 0) + parseFloat(c.closeFee || 0)).toFixed(2)}</td>
+                            <td class="py-2.5 px-4 ${pCol}">${pSign}$${pnlVal.toFixed(2)}</td>
                         </tr>
                     `;
                 }).join('');
@@ -611,7 +684,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             lucide.createIcons();
         }
 
-        // Avvio Polling continuo ogni 3 secondi
+        // Fetch iniziale e loop continuo ogni 3 secondi
         fetchData();
         setInterval(fetchData, 3000);
     </script>
