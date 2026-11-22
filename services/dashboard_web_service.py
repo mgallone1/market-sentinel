@@ -822,7 +822,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 const ctx = canvas.getContext('2d');
 
                 const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
-                const gridColor = isDark ? 'rgba(35, 49, 80, 0.4)' : 'rgba(226, 232, 240, 0.8)';
+                const gridColor = isDark ? 'rgba(35, 49, 80, 0.4)' : 'rgba(226, 232, 240, 0.7)';
                 const tickColor = isDark ? '#94a3b8' : '#64748b';
 
                 const labels = snapshots.map(s => {
@@ -835,10 +835,25 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 const equity = snapshots.map(s => s.total_equity);
                 const pnl = snapshots.map(s => s.cumulative_realized_pnl);
 
+                const gradient = ctx.createLinearGradient(0, 0, 0, 220);
+                if (isDark) {
+                    gradient.addColorStop(0, 'rgba(59, 130, 246, 0.25)');
+                    gradient.addColorStop(1, 'rgba(59, 130, 246, 0.00)');
+                } else {
+                    gradient.addColorStop(0, 'rgba(37, 99, 235, 0.16)');
+                    gradient.addColorStop(1, 'rgba(37, 99, 235, 0.00)');
+                }
+
+                const lineColor = isDark ? '#60a5fa' : '#2563eb';
+                const pnlColor = isDark ? '#34d399' : '#16a34a';
+
                 if (chartInstance) {
                     chartInstance.data.labels = labels;
                     chartInstance.data.datasets[0].data = equity;
+                    chartInstance.data.datasets[0].borderColor = lineColor;
+                    chartInstance.data.datasets[0].backgroundColor = gradient;
                     chartInstance.data.datasets[1].data = pnl;
+                    chartInstance.data.datasets[1].borderColor = pnlColor;
                     chartInstance.update('none');
                     return;
                 }
@@ -849,24 +864,29 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                         labels: labels,
                         datasets: [
                             {
-                                label: 'Equity ($)',
+                                label: 'Capitale ($)',
                                 data: equity,
-                                borderColor: '#15803d',
-                                borderWidth: 2,
-                                backgroundColor: isDark ? 'rgba(34, 197, 94, 0.05)' : 'rgba(21, 128, 61, 0.05)',
-                                pointRadius: 1.5,
-                                tension: 0.15,
+                                borderColor: lineColor,
+                                borderWidth: 2.2,
+                                backgroundColor: gradient,
+                                pointRadius: 0,
+                                pointHoverRadius: 5,
+                                pointHoverBackgroundColor: lineColor,
+                                pointHoverBorderColor: '#fff',
+                                pointHoverBorderWidth: 2,
+                                tension: 0.25,
                                 fill: true,
                                 yAxisID: 'y'
                             },
                             {
                                 label: 'PnL ($)',
                                 data: pnl,
-                                borderColor: '#b45309',
+                                borderColor: pnlColor,
                                 borderWidth: 1.8,
-                                borderDash: [3, 3],
+                                borderDash: [4, 4],
                                 backgroundColor: 'transparent',
-                                pointRadius: 1.5,
+                                pointRadius: 0,
+                                pointHoverRadius: 4,
                                 tension: 0.1,
                                 yAxisID: 'y1'
                             }
@@ -876,19 +896,51 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                         responsive: true,
                         maintainAspectRatio: false,
                         animation: false,
+                        interaction: {
+                            mode: 'index',
+                            intersect: false,
+                        },
                         plugins: {
-                            legend: { display: false }
+                            legend: {
+                                display: true,
+                                position: 'top',
+                                align: 'end',
+                                labels: {
+                                    boxWidth: 8,
+                                    boxHeight: 8,
+                                    color: tickColor,
+                                    font: { family: 'SF Mono, monospace', size: 10 }
+                                }
+                            },
+                            tooltip: {
+                                backgroundColor: isDark ? '#1e293b' : '#ffffff',
+                                titleColor: isDark ? '#f8fafc' : '#0f172a',
+                                bodyColor: isDark ? '#94a3b8' : '#334155',
+                                borderColor: isDark ? '#334155' : '#e2e8f0',
+                                borderWidth: 1,
+                                padding: 10,
+                                callbacks: {
+                                    label: function(context) {
+                                        let label = context.dataset.label || '';
+                                        if (label) label += ': ';
+                                        if (context.parsed.y !== null) {
+                                            label += '$' + context.parsed.y.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                                        }
+                                        return label;
+                                    }
+                                }
+                            }
                         },
                         scales: {
                             x: {
                                 grid: { color: gridColor },
-                                ticks: { color: tickColor, font: { family: 'SF Mono, monospace', size: 9 }, maxTicksLimit: 5 }
+                                ticks: { color: tickColor, font: { family: 'SF Mono, monospace', size: 9 }, maxTicksLimit: 6 }
                             },
                             y: {
                                 position: 'left',
                                 grid: { color: gridColor },
                                 ticks: {
-                                    color: '#15803d',
+                                    color: lineColor,
                                     font: { family: 'SF Mono, monospace', size: 9 },
                                     callback: val => '$' + (val / 1000).toFixed(1) + 'k'
                                 }
@@ -897,9 +949,9 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                                 position: 'right',
                                 grid: { drawOnChartArea: false },
                                 ticks: {
-                                    color: '#b45309',
+                                    color: pnlColor,
                                     font: { family: 'SF Mono, monospace', size: 9 },
-                                    callback: val => '$' + val.toFixed(0)
+                                    callback: val => (val >= 0 ? '+' : '') + '$' + val.toFixed(0)
                                 }
                             }
                         }
@@ -1145,7 +1197,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         }
 
         fetchData();
-        setInterval(fetchData, 3000);
+        setInterval(fetchData, 5000);
     </script>
 </body>
 </html>
@@ -1160,7 +1212,7 @@ import time
 
 _CACHE_STORE = {}
 _LAST_CACHE_TIME = 0.0
-_CACHE_TTL = 1.8  # Risposte istantanee in <10ms riutilizzando la cache recente di 1.8s
+_CACHE_TTL = 3.5  # Stabilizzazione visiva numeri  # Risposte istantanee in <10ms riutilizzando la cache recente di 1.8s
 
 def _fetch_all_live_data_sync(tf: str):
     """Worker sincrono eseguito in thread worker per chiamare Bybit e Alpaca senza bloccare l'event loop."""
