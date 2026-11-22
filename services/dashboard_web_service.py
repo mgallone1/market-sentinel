@@ -865,8 +865,11 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             </div>
         </div>
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; flex-wrap: wrap; gap: 6px;">
-            <!-- Toggle Modalità Scala: Dollari $ vs Percentuale % -->
+            <!-- Toggle Modalità: Patrimonio Wallet vs PnL Operativo Bot & Scala ($ vs %) -->
             <div class="chart-controls mono">
+                <button class="tf-btn active" id="btn-view-wallet" onclick="setChartMetric('wallet')" data-tip="Mostra la traiettoria del capitale totale comprensivo dei depositi spot in wallet">💼 PATRIMONIO</button>
+                <button class="tf-btn" id="btn-view-pnl" onclick="setChartMetric('pnl')" data-tip="Isola e mostra esclusivamente la curva dei profitti e perdite generati dalle operazioni dei bot">🎯 PnL OPERATIVO</button>
+                <span style="border-left: 1px solid var(--border); margin: 0 4px; height: 16px;"></span>
                 <button class="tf-btn active" id="btn-mode-usd" onclick="setChartMode('usd')" data-tip="Mostra il grafico in valori monetari assoluti ($ Dollari)">$ DOLLARI</button>
                 <button class="tf-btn" id="btn-mode-pct" onclick="setChartMode('pct')" data-tip="Mostra il grafico in rendimento percentuale progressivo (% Yield)">% PERCENTUALE</button>
             </div>
@@ -1073,7 +1076,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             <!-- Card 7: Notifiche Push Telegram Smart -->
             <div class="acc-cell" style="padding: 14px; text-align: left;">
                 <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
-                    <strong style="color: var(--text-main); font-size: 13px;">7. Notifiche Push Telegram Intelligenti (Zero Spam)</strong>
+                    <strong style="color: var(--text-main); font-size: 13px;">7. Notifiche Push Telegram Intelligenti (Zero Spam) &amp; Recap 22:00</strong>
                     <span class="badge mono" style="background: var(--green); color: #fff; font-size: 9px; padding: 2px 6px; border-radius: 3px;">ALERT 24/7</span>
                 </div>
                 <div style="font-size: 11px; color: var(--text-muted); line-height: 1.45;">
@@ -1081,7 +1084,8 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                     <strong>• Inversione Macro BTC 4H:</strong> Notifica quando il trend generale passa da Bullish a Bearish.<br>
                     <strong>• Break-Even Safe (+0.80%):</strong> Avviso quando lo stop viene alzato sopra l'ingresso a rischio zero.<br>
                     <strong>• Trailing Profit Lock (+1.60%):</strong> Avviso quando viene garantito l'incasso di almeno il +1.00% netto.<br>
-                    <strong>• Chiusura TP (+3.60%) / SL (-1.20%):</strong> Riepilogo immediato con dollari incassati e PnL percentuale.
+                    <strong>• Chiusura TP / SL Dinamico:</strong> Riepilogo immediato con dollari incassati e PnL percentuale basato su 1.4x ATR.<br>
+                    <strong>• Report Giornaliero Silenzioso (22:00 CET):</strong> Un unico messaggio serale con il bilancio netto della giornata, win-rate, posizioni notturne attive e Health Score.
                 </div>
             </div>
 
@@ -1093,8 +1097,9 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 </div>
                 <div style="font-size: 11px; color: var(--text-muted); line-height: 1.45;">
                     Toccando qualsiasi riga di trade aperto si apre il pannello di analisi quantitativa approfondita:<br>
-                    <strong>• Timeframe dell'Analisi:</strong> Esplicitamente indicato in alto a sinistra (<code>1D - Giornaliero 6 Mesi / 120 barre</code> per catturare cicli macro e frattali Elliott affidabili; <code>4H</code> per lo Scudo Macro BTC).<br>
-                    <strong>• Grafico Sovrapposto a Più Curve:</strong> Mostra in tempo reale la serie storica reale (azzurro), la curva di traslazione <strong>Hurst FLD</strong> (oro tratteggiato), la sinusoide a 4 tempi del <strong>Battleplan Migliorino</strong> (ciano) e il cono stocastico <strong>Monte Carlo P50</strong> a 15 giorni con intervallo di confidenza al 95%.<br>
+                    <strong>• Selettore Timeframe Dinamico (1D / 4H / 1H):</strong> Permette di alternare all'istante l'analisi tra visione Macro (1D), Swing (4H) e Tattica Intraday (1H).<br>
+                    <strong>• Confluenza Microstruttura (OBI &amp; ATR):</strong> Gli ingressi verificano l'Order Book Imbalance (muri di liquidità Bid/Ask) e calcolano Stop Loss e Take Profit proporzionati alla volatilità reale ATR.<br>
+                    <strong>• Grafico Sovrapposto a Più Curve:</strong> Mostra in tempo reale la serie storica reale (azzurro), la curva di traslazione <strong>Hurst FLD</strong> (oro tratteggiato), la sinusoide a 4 tempi del <strong>Battleplan Migliorino</strong> (ciano) e il cono stocastico <strong>Monte Carlo P50</strong> con intervallo di confidenza al 95%.<br>
                     <strong>• Hurst FLD (Future Line of Demarcation):</strong> Trasla il prezzo di mezzo periodo (T/2). Se il prezzo incrocia la FLD dal basso, convalida il minimo ciclico proiettando il target al rialzo; se la buca dall'alto, avverte di debolezza ciclica verso il minimo.<br>
                     <strong>• Battleplan &amp; Vincoli di Migliorino:</strong> Mostra il tempo ciclico su 4 tempi (T, T+1, T+2, T+3) e segnala se il ciclo è libero o vincolato al ribasso (un ciclo che rompe il proprio minimo di partenza non può più superare il proprio massimo).<br>
                     <strong>• Onde di Elliott Frattali &amp; Target Fibonacci:</strong> Riconosce la fase frattale (Onda 1-2-3-4-5 d'impulso o correzione A-B-C) e calcola in tempo reale i livelli di ritracciamento di Fibonacci (38.2%, 50.0% Mediana e 61.8% Golden Pocket).<br>
@@ -1121,9 +1126,17 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 <!-- Grafico Previsionale Stocastico Monte Carlo, Hurst FLD & Battleplan Migliorino -->
                 <div>
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; flex-wrap: wrap; gap: 4px;">
-                        <span style="font-size: 11px; font-weight: 700; color: var(--text-main);">Traiettoria Monte Carlo (15gg), FLD Hurst &amp; Battleplan</span>
+                        <div style="display: flex; gap: 4px; align-items: center;">
+                            <span style="font-size: 11px; font-weight: 700; color: var(--text-main);">Traiettoria Monte Carlo, FLD &amp; Battleplan</span>
+                            <!-- Timeframe Selector nel Modal -->
+                            <div style="display: flex; gap: 3px; margin-left: 6px;">
+                                <button class="tf-btn active" id="modal-tf-1d" onclick="switchModalTimeframe('1d')" style="padding: 2px 7px; font-size: 9px;">1D</button>
+                                <button class="tf-btn" id="modal-tf-4h" onclick="switchModalTimeframe('4h')" style="padding: 2px 7px; font-size: 9px;">4H</button>
+                                <button class="tf-btn" id="modal-tf-1h" onclick="switchModalTimeframe('1h')" style="padding: 2px 7px; font-size: 9px;">1H</button>
+                            </div>
+                        </div>
                         <div style="display: flex; gap: 6px; align-items: center;">
-                            <span id="modal-tf-badge" class="badge mono" style="background: var(--surface-elevated); color: var(--text-muted); font-size: 9px; padding: 2px 6px; border-radius: 4px; border: 1px solid var(--border);">1D • 120 CANDELE</span>
+                            <span id="modal-tf-badge" class="badge mono" style="background: var(--surface-elevated); color: var(--text-muted); font-size: 9px; padding: 2px 6px; border-radius: 4px; border: 1px solid var(--border);">1D • MACRO</span>
                             <span id="modal-mc-prob" class="badge mono" style="background: var(--green-bg); color: var(--green); font-size: 10px; padding: 2px 6px; border-radius: 4px;">Prob. Up: 50%</span>
                         </div>
                     </div>
@@ -1253,6 +1266,18 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         let currentTimeframe = '3s';
         let currentInstance = 'bybit'; // 'bybit' | 'alpaca' | 'total'
         let chartMode = 'usd'; // 'usd' | 'pct'
+        let chartMetric = 'wallet'; // 'wallet' | 'pnl'
+
+        function setChartMetric(metric) {
+            chartMetric = metric;
+            document.getElementById('btn-view-wallet').classList.toggle('active', metric === 'wallet');
+            document.getElementById('btn-view-pnl').classList.toggle('active', metric === 'pnl');
+            if (chartInstance) {
+                chartInstance.destroy();
+                chartInstance = null;
+            }
+            fetchData();
+        }
 
         function setChartMode(mode) {
             chartMode = mode;
@@ -1393,7 +1418,18 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 
                 const baseEq = (currentInstance === 'bybit' ? snapshots[0].bybit_equity : (currentInstance === 'alpaca' ? snapshots[0].alpaca_equity : snapshots[0].total_equity)) || 1.0;
 
-                if (chartMode === 'pct') {
+                // Se chartMetric è 'pnl', plottiamo la curva del Net PnL (realizzato + fluttuante) per isolare l'operatività del trading
+                if (chartMetric === 'pnl') {
+                    if (chartMode === 'pct') {
+                        equity = snapshots.map(s => parseFloat(((s.cumulative_realized_pnl + (s.unrealized_pnl || 0)) / baseEq * 100).toFixed(3)));
+                        labelName = 'Trading Net PnL (%)';
+                    } else {
+                        equity = snapshots.map(s => parseFloat((s.cumulative_realized_pnl + (s.unrealized_pnl || 0)).toFixed(2)));
+                        labelName = 'Trading Net PnL ($)';
+                    }
+                    pnl = snapshots.map(s => parseFloat(s.cumulative_realized_pnl.toFixed(2)));
+                    pnlName = 'PnL Chiuso ($)';
+                } else if (chartMode === 'pct') {
                     // Modalità %: calcola la variazione percentuale progressiva rispetto all'inizio del grafico
                     if (currentInstance === 'bybit') {
                         equity = snapshots.map(s => parseFloat(((s.bybit_equity - baseEq) / baseEq * 100).toFixed(3)));
@@ -1449,6 +1485,8 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                         if (hudRange) {
                             if (chartMode === 'pct') {
                                 hudRange.innerText = `L: ${minVal.toFixed(2)}% • H: ${maxVal.toFixed(2)}%`;
+                            } else if (chartMetric === 'pnl') {
+                                hudRange.innerText = `L: $${minVal.toFixed(1)} • H: $${maxVal.toFixed(1)}`;
                             } else {
                                 hudRange.innerText = `L: $${(minVal/1000).toFixed(1)}k • H: $${(maxVal/1000).toFixed(1)}k`;
                             }
@@ -1980,10 +2018,30 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         }
 
         let forecastChartInstance = null;
+        let currentModalSymbol = 'BTCUSDT';
+        let currentModalSide = 'LONG';
+        let currentModalTf = '1d';
+
+        async function switchModalTimeframe(tf) {
+            currentModalTf = tf;
+            ['1d', '4h', '1h'].forEach(t => {
+                const btn = document.getElementById(`modal-tf-${t}`);
+                if (btn) btn.classList.toggle('active', t === tf);
+            });
+            await loadModalForecast(currentModalSymbol, currentModalSide, currentModalTf);
+        }
 
         async function openTradeModal(symbol, side, entry, mark) {
             const modal = document.getElementById('trade-modal');
             modal.classList.add('active');
+
+            currentModalSymbol = symbol;
+            currentModalSide = side;
+            currentModalTf = '1d';
+            ['1d', '4h', '1h'].forEach(t => {
+                const btn = document.getElementById(`modal-tf-${t}`);
+                if (btn) btn.classList.toggle('active', t === '1d');
+            });
 
             document.getElementById('modal-trade-sym').innerText = symbol;
             const sideEl = document.getElementById('modal-trade-side');
@@ -1991,6 +2049,10 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             sideEl.className = side === 'LONG' ? 'trade-side-long' : 'trade-side-short';
             document.getElementById('modal-trade-price').innerText = `Entry: $${entry.toFixed(4)} | Mark: $${mark.toFixed(4)}`;
 
+            await loadModalForecast(symbol, side, '1d');
+        }
+
+        async function loadModalForecast(symbol, side, tf) {
             // Reset testi a loading
             document.getElementById('modal-mc-prob').innerText = 'Calcolo in corso...';
             document.getElementById('modal-hurst-val').innerText = 'Caricamento FLD...';
@@ -2004,7 +2066,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             document.getElementById('modal-advice-text').innerText = 'Analisi quantitativa multi-modello in elaborazione...';
 
             try {
-                const res = await fetch(`/api/trade-forecast?symbol=${symbol}`);
+                const res = await fetch(`/api/trade-forecast?symbol=${symbol}&tf=${tf}`);
                 const data = await res.json();
                 if (data.error) {
                     document.getElementById('modal-advice-text').innerText = data.error;
@@ -2346,7 +2408,8 @@ async def handle_dashboard_api(request):
 async def handle_trade_forecast_api(request):
     """Restituisce l'analisi ciclica (Hurst/Migliorino), onde di Elliott e simulazione Monte Carlo per un asset."""
     symbol = request.query.get("symbol", "BTCUSDT")
-    data = await asyncio.to_thread(get_deep_trade_forecast, symbol)
+    tf = request.query.get("tf", "1d")
+    data = await asyncio.to_thread(get_deep_trade_forecast, symbol, tf)
     return web.json_response(data)
 
 def create_web_app(bybit_svc=None, alpaca_svc=None):

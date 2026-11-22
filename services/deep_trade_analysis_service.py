@@ -22,13 +22,15 @@ from services.cycle_analyst import CycleAnalystService
 _ANALYSIS_CACHE: Dict[str, Dict[str, Any]] = {}
 _CACHE_TTL = 90.0 # 90s di cache in memoria per asset
 
-def get_deep_trade_forecast(symbol: str) -> Dict[str, Any]:
-    """Genera l'analisi ciclica, ondulatoria e stocastica per un simbolo (es. XRPUSDT, BTCUSDT)."""
+def get_deep_trade_forecast(symbol: str, tf: str = "1d") -> Dict[str, Any]:
+    """Genera l'analisi ciclica, ondulatoria e stocastica per un simbolo (es. XRPUSDT, BTCUSDT) sul timeframe richiesto (1d, 4h, 1h)."""
     now = time.time()
     clean_sym = symbol.upper().replace("/", "").replace("-", "")
+    tf_clean = tf.lower().strip()
+    cache_key = f"{clean_sym}_{tf_clean}"
 
-    if clean_sym in _ANALYSIS_CACHE and (now - _ANALYSIS_CACHE[clean_sym]["time"]) < _CACHE_TTL:
-        return _ANALYSIS_CACHE[clean_sym]["data"]
+    if cache_key in _ANALYSIS_CACHE and (now - _ANALYSIS_CACHE[cache_key]["time"]) < _CACHE_TTL:
+        return _ANALYSIS_CACHE[cache_key]["data"]
 
     # Mappatura ticker yfinance
     yf_ticker = clean_sym
@@ -40,20 +42,42 @@ def get_deep_trade_forecast(symbol: str) -> Dict[str, Any]:
         yf_ticker = f"{base}-USD"
 
     try:
-        # Timeframe Daily (1D) per ciclica e onde di medio termine
-        df = yf.download(yf_ticker, period="6mo", interval="1d", progress=False)
-        timeframe_label = "1D (Giornaliero - 6 Mesi)"
-        if df.empty or len(df) < 35:
-            # Fallback a 4H se necessario
-            df = yf.download(yf_ticker, period="3mo", interval="1h", progress=False)
-            timeframe_label = "1H (Orario - 1 Mese)"
-        
+        # Configurazione timeframe dinamica: (period, interval, label)
+        if tf_clean == "1h":
+            period_str = "1mo"
+            interval_str = "1h"
+            timeframe_label = "1H (Orario - 1 Mese / Intraday)"
+        elif tf_clean == "4h":
+            period_str = "3mo"
+            interval_str = "1h" # yfinance aggrega orario a 4h o usa 1h con ricampionamento
+            timeframe_label = "4H (4 Ore - 3 Mesi / Swing)"
+        else:
+            tf_clean = "1d"
+            period_str = "6mo"
+            interval_str = "1d"
+            timeframe_label = "1D (Giornaliero - 6 Mesi / Macro)"
+
+        df = yf.download(yf_ticker, period=period_str, interval=interval_str, progress=False)
         if hasattr(df.columns, 'levels') and len(df.columns.levels) > 1:
             df.columns = df.columns.get_level_values(0)
 
         clean_df = df.dropna(subset=["Close"]).copy()
+        if tf_clean == "4h" and len(clean_df) >= 8:
+            # Ricampiona a 4H se richiesto 4h
+            clean_df = clean_df.resample('4h').agg({
+                'Open': 'first',
+                'High': 'max',
+                'Low': 'min',
+                'Close': 'last',
+                'Volume': 'sum'
+            }).dropna()
+
         if clean_df.empty or len(clean_df) < 20:
-            return {"error": f"Dati storici insufficienti per {clean_sym}"}
+            # Fallback sicuro a 1D
+            clean_df = yf.download(yf_ticker, period="6mo", interval="1d", progress=False).dropna()
+            if hasattr(clean_df.columns, 'levels') and len(clean_df.columns.levels) > 1:
+                clean_df.columns = clean_df.columns.get_level_values(0)
+            timeframe_label = "1D (Giornaliero - Fallback)"
 
         # 1. Ciclica di Hurst & Giuseppe Migliorino
         cycle_metrics = HurstMigliorinoCycleService.calculate_cycle_metrics(clean_df)
@@ -159,7 +183,7 @@ def get_deep_trade_forecast(symbol: str) -> Dict[str, Any]:
             }
         }
 
-        _ANALYSIS_CACHE[clean_sym] = {
+        _ANALYSIS_CACHE[cache_key] = {
             "time": now,
             "data": result
         }

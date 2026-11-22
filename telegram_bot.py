@@ -2870,6 +2870,66 @@ async def send_scheduled_briefing(app, slot: str, force: bool = False):
     except Exception as e:
         print(f"[!] Errore critico generazione scheduled briefing: {e}")
 
+async def daily_evening_recap_job(application):
+    """Report Giornaliero Silenzioso delle 22:00 CET: bilancio di fine giornata, trade chiusi, posizioni e Health Score."""
+    try:
+        from services.trading_compass_service import trading_compass
+        wallet = bybit_service.get_wallet_summary()
+        b_pos = bybit_service.get_open_positions()
+        res_closed = bybit_service.session.get_closed_pnl(category="linear", limit=20)
+        closed_list = res_closed.get("result", {}).get("list", []) if res_closed.get("retCode") == 0 else []
+
+        tot_eq = float(wallet.get("total_equity", 0.0) or 0.0)
+        unreal_pnl = sum(p.get("unrealized_pnl", 0.0) for p in b_pos)
+
+        # Filtra i trade chiusi nelle ultime 24 ore (o oggi)
+        today_start_ms = int(datetime.now(ZoneInfo("Europe/Rome")).replace(hour=0, minute=0, second=0, microsecond=0).timestamp() * 1000)
+        today_closed = [c for c in closed_list if int(c.get("updatedTime", 0)) >= today_start_ms]
+        today_realized = sum(float(c.get("closedPnl", 0.0)) for c in today_closed)
+        wins = sum(1 for c in today_closed if float(c.get("closedPnl", 0.0)) > 0)
+        total_closed = len(today_closed)
+        win_rate = (wins / total_closed * 100) if total_closed > 0 else 0.0
+
+        compass_data = trading_compass.compute_edge_metrics(closed_list, b_pos, tot_eq)
+        health_score = compass_data.get("health_score", 50)
+        verdict = compass_data.get("verdict", "ALLINEATO")
+
+        sign_real = "+" if today_realized >= 0 else ""
+        sign_unreal = "+" if unreal_pnl >= 0 else ""
+        icon_res = "🟢" if (today_realized + unreal_pnl) >= 0 else "🔻"
+
+        msg = (
+            f"🌙 *BILANCIO QUANTITATIVO GIORNALIERO (22:00 CET)*\n"
+            f"────────────────────────\n"
+            f"• *PnL Realizzato Oggi:* `{sign_real}${today_realized:.2f}` ({wins}/{total_closed} vincenti - `{win_rate:.0f}%`)\n"
+            f"• *PnL Fluttuante Aperto:* `{sign_unreal}${unreal_pnl:.2f}`\n"
+            f"• *Risultato Netto Operativo:* {icon_res} `{(today_realized + unreal_pnl):+.2f} USDT`\n"
+            f"• *Health & Alignment Score:* `{health_score}/100` [{verdict}]\n\n"
+        )
+
+        if b_pos:
+            msg += f"📊 *POSIZIONI NOTTURNE IN GESTIONE ({len(b_pos)}):*\n"
+            for bp in b_pos:
+                bsign = "+" if bp['unrealized_pnl'] >= 0 else ""
+                stage = _POSITION_RISK_STAGE.get(bp['symbol'], 'INITIAL')
+                stage_badge = "🛡️ BE PROTECTED" if stage == "BE_SAFE" else ("🔒 LOCK PROFIT" if stage == "LOCK_PROFIT" else "PARACADUTE SL")
+                msg += f"• `{bp['symbol']}` [{bp['side']}]: `{bsign}${bp['unrealized_pnl']:.2f}` ({bp['pnl_pct']:+.2f}%) &rarr; _{stage_badge}_\n"
+        else:
+            msg += "💤 *Nessuna posizione aperta sui futures.* Monitoraggio radar attivo 24/7."
+
+        target_ids = get_target_chat_ids()
+        clean_recap = clean_telegram_markdown(msg)
+        for uid in target_ids:
+            try:
+                await application.bot.send_message(chat_id=uid, text=clean_recap, parse_mode="Markdown")
+            except Exception:
+                try:
+                    await application.bot.send_message(chat_id=uid, text=strip_markdown(msg))
+                except Exception:
+                    pass
+    except Exception as e_recap:
+        print(f"[!] Errore recap giornaliero: {e_recap}")
+
 async def auto_flatten_overnight_job(application):
     """
     Regola tassativa Day-Trading per azioni tradizionali: Flat by 21:55 CET (15:55 EST).
@@ -3113,9 +3173,31 @@ def _sync_crypto_risk_and_screening():
                     or_high = float(high.iloc[-5:-1].max())
                     or_low = float(low.iloc[-5:-1].min())
 
+                    # Calcolo ATR Dinamico (Average True Range a 14 periodi) per tarare Stop Loss e Take Profit
+                    tr1 = high - low
+                    tr2 = (high - close.shift(1)).abs()
+                    tr3 = (low - close.shift(1)).abs()
+                    tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+                    atr = float(tr.rolling(14).mean().iloc[-1] or (last_c * 0.01))
+                    atr_pct = (atr / last_c) * 100
+                    
+                    # Stop Loss calibrato su 1.4x ATR (minimo 0.90%, massimo 1.80%)
+                    dynamic_sl_pct = round(max(0.90, min(1.80, atr_pct * 1.4)), 2)
+                    # Take Profit calibrato con Rapporto Aureo Istituzionale 1:3
+                    dynamic_tp_pct = round(dynamic_sl_pct * 3.0, 2)
+
                     # INGRESSO SHORT (Ammesso solo se Macro Bias è BEARISH)
                     # Verifica Confluenza Ciclica Hurst/Migliorino ed Elliott
                     if macro_bias == "BEARISH" and (last_c < or_low) and (last_c < ema20 < ema50) and (rsi < 48) and (vol_ratio >= 1.10):
+                        # Convalida Microstruttura del Book (Order Book Imbalance)
+                        try:
+                            obi = bybit_service.get_orderbook_imbalance(b_sym)
+                            if obi.get("bias") == "BUY_WALL" and obi.get("imbalance", 0) > 0.40:
+                                print(f"🛡️ [OBI Shield Short] {b_sym} presenta muri di acquisto sul book (Imbalance: {obi['imbalance']:+.2f}). Evitato short sul supporto.")
+                                continue
+                        except Exception as e_obi:
+                            print(f"[!] Warning verifica OBI: {e_obi}")
+
                         # Convalida quantitativa profonda: verifica se la ciclica di Hurst e il Battleplan confermano o non ostacolano il setup
                         try:
                             from services.deep_trade_analysis_service import get_deep_trade_forecast
@@ -3128,8 +3210,8 @@ def _sync_crypto_risk_and_screening():
                         except Exception as e_fc:
                             print(f"[!] Warning verifica ciclica forecast: {e_fc}")
 
-                        print(f"📉 [Setup A+ SHORT Confluente] {b_sym} con Macro BEARISH (RSI: {rsi:.1f}, VolRatio: {vol_ratio:.2f}x). Ordine dinamico ${dynamic_notional:,.0f}...")
-                        order_res = bybit_service.place_order(b_sym, side="Sell", notional_usd=dynamic_notional, take_profit_pct=3.6, stop_loss_pct=1.2)
+                        print(f"📉 [Setup A+ SHORT Confluente] {b_sym} con Macro BEARISH (RSI: {rsi:.1f}, VolRatio: {vol_ratio:.2f}x, ATR-SL: {dynamic_sl_pct}%). Ordine dinamico ${dynamic_notional:,.0f}...")
+                        order_res = bybit_service.place_order(b_sym, side="Sell", notional_usd=dynamic_notional, take_profit_pct=dynamic_tp_pct, stop_loss_pct=dynamic_sl_pct)
                         if "error" not in order_res:
                             notification_events.append((
                                 f"🔻 *NUOVO ORDINE SHORT APERTO (SETUP A+)*\n"
@@ -3137,12 +3219,22 @@ def _sync_crypto_risk_and_screening():
                                 f"• *Asset:* `{b_sym}` ({b_name})\n"
                                 f"• *Notionale Dinamico (10% Equity):* `${dynamic_notional:,.0f}`\n"
                                 f"• *Macro Bias:* `BEARISH` (BTC < EMA50 4H)\n"
-                                f"• *Target R:R 1:3:* Take Profit +3.60% | Stop Loss -1.20%"
+                                f"• *Target R:R 1:3 ATR:* Take Profit +{dynamic_tp_pct:.2f}% | Stop Loss -{dynamic_sl_pct:.2f}%\n"
+                                f"• *Confluenza:* OBI Confermato, FLD Hurst e Battleplan sincronizzati."
                             ))
                         break
 
                     # INGRESSO LONG (Ammesso solo se Macro Bias è BULLISH)
                     elif macro_bias == "BULLISH" and (last_c > or_high) and (last_c > ema20 > ema50) and (rsi > 52) and (vol_ratio >= 1.10):
+                        # Convalida Microstruttura del Book (Order Book Imbalance)
+                        try:
+                            obi = bybit_service.get_orderbook_imbalance(b_sym)
+                            if obi.get("bias") == "SELL_WALL" and obi.get("imbalance", 0) < -0.40:
+                                print(f"🛡️ [OBI Shield Long] {b_sym} presenta muri di vendita sul book (Imbalance: {obi['imbalance']:+.2f}). Evitato long sulla resistenza.")
+                                continue
+                        except Exception as e_obi:
+                            print(f"[!] Warning verifica OBI: {e_obi}")
+
                         # Convalida quantitativa profonda: verifica se la ciclica di Hurst e il Battleplan confermano o non ostacolano il setup
                         try:
                             from services.deep_trade_analysis_service import get_deep_trade_forecast
@@ -3155,8 +3247,8 @@ def _sync_crypto_risk_and_screening():
                         except Exception as e_fc:
                             print(f"[!] Warning verifica ciclica forecast: {e_fc}")
 
-                        print(f"📈 [Setup A+ LONG Confluente] {b_sym} con Macro BULLISH (RSI: {rsi:.1f}, VolRatio: {vol_ratio:.2f}x). Ordine dinamico ${dynamic_notional:,.0f}...")
-                        order_res = bybit_service.place_order(b_sym, side="Buy", notional_usd=dynamic_notional, take_profit_pct=3.6, stop_loss_pct=1.2)
+                        print(f"📈 [Setup A+ LONG Confluente] {b_sym} con Macro BULLISH (RSI: {rsi:.1f}, VolRatio: {vol_ratio:.2f}x, ATR-SL: {dynamic_sl_pct}%). Ordine dinamico ${dynamic_notional:,.0f}...")
+                        order_res = bybit_service.place_order(b_sym, side="Buy", notional_usd=dynamic_notional, take_profit_pct=dynamic_tp_pct, stop_loss_pct=dynamic_sl_pct)
                         if "error" not in order_res:
                             notification_events.append((
                                 f"🟢 *NUOVO ORDINE LONG APERTO (SETUP A+)*\n"
@@ -3164,7 +3256,8 @@ def _sync_crypto_risk_and_screening():
                                 f"• *Asset:* `{b_sym}` ({b_name})\n"
                                 f"• *Notionale Dinamico (10% Equity):* `${dynamic_notional:,.0f}`\n"
                                 f"• *Macro Bias:* `BULLISH` (BTC > EMA50 4H)\n"
-                                f"• *Target R:R 1:3:* Take Profit +3.60% | Stop Loss -1.20%"
+                                f"• *Target R:R 1:3 ATR:* Take Profit +{dynamic_tp_pct:.2f}% | Stop Loss -{dynamic_sl_pct:.2f}%\n"
+                                f"• *Confluenza:* OBI Confermato, FLD Hurst e Battleplan sincronizzati."
                             ))
                         break
                 except Exception as ex:
@@ -3249,6 +3342,14 @@ async def post_init(application):
             CronTrigger(hour=21, minute=55, timezone="Europe/Rome"),
             args=[application],
             id="auto_flatten_2155",
+            replace_existing=True
+        )
+        # Report Giornaliero Silenzioso di Fine Giornata alle 22:00 CET
+        scheduler.add_job(
+            daily_evening_recap_job,
+            CronTrigger(hour=22, minute=0, timezone="Europe/Rome"),
+            args=[application],
+            id="daily_evening_recap_2200",
             replace_existing=True
         )
         # Watchdog proattivo della Sentinella ogni 10 minuti (per massima reattività)

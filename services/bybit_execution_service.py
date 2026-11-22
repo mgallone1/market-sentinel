@@ -152,6 +152,32 @@ class BybitExecutionService:
             print(f"[!] Errore tickers Bybit: {e}")
             return {}
 
+    def get_orderbook_imbalance(self, symbol: str, limit: int = 15) -> Dict[str, Any]:
+        """
+        Calcola l'Order Book Imbalance (OBI) sui primi N livelli del book.
+        Valori positivi (> +0.30): forte pressione in acquisto (muri di Bid).
+        Valori negativi (< -0.30): forte pressione in vendita (muri di Ask).
+        """
+        clean_sym = symbol.upper().replace("/", "").replace("-", "")
+        try:
+            res = self.session.get_orderbook(category="linear", symbol=clean_sym, limit=limit)
+            if res.get("retCode") == 0:
+                bids = res.get("result", {}).get("b", [])
+                asks = res.get("result", {}).get("a", [])
+                bid_vol = sum(float(b[1]) for b in bids)
+                ask_vol = sum(float(a[1]) for a in asks)
+                tot_vol = bid_vol + ask_vol
+                imbalance = (bid_vol - ask_vol) / tot_vol if tot_vol > 0 else 0.0
+                return {
+                    "imbalance": round(imbalance, 3),
+                    "bid_vol": round(bid_vol, 2),
+                    "ask_vol": round(ask_vol, 2),
+                    "bias": "BUY_WALL" if imbalance > 0.35 else ("SELL_WALL" if imbalance < -0.35 else "BALANCED")
+                }
+            return {"imbalance": 0.0, "bias": "BALANCED"}
+        except Exception as e:
+            return {"imbalance": 0.0, "bias": "BALANCED", "error": str(e)}
+
     def place_order(
         self,
         symbol: str,
