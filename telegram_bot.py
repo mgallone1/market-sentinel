@@ -2942,27 +2942,32 @@ async def crypto_auto_risk_manager_job(application):
                         except Exception:
                             pass
 
-        # 2. Controllo Always in Trading: se abbiamo meno di 1 posizione crypto aperta, cerchiamo il miglior setup e apriamo
-        if len(crypto_positions) == 0:
-            active_symbols = {p.get("symbol", "").replace("/", "").upper() for p in crypto_positions}
+        # 2. Controllo Always in Trading: manteniamo un paniere diversificato (fino a 3 posizioni contemporanee)
+        target_max_positions = 3
+        if len(crypto_positions) < target_max_positions:
+            active_clean = {p.get("symbol", "").replace("/", "").upper() for p in crypto_positions}
+            # Universo diversificato di crypto negoziabili su Alpaca
             candidates = [
-                ("SOL/USD", "SOLUSD", "SOL-USD", "Solana"),
                 ("BTC/USD", "BTCUSD", "BTC-USD", "Bitcoin"),
-                ("ETH/USD", "ETHUSD", "ETH-USD", "Ethereum")
+                ("ETH/USD", "ETHUSD", "ETH-USD", "Ethereum"),
+                ("SOL/USD", "SOLUSD", "SOL-USD", "Solana"),
+                ("AVAX/USD", "AVAXUSD", "AVAX-USD", "Avalanche"),
+                ("LINK/USD", "LINKUSD", "LINK-USD", "Chainlink")
             ]
 
-            best_candidate = None
-            best_score = -999
-
+            eligible = []
             for pair_slash, pair_clean, yf_sym, name in candidates:
-                if pair_clean in active_symbols or pair_slash in active_symbols:
+                if pair_clean in active_clean or pair_slash.replace("/", "") in active_clean:
                     continue
+
                 try:
                     import yfinance as yf
                     import pandas as pd
                     df = yf.download(yf_sym, period="5d", interval="15m", progress=False)
                     if df.empty or len(df) < 25:
+                        eligible.append((pair_slash, name, 0, "NEUTRAL"))
                         continue
+
                     close = df["Close"].iloc[:, 0] if isinstance(df["Close"], pd.DataFrame) else df["Close"]
                     delta = close.diff()
                     gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
@@ -2978,44 +2983,41 @@ async def crypto_auto_risk_manager_job(application):
                         score += 2
                     if ema20 > ema50:
                         score += 2
-                    if 35 <= rsi <= 70:
+                    if 35 <= rsi <= 65:
                         score += 2
                     elif rsi < 35:
-                        score += 3 # Potenziale rimbalzo da ipervenduto
+                        score += 3 # Segnale forte di rimbalzo da ipervenduto
 
-                    if score > best_score:
-                        best_score = score
-                        best_candidate = (pair_slash, name, last_c, rsi)
-                except Exception as ex_candle:
-                    print(f"[!] Errore analisi candele {yf_sym}: {ex_candle}")
+                    eligible.append((pair_slash, name, score, "BULLISH" if score >= 2 else "NEUTRAL"))
+                except Exception as ex_c:
+                    eligible.append((pair_slash, name, 0, "NEUTRAL"))
 
-            # Se abbiamo trovato un candidato valido (o fallback su SOL/USD)
-            target_pair = best_candidate[0] if best_candidate else "SOL/USD"
-            target_name = best_candidate[1] if best_candidate else "Solana"
-            target_price = best_candidate[2] if best_candidate else 0.0
+            # Ordina per score quantitativo decrescente per selezionare il miglior asset diversificato
+            eligible.sort(key=lambda x: x[2], reverse=True)
 
-            print(f"🪙 [Crypto Always-Trading] Nessuna posizione crypto attiva. Apertura automatica di $2.500 su {target_pair} (Score: {best_score})...")
-            res_order = alpaca_service.place_crypto_order(symbol=target_pair, notional=2500.0, side="buy")
-            if "error" not in res_order:
-                for uid in AUTHORIZED_USER_IDS:
-                    try:
-                        await application.bot.send_message(
-                            chat_id=uid,
-                            text=(
-                                "⚡ *CRYPTO TRADING 24/7 ATTIVO — NUOVO INGRESSO AUTOMATICO* 🚀\n"
-                                "────────────────────────\n"
-                                f"• *Asset:* *{target_name}* (`{target_pair}`)\n"
-                                f"• *Importo Operazione:* `$2,500.00`\n"
-                                f"• *Strategia:* Always in Trading 24/7 (TP: +2.5% | SL: -1.5%)\n"
-                                f"• *Status Ordine:* `{res_order.get('status', 'inviato').upper()}`\n\n"
-                                "💡 _Posizione sotto monitoraggio automatico continuo h24._"
-                            ),
-                            parse_mode="Markdown"
-                        )
-                    except Exception:
-                        pass
-            else:
-                print(f"[!] Errore ordine automatico crypto: {res_order.get('error')}")
+            if eligible:
+                target_pair, target_name, target_score, direction = eligible[0]
+                print(f"🪙 [Crypto Multi-Asset] Apertura diversificata di $2.500 su {target_pair} ({target_name}) con score: {target_score}...")
+                res_order = alpaca_service.place_crypto_order(symbol=target_pair, notional=2500.0, side="buy")
+                if "error" not in res_order:
+                    for uid in AUTHORIZED_USER_IDS:
+                        try:
+                            await application.bot.send_message(
+                                chat_id=uid,
+                                text=(
+                                    "⚡ *CRYPTO TRADING 24/7 DIVERSIFICATO — NUOVO INGRESSO* 🚀\n"
+                                    "────────────────────────\n"
+                                    f"• *Asset:* *{target_name}* (`{target_pair}`)\n"
+                                    f"• *Importo Operazione:* `$2,500.00`\n"
+                                    f"• *Allocazione:* Paniere multi-crypto attivo (BTC, ETH, SOL e Altcoin)\n"
+                                    f"• *Strategia:* TP: +2.5% | SL: -1.5%\n"
+                                    f"• *Status Ordine:* `{res_order.get('status', 'inviato').upper()}`\n\n"
+                                    "💡 _Il sistema ruota automaticamente e non si concentra su un singolo asset._"
+                                ),
+                                parse_mode="Markdown"
+                            )
+                        except Exception:
+                            pass
 
     except Exception as e:
         print(f"[!] Errore crypto_auto_risk_manager_job: {e}")
