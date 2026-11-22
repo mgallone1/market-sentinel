@@ -627,37 +627,65 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         [data-tip]:focus::after {
             content: attr(data-tip);
             position: absolute;
-            bottom: calc(100% + 6px);
+            bottom: calc(100% + 8px);
             left: 50%;
             transform: translateX(-50%);
-            padding: 6px 10px;
-            border-radius: 6px;
+            padding: 7px 11px;
+            border-radius: 7px;
             background: #0f172a;
             color: #f8fafc;
             font-size: 11px;
-            line-height: 1.35;
+            line-height: 1.4;
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
             font-weight: 500;
             white-space: normal;
             width: max-content;
-            max-width: 230px;
+            max-width: 250px;
             text-align: center;
-            z-index: 999;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.25);
+            z-index: 99999;
+            box-shadow: 0 6px 16px rgba(0,0,0,0.35);
             pointer-events: none;
-            border: 1px solid rgba(255,255,255,0.15);
+            border: 1px solid rgba(255,255,255,0.18);
         }
         [data-tip]:hover::before,
         [data-tip]:focus::before {
             content: '';
             position: absolute;
-            bottom: calc(100% + 1px);
+            bottom: calc(100% + 2px);
             left: 50%;
             transform: translateX(-50%);
-            border: 5px solid transparent;
+            border: 6px solid transparent;
             border-top-color: #0f172a;
-            z-index: 999;
+            z-index: 99999;
             pointer-events: none;
+        }
+
+        /* Tooltip con posizionamento in basso (per elementi in alto a rischio clipping) */
+        [data-tip-pos="bottom"]:hover::after,
+        [data-tip-pos="bottom"]:focus::after {
+            bottom: auto;
+            top: calc(100% + 8px);
+        }
+        [data-tip-pos="bottom"]:hover::before,
+        [data-tip-pos="bottom"]:focus::before {
+            bottom: auto;
+            top: calc(100% + 2px);
+            border-top-color: transparent;
+            border-bottom-color: #0f172a;
+        }
+
+        /* Tooltip allineati a destra (evitano overflow a destra su schermi stretti) */
+        [data-tip-pos="right"]:hover::after,
+        [data-tip-pos="right"]:focus::after {
+            left: auto;
+            right: 0;
+            transform: none;
+        }
+        [data-tip-pos="right"]:hover::before,
+        [data-tip-pos="right"]:focus::before {
+            left: auto;
+            right: 14px;
+            transform: none;
         }
 
         /* Bottom Tab Bar */
@@ -761,23 +789,23 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 
             <!-- 4 Metric Cards: Expected Value, Realized R:R, In-The-Money Ratio, Profit Factor -->
             <div class="diag-grid mono">
-                <div class="diag-cell" data-tip="Valore monetario atteso per trade: se positivo indica che la strategia guadagna nel lungo periodo">
-                    <div class="diag-label">Expected Value (EV)</div>
+                <div class="diag-cell">
+                    <div class="diag-label" data-tip-pos="bottom" data-tip="Valore monetario medio atteso per singola operazione (Expected Value). Se positivo certifica un reale vantaggio matematico cumulativo nel lungo periodo.">Expected Value (EV)</div>
                     <div class="diag-val" id="diag-ev-val">$0.00</div>
                     <div class="diag-sub">Utile atteso per trade</div>
                 </div>
-                <div class="diag-cell" data-tip="Valore monetario atteso per trade: se positivo indica che la strategia guadagna nel lungo periodo">
-                    <div class="diag-label" data-tip="Rapporto Rischio/Rendimento: quanto guadagni quando vinci rispetto a quanto perdi quando vieni stoppato (target minimo 1:2.5)">R:R Reale vs Target</div>
+                <div class="diag-cell">
+                    <div class="diag-label" data-tip-pos="bottom" data-tip="Rapporto Rischio/Rendimento reale calcolato a mercato vs target teorico (1:3.0). Indica quanti dollari incassi in media per ogni dollaro rischiato sullo Stop Loss.">R:R Reale vs Target</div>
                     <div class="diag-val" id="diag-rr-val">1:0.0</div>
                     <div class="diag-sub">Target min: 1:2.5</div>
                 </div>
-                <div class="diag-cell" data-tip="Valore monetario atteso per trade: se positivo indica che la strategia guadagna nel lungo periodo">
-                    <div class="diag-label" data-tip="Percentuale di contratti aperti che si trovano attualmente in profitto non realizzato">Posizioni in Gain</div>
+                <div class="diag-cell">
+                    <div class="diag-label" data-tip-pos="bottom" data-tip="Percentuale e conteggio dei contratti aperti attualmente in profitto, con dettaglio delle posizioni già protette a rischio zero (Break-Even Safe).">Posizioni in Gain</div>
                     <div class="diag-val" id="diag-itm-val">0%</div>
                     <div class="diag-sub" id="diag-prot-sub">0 protette Break-Even</div>
                 </div>
-                <div class="diag-cell" data-tip="Valore monetario atteso per trade: se positivo indica che la strategia guadagna nel lungo periodo">
-                    <div class="diag-label" data-tip="Profitti lordi totali divisi per perdite lorde totali. Superiore a 1.5 indica un forte vantaggio">Profit Factor</div>
+                <div class="diag-cell">
+                    <div class="diag-label" data-tip-pos="bottom" data-tip="Rapporto tra profitti lordi totali e perdite lorde totali. Valori superiori a 1.50 confermano una strategia quantitativa ad alta efficienza statistica.">Profit Factor</div>
                     <div class="diag-val" id="diag-pf-val">0.00</div>
                     <div class="diag-sub">Gross Win / Gross Loss</div>
                 </div>
@@ -819,32 +847,32 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         </div>
         <div class="tf-grid mono">
             <div class="tf-card active" id="card-tf-3s" onclick="setTimeframe('3s')">
-                <div class="tf-header" data-tip="Variazione dell'equity negli ultimi 3 secondi (tick in tempo reale)">Ogni 3s</div>
+                <div class="tf-header" data-tip-pos="bottom" data-tip="Variazione netta del capitale/PnL negli ultimi 3 secondi (tick ad altissima frequenza in tempo reale)">Ogni 3s</div>
                 <div class="tf-delta" id="delta-3s-val">$0.00</div>
                 <div class="tf-pct" id="delta-3s-pct">0.00%</div>
             </div>
             <div class="tf-card" id="card-tf-1m" onclick="setTimeframe('1m')">
-                <div class="tf-header" data-tip="Variazione dell'equity registrata nell'ultimo minuto">1 Minuto</div>
+                <div class="tf-header" data-tip-pos="bottom" data-tip="Variazione netta registrata nell'ultimo minuto di contrattazione">1 Minuto</div>
                 <div class="tf-delta" id="delta-1m-val">$0.00</div>
                 <div class="tf-pct" id="delta-1m-pct">0.00%</div>
             </div>
             <div class="tf-card" id="card-tf-1h" onclick="setTimeframe('1h')">
-                <div class="tf-header" data-tip="Variazione cumulativa del capitale nelle ultime 60 minuti">1 Ora</div>
+                <div class="tf-header" data-tip-pos="bottom" data-tip="Variazione cumulativa netta registrata negli ultimi 60 minuti">1 Ora</div>
                 <div class="tf-delta" id="delta-1h-val">$0.00</div>
                 <div class="tf-pct" id="delta-1h-pct">0.00%</div>
             </div>
             <div class="tf-card" id="card-tf-1d" onclick="setTimeframe('1d')">
-                <div class="tf-header" data-tip="Rendimento delle ultime 24 ore rispetto al saldo della sessione precedente">1 Giorno</div>
+                <div class="tf-header" data-tip-pos="bottom" data-tip="Rendimento cumulativo delle ultime 24 ore rispetto al saldo della sessione precedente">1 Giorno</div>
                 <div class="tf-delta" id="delta-1d-val">$0.00</div>
                 <div class="tf-pct" id="delta-1d-pct">0.00%</div>
             </div>
             <div class="tf-card" id="card-tf-1w" onclick="setTimeframe('1w')">
-                <div class="tf-header" data-tip="Performance progressiva cumulativa negli ultimi 7 giorni">1 Settimana</div>
+                <div class="tf-header" data-tip-pos="bottom" data-tip="Performance progressiva cumulativa negli ultimi 7 giorni di trading">1 Settimana</div>
                 <div class="tf-delta" id="delta-1w-val">$0.00</div>
                 <div class="tf-pct" id="delta-1w-pct">0.00%</div>
             </div>
             <div class="tf-card" id="card-tf-1M" onclick="setTimeframe('1M')">
-                <div class="tf-header" data-tip="Rendimento complessivo a 30 giorni">1 Mese</div>
+                <div class="tf-header" data-tip-pos="bottom" data-tip="Rendimento netto consolidato a 30 giorni">1 Mese</div>
                 <div class="tf-delta" id="delta-1M-val">$0.00</div>
                 <div class="tf-pct" id="delta-1M-pct">0.00%</div>
             </div>
@@ -1865,11 +1893,11 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                     const pSign = p.unrealized_pnl >= 0 ? '+' : '';
                     const pnlClass = p.unrealized_pnl >= 0 ? 'val-up' : 'val-down';
 
-                    let guardHtml = `<span class="trade-guard" data-tip="Stop Loss attivo: chiusura automatica protettiva se la posizione perde l'1.20%">SL -1.20%</span>`;
+                    let guardHtml = `<span class="trade-guard" data-tip-pos="right" data-tip="Stop Loss dinamico (1.4x ATR): protezione automatica calibrata sulla volatilità del mercato">SL -1.20%</span>`;
                     if (p.pnl_pct >= 1.60) {
-                        guardHtml = `<span class="trade-guard guard-lock" data-tip="Trailing Profit Lock attivo: stop alzato per garantire almeno il +1.00% netto">LOCK +1.00%</span>`;
+                        guardHtml = `<span class="trade-guard guard-lock" data-tip-pos="right" data-tip="Trailing Profit Lock attivo: stop rialzato per blindare almeno il +1.00% netto di profitto">LOCK +1.00%</span>`;
                     } else if (p.pnl_pct >= 0.80) {
-                        guardHtml = `<span class="trade-guard guard-be" data-tip="Break-Even Safe attivo: rischio azzerato, stop a +0.20% netto">BE SAFE +0.20%</span>`;
+                        guardHtml = `<span class="trade-guard guard-be" data-tip-pos="right" data-tip="Break-Even Safe attivo: rischio trade azzerato, stop spostato a +0.20% per coprire tutte le fee">BE SAFE +0.20%</span>`;
                     }
 
                     // Calcolo Target Progress Bar
@@ -1903,10 +1931,10 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                                     </div>
                                 </div>
                                 <div class="trade-right">
-                                    <div class="trade-pnl ${pnlClass}" data-tip="PnL non realizzato fluttuante in dollari">
+                                    <div class="trade-pnl ${pnlClass}" data-tip-pos="right" data-tip="PnL non realizzato fluttuante in dollari sulla posizione aperta">
                                         ${pSign}$${p.unrealized_pnl.toFixed(2)}
                                     </div>
-                                    <div style="font-size: 11px;" class="${pnlClass}" data-tip="Rendimento percentuale calcolato sul notionale dinamico (10% equity)">
+                                    <div style="font-size: 11px;" class="${pnlClass}" data-tip-pos="right" data-tip="Rendimento percentuale netto calcolato sul capitale investito (10% equity)">
                                         ${pSign}${p.pnl_pct.toFixed(2)}%
                                     </div>
                                     ${guardHtml}
@@ -1921,7 +1949,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                                         <span style="color: var(--text-dim);">TP (+3.6%): <b style="color: var(--green);">$${tp.toFixed(4)}</b></span>
                                         <span style="color: var(--text-dim);">SL (-1.2%): <b style="color: var(--red);">$${sl.toFixed(4)}</b></span>
                                     </div>
-                                    <div class="target-bar-bg" data-tip="Avanzamento verso il Target Take Profit istituzionale (+3.60%)">
+                                    <div class="target-bar-bg" data-tip-pos="bottom" data-tip="Avanzamento grafico verso il Take Profit istituzionale (R:R 1:3). Scala dinamica verde/ambra">
                                         <div class="target-bar-fill" style="width: ${tpProgress.toFixed(0)}%; background: ${progressColor};"></div>
                                     </div>
                                     <div class="target-level-row" style="color: var(--text-dim); font-size: 9px;">
