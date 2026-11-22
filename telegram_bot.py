@@ -51,6 +51,8 @@ from services.advanced_predictive_system import AdvancedPredictiveSystem
 from services.alpaca_execution_service import AlpacaExecutionService
 from services.bybit_execution_service import BybitExecutionService
 from services.risk_budget_manager import RiskBudgetManager
+from services.dashboard_web_service import create_web_app
+from aiohttp import web
 
 alpaca_service = AlpacaExecutionService()
 bybit_service = BybitExecutionService()
@@ -3129,6 +3131,19 @@ async def post_init(application):
         print("⏰ [Scheduler] Programmato: Briefing 07:00 / 15:00 CET | Watchdog Sentinella ogni 20 minuti!")
     except Exception as e:
         print(f"[!] Errore configurazione scheduler in post_init: {e}")
+
+    # Avvio Server Web Dashboard in background (aiohttp su porta PORT/8080)
+    try:
+        web_port = int(os.getenv("PORT", 8080))
+        web_app = create_web_app(bybit_service, alpaca_service)
+        runner = web.AppRunner(web_app)
+        await runner.setup()
+        site = web.TCPSite(runner, host="0.0.0.0", port=web_port)
+        await site.start()
+        application.bot_data["web_runner"] = runner
+        print(f"🌐 [Dashboard Web] Server HTTP Live avviato su http://0.0.0.0:{web_port}")
+    except Exception as e:
+        print(f"[!] Errore avvio Dashboard Web server: {e}")
 
 async def crypto_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Quadro e quotazioni in tempo reale delle principali Crypto con Long e Short nativo (Bybit & Alpaca)."""

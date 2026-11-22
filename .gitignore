@@ -6,3 +6,4 @@ data/
 trader/state/
 trader/*.json
 trader/universe.txt
+*.db
