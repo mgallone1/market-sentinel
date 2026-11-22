@@ -2578,50 +2578,8 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         return
 
     if data == "cmd_crypto":
-        # Invia direttamente il pannello Crypto 24/7 modificando il messaggio del bot
-        bars = alpaca_service.get_crypto_latest_bars(["BTC/USD", "ETH/USD", "SOL/USD"])
-        eur_usd = MarketDataService.get_eur_usd_rate() or 1.08
-
-        lines = [
-            "🪙 *ALPACA CRYPTO TRADING 24/7*",
-            "────────────────────────",
-            "⚡ *Mercato sempre attivo anche nel Weekend!*",
-            "Tutti i prezzi convertiti con tasso EUR/USD live.\n"
-        ]
-
-        crypto_catalog = [
-            ("BTC/USD", "Bitcoin", "BTC"),
-            ("ETH/USD", "Ethereum", "ETH"),
-            ("SOL/USD", "Solana", "SOL")
-        ]
-
-        for pair, name, short_name in crypto_catalog:
-            bar = bars.get(pair, {})
-            price_usd = float(bar.get("c", 0.0))
-            price_eur = price_usd / eur_usd if price_usd > 0 else 0.0
-            p_usd_str = f"${price_usd:,.2f}" if price_usd > 0 else "N/D"
-            p_eur_str = f"€{price_eur:,.2f}" if price_eur > 0 else "N/D"
-            lines.append(f"• *{name}* (`{pair}`): `{p_usd_str}` (`{p_eur_str}`)")
-
-        lines.append("\n💡 *Come Operare:*")
-        lines.append("Puoi usare i pulsanti sotto da $2.500 oppure digitare:")
-        lines.append("• _\"Compra 2500$ di Solana su Alpaca\"_")
-        lines.append("• _\"Vendi Solana su Alpaca\"_")
-
-        keyboard = [
-            [
-                InlineKeyboardButton("🟠 Compra $2.500 BTC", callback_data="buy_crypto_btc"),
-                InlineKeyboardButton("🔷 Compra $2.500 ETH", callback_data="buy_crypto_eth")
-            ],
-            [
-                InlineKeyboardButton("🟣 Compra $2.500 SOL", callback_data="buy_crypto_sol"),
-                InlineKeyboardButton("⚡ Saldo Alpaca", callback_data="alpaca_refresh")
-            ]
-        ]
-        try:
-            await query.message.edit_text("\n".join(lines), parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
-        except Exception:
-            await query.message.reply_text("\n".join(lines), parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
+        # Inoltra al pannello unificato Bybit Crypto 24/7
+        await crypto_cmd(update, context)
         return
 
     if data == "alpaca_close_all":
@@ -3179,25 +3137,13 @@ async def crypto_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lines.append(f"\n💼 *Saldo Demo Bybit:* `${bybit_equity:,.2f} USDT`")
 
     lines.append("\n💡 *Come Operare con Ordine Diretto:*")
-    lines.append("Puoi digitare liberamente in chat sia Long che Short:")
+    lines.append("Puoi digitare liberamente in chat sia Long che Short con sicurezza:")
     lines.append("• _\"Shorta Bitcoin con 2500$\"_")
     lines.append("• _\"Short Solana su Bybit\"_")
     lines.append("• _\"Compra 2500$ di Ethereum\"_")
     lines.append("• _\"Chiudi posizione Solana\"_")
 
     keyboard = [
-        [
-            InlineKeyboardButton("🟠 Compra $2.500 BTC", callback_data="buy_crypto_btc"),
-            InlineKeyboardButton("🔻 Short $2.500 BTC", callback_data="short_crypto_btc")
-        ],
-        [
-            InlineKeyboardButton("🔷 Compra $2.500 ETH", callback_data="buy_crypto_eth"),
-            InlineKeyboardButton("🔻 Short $2.500 ETH", callback_data="short_crypto_eth")
-        ],
-        [
-            InlineKeyboardButton("🟣 Compra $2.500 SOL", callback_data="buy_crypto_sol"),
-            InlineKeyboardButton("🔻 Short $2.500 SOL", callback_data="short_crypto_sol")
-        ],
         [
             InlineKeyboardButton("🔄 Aggiorna Crypto", callback_data="cmd_crypto"),
             InlineKeyboardButton("⚡ Saldo Alpaca", callback_data="alpaca_refresh")
@@ -3240,12 +3186,8 @@ async def commodities_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lines.append("• _\"Short 15 quote di Argento\"_ o _\"Vendi SLV\"_")
 
     keyboard.append([
-        InlineKeyboardButton("🥇 Compra Oro (GLD)", callback_data="buy_gld"),
-        InlineKeyboardButton("🛢️ Compra Petrolio (USO)", callback_data="buy_uso")
-    ])
-    keyboard.append([
-        InlineKeyboardButton("🥈 Compra Argento (SLV)", callback_data="buy_slv"),
-        InlineKeyboardButton("⚡ Saldo Alpaca", callback_data="alpaca_refresh")
+        InlineKeyboardButton("⚡ Saldo Alpaca", callback_data="alpaca_refresh"),
+        InlineKeyboardButton("💼 Portafoglio", callback_data="cmd_portfolio")
     ])
 
     reply_markup = InlineKeyboardMarkup(keyboard)
