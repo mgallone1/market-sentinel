@@ -10,8 +10,11 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 from typing import Dict, Any
 
-from services.bybit_execution_service import bybit_service
-from services.alpaca_execution_service import alpaca_service
+from services.bybit_execution_service import BybitExecutionService
+from services.alpaca_execution_service import AlpacaExecutionService
+
+_bybit_service: BybitExecutionService = None
+_alpaca_service: AlpacaExecutionService = None
 
 DASHBOARD_HTML = """<!DOCTYPE html>
 <html lang="it">
@@ -383,13 +386,22 @@ async def handle_dashboard_page(request):
 
 async def handle_dashboard_api(request):
     """Restituisce il payload JSON completo in tempo reale per alimentare la dashboard."""
+    global _bybit_service, _alpaca_service
+    if not _bybit_service:
+        _bybit_service = BybitExecutionService()
+    if not _alpaca_service:
+        _alpaca_service = AlpacaExecutionService()
+
     try:
-        b_wallet = bybit_service.get_wallet_summary()
-        b_pos = bybit_service.get_open_positions()
-        b_closed_res = bybit_service.session.get_closed_pnl(category="linear", limit=10)
-        b_closed = b_closed_res.get("result", {}).get("list", [])
+        b_wallet = _bybit_service.get_wallet_summary()
+        b_pos = _bybit_service.get_open_positions()
+        try:
+            b_closed_res = _bybit_service.session.get_closed_pnl(category="linear", limit=10)
+            b_closed = b_closed_res.get("result", {}).get("list", [])
+        except Exception:
+            b_closed = []
         
-        a_summary = alpaca_service.get_account_summary()
+        a_summary = _alpaca_service.get_account_summary()
         
         payload = {
             "status": "online",
@@ -408,7 +420,13 @@ async def handle_dashboard_api(request):
     except Exception as e:
         return web.json_response({"error": str(e)}, status=500)
 
-def create_web_app():
+def create_web_app(bybit_svc=None, alpaca_svc=None):
+    global _bybit_service, _alpaca_service
+    if bybit_svc:
+        _bybit_service = bybit_svc
+    if alpaca_svc:
+        _alpaca_service = alpaca_svc
+
     app = web.Application()
     app.router.add_get("/", handle_dashboard_page)
     app.router.add_get("/api/dashboard", handle_dashboard_api)
