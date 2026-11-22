@@ -2949,8 +2949,8 @@ async def crypto_auto_risk_manager_job(application):
                     except Exception:
                         pass
 
-        # 2. Apertura proattiva sia Long che Short su Bybit: fino a 5 posizioni diversificate
-        if len(bybit_positions) < 5:
+        # 2. Apertura proattiva sia Long che Short su Bybit: fino a 6 posizioni diversificate
+        if len(bybit_positions) < 6:
             active_bybit_syms = {bp["symbol"] for bp in bybit_positions}
             bybit_candidates = [
                 ("SOLUSDT", "SOL-USD", "Solana"),
@@ -2959,7 +2959,10 @@ async def crypto_auto_risk_manager_job(application):
                 ("LINKUSDT", "LINK-USD", "Chainlink"),
                 ("AVAXUSDT", "AVAX-USD", "Avalanche"),
                 ("XRPUSDT", "XRP-USD", "Ripple"),
-                ("DOGEUSDT", "DOGE-USD", "Dogecoin")
+                ("DOGEUSDT", "DOGE-USD", "Dogecoin"),
+                ("SUIUSDT", "SUI20947-USD", "Sui"),
+                ("NEARUSDT", "NEAR-USD", "Near Protocol"),
+                ("BNBUSDT", "BNB-USD", "Binance Coin")
             ]
             for b_sym, b_yf, b_name in bybit_candidates:
                 if b_sym in active_bybit_syms:
@@ -2980,14 +2983,14 @@ async def crypto_auto_risk_manager_job(application):
                     ema50 = float(close.ewm(span=50, adjust=False).mean().iloc[-1])
                     last_c = float(close.iloc[-1])
 
-                    # Segnale SHORT: RSI elevato (>= 60) oppure rottura ribassista sotto le medie
-                    if rsi >= 60 or (last_c < ema20 < ema50):
+                    # Segnale SHORT: RSI elevato (>= 58) oppure rottura ribassista sotto le medie
+                    if rsi >= 58 or (last_c < ema20 < ema50):
                         print(f"📉 [Bybit Futures] Rilevato segnale SHORT su {b_sym} (RSI: {rsi:.1f}). Invio ordine Short Scalping $15,000...")
                         res_order = bybit_service.place_order(b_sym, side="Sell", notional_usd=15000.0, take_profit_pct=0.8, stop_loss_pct=0.6)
                         order_type_label = "SHORT (Ribassista)"
                         order_icon = "🔻"
                     # Segnale LONG: RSI favorevole con trend rialzista
-                    elif rsi <= 55 and (last_c > ema20 > ema50):
+                    elif rsi <= 55 or (last_c > ema20 > ema50):
                         print(f"📈 [Bybit Futures] Rilevato segnale LONG su {b_sym} (RSI: {rsi:.1f}). Invio ordine Long Scalping $15,000...")
                         res_order = bybit_service.place_order(b_sym, side="Buy", notional_usd=15000.0, take_profit_pct=0.8, stop_loss_pct=0.6)
                         order_type_label = "LONG (Rialzista)"
@@ -3091,12 +3094,12 @@ async def post_init(application):
             id="sentinel_watchdog_10min",
             replace_existing=True
         )
-        # Monitor Risk Management Crypto 24/7 (TP +2.5% / SL -1.5% ogni 5 minuti)
+        # Monitor Scalping e Risk Management Crypto 24/7 continuo (ogni 2 minuti)
         scheduler.add_job(
             crypto_auto_risk_manager_job,
-            CronTrigger(minute="*/5", timezone="Europe/Rome"),
+            CronTrigger(minute="*/2", timezone="Europe/Rome"),
             args=[application],
-            id="crypto_risk_mgr_5min",
+            id="crypto_risk_mgr_2min",
             replace_existing=True
         )
         scheduler.start()
