@@ -49,9 +49,11 @@ from services.hurst_migliorino_cycles import HurstMigliorinoCycleService
 from services.cycle_radar import CycleRadarService
 from services.advanced_predictive_system import AdvancedPredictiveSystem
 from services.alpaca_execution_service import AlpacaExecutionService
+from services.bybit_execution_service import BybitExecutionService
 from services.risk_budget_manager import RiskBudgetManager
 
 alpaca_service = AlpacaExecutionService()
+bybit_service = BybitExecutionService()
 risk_manager = RiskBudgetManager(max_risk_usd=100.0, min_rr=2.0)
 from services.video_downloader import VideoDownloaderService
 from services.day_trader_service import DayTraderService
@@ -1769,7 +1771,36 @@ async def _handle_text_message_core(update: Update, context: ContextTypes.DEFAUL
             else:
                 notional_amt = val_num
 
-            # Ordine a mercato 24/7 (senza overnight swap su crypto)
+            # Se l'operazione richiesta è SHORT, usiamo direttamente Bybit Perpetual Futures
+            if side.lower() in ["sell", "short", "vendi", "shorta"]:
+                bybit_sym = "BTCUSDT" if "BTC" in resolved_sym or "BITCOIN" in resolved_sym else (
+                    "ETHUSDT" if "ETH" in resolved_sym or "ETHEREUM" in resolved_sym else (
+                        "SOLUSDT" if "SOL" in resolved_sym or "SOLANA" in resolved_sym else f"{resolved_sym.replace('/', '')}USDT"
+                    )
+                )
+                res_short = bybit_service.place_order(symbol=bybit_sym, side="Sell", notional_usd=notional_amt, take_profit_pct=2.5, stop_loss_pct=1.5)
+                if "error" in res_short:
+                    await status_order_msg.edit_text(
+                        f"⚠️ *Errore ordine Short su Bybit:*\n`{res_short['error']}`",
+                        parse_mode="Markdown"
+                    )
+                else:
+                    await status_order_msg.edit_text(
+                        f"🔻 *ORDINE SHORT CRYPTO ESEGUITO SU BYBIT (24/7)!* 📉\n"
+                        f"────────────────────────\n"
+                        f"• *Contratto:* `{bybit_sym}`\n"
+                        f"• *Operazione:* `SHORT (Vendita allo Scoperto)`\n"
+                        f"• *Importo Notionale:* `${notional_amt:.2f} USDT`\n"
+                        f"• *Prezzo Esecuzione:* `${res_short.get('price'):.2f}`\n"
+                        f"• *Take Profit:* `${res_short.get('take_profit')}` (+2.5% al ribasso)\n"
+                        f"• *Stop Loss:* `${res_short.get('stop_loss')}` (-1.5% al rialzo)\n"
+                        f"• *Status:* `APERTO SUL CONTO DEMO BYBIT` 🎯\n\n"
+                        f"💡 _Visualizza il saldo e le posizioni con `/crypto`._",
+                        parse_mode="Markdown"
+                    )
+                return
+
+            # Ordine LONG a mercato 24/7 (Alpaca)
             res_crypto = alpaca_service.place_crypto_order(symbol=crypto_sym, notional=notional_amt, side=side)
             if "error" in res_crypto:
                 await status_order_msg.edit_text(
@@ -2646,20 +2677,45 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
             "buy_crypto_sol": "SOL/USD"
         }
         chosen_sym = sym_map[data]
-        # Sizing calibrato al portafoglio: $2,500 anziché $100
         res = alpaca_service.place_crypto_order(symbol=chosen_sym, notional=2500.0, side="buy")
         if "error" not in res:
             await query.message.reply_text(
-                f"✅ *ORDINE CRYPTO ESEGUITO SU ALPACA (24/7)!* 🚀\n"
+                f"✅ *ORDINE LONG CRYPTO ESEGUITO (24/7)!* 🚀\n"
                 f"• *Coppia:* `{chosen_sym}`\n"
                 f"• *Importo Notionale:* `$2,500.00`\n"
-                f"• *Tipo Ordine:* Market GTC (Crypto 24/7 - No Overnight Fee)\n"
+                f"• *Tipo Ordine:* Market GTC (Crypto 24/7)\n"
                 f"• *Status:* `{res.get('status', 'inviato').upper()}`\n\n"
-                "💡 _Verifica la posizione aggiornata digitando `/alpaca`._",
+                "💡 _Verifica la posizione aggiornata digitando `/crypto` o `/alpaca`._",
                 parse_mode="Markdown"
             )
         else:
             await query.message.reply_text(f"⚠️ Errore esecuzione crypto: {res.get('error')}")
+        return
+
+    if data in ["short_crypto_btc", "short_crypto_eth", "short_crypto_sol"]:
+        sym_map = {
+            "short_crypto_btc": "BTCUSDT",
+            "short_crypto_eth": "ETHUSDT",
+            "short_crypto_sol": "SOLUSDT"
+        }
+        chosen_sym = sym_map[data]
+        res = bybit_service.place_order(symbol=chosen_sym, side="Sell", notional_usd=2500.0, take_profit_pct=2.5, stop_loss_pct=1.5)
+        if "error" not in res:
+            await query.message.reply_text(
+                f"🔻 *ORDINE SHORT CRYPTO ESEGUITO SU BYBIT (24/7)!* 📉\n"
+                f"────────────────────────\n"
+                f"• *Contratto:* `{chosen_sym}`\n"
+                f"• *Operazione:* `SHORT (Vendita allo Scoperto)`\n"
+                f"• *Controvalore:* `$2,500.00 USDT`\n"
+                f"• *Prezzo Esecuzione:* `${res.get('price'):.2f}`\n"
+                f"• *Take Profit:* `${res.get('take_profit')}` (+2.5%)\n"
+                f"• *Stop Loss:* `${res.get('stop_loss')}` (-1.5%)\n"
+                f"• *Status:* `APERTO SUL CONTO DEMO BYBIT` 🎯\n\n"
+                "💡 _Digita `/crypto` per vedere il P&L live della posizione short._",
+                parse_mode="Markdown"
+            )
+        else:
+            await query.message.reply_text(f"⚠️ Errore esecuzione Short Bybit: {res.get('error')}")
         return
 
     if data == "cmd_crypto":
@@ -3019,6 +3075,91 @@ async def crypto_auto_risk_manager_job(application):
                         except Exception:
                             pass
 
+        # 3. Bybit Perpetual Futures Engine (Long & SHORT nativo 24/7)
+        try:
+            bybit_positions = bybit_service.get_open_positions()
+            # Monitor TP (+2.5%) / SL (-1.5%) sulle posizioni Bybit
+            for bp in bybit_positions:
+                bsym = bp["symbol"]
+                pnl_pct = bp["pnl_pct"]
+                unrealized = bp["unrealized_pnl"]
+                bside = bp["side"]
+                if pnl_pct >= 2.5 or pnl_pct <= -1.5:
+                    bybit_service.close_position(bsym)
+                    action_label = f"🎯 *BYBIT TAKE PROFIT RAGGIUNTO (+{pnl_pct:.2f}%)*" if pnl_pct >= 2.5 else f"🛑 *BYBIT STOP LOSS ESEGUITO ({pnl_pct:.2f}%)*"
+                    for uid in AUTHORIZED_USER_IDS:
+                        try:
+                            await application.bot.send_message(
+                                chat_id=uid,
+                                text=(
+                                    f"{action_label}\n"
+                                    f"────────────────────────\n"
+                                    f"• *Asset:* `{bsym}` [{bside}]\n"
+                                    f"• *Risultato Netto:* `${unrealized:+.2f}` ({pnl_pct:+.2f}%)\n"
+                                    "Posizione futures demo liquidata con successo su Bybit."
+                                ),
+                                parse_mode="Markdown"
+                            )
+                        except Exception:
+                            pass
+
+            # Apertura automatica di posizioni Short/Long su Bybit Futures se abbiamo meno di 2 posizioni
+            if len(bybit_positions) < 2:
+                active_bybit_syms = {bp["symbol"] for bp in bybit_positions}
+                bybit_candidates = [
+                    ("BTCUSDT", "BTC-USD", "Bitcoin"),
+                    ("ETHUSDT", "ETH-USD", "Ethereum"),
+                    ("SOLUSDT", "SOL-USD", "Solana")
+                ]
+                for b_sym, b_yf, b_name in bybit_candidates:
+                    if b_sym in active_bybit_syms:
+                        continue
+                    try:
+                        import yfinance as yf
+                        import pandas as pd
+                        df = yf.download(b_yf, period="5d", interval="15m", progress=False)
+                        if df.empty or len(df) < 25:
+                            continue
+                        close = df["Close"].iloc[:, 0] if isinstance(df["Close"], pd.DataFrame) else df["Close"]
+                        delta = close.diff()
+                        gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+                        loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+                        rs = gain / (loss + 1e-9)
+                        rsi = float((100 - (100 / (1 + rs))).iloc[-1])
+                        ema20 = float(close.ewm(span=20, adjust=False).mean().iloc[-1])
+                        ema50 = float(close.ewm(span=50, adjust=False).mean().iloc[-1])
+                        last_c = float(close.iloc[-1])
+
+                        # Segnale SHORT Bybit: Ipercomprato o rottura al ribasso sotto le medie
+                        if rsi > 70 or (last_c < ema20 < ema50):
+                            print(f"📉 [Bybit Futures] Rilevato segnale SHORT su {b_sym} (RSI: {rsi:.1f}). Invio ordine Short...")
+                            res_short = bybit_service.place_order(b_sym, side="Sell", notional_usd=2500.0, take_profit_pct=2.5, stop_loss_pct=1.5)
+                            if "error" not in res_short:
+                                for uid in AUTHORIZED_USER_IDS:
+                                    try:
+                                        await application.bot.send_message(
+                                            chat_id=uid,
+                                            text=(
+                                                "📉 *BYBIT FUTURES DEMO — NUOVO ORDINE SHORT 24/7* 🔻\n"
+                                                "────────────────────────\n"
+                                                f"• *Contratto:* `{b_sym}`\n"
+                                                f"• *Posizione:* `SHORT (Vendita allo Scoperto)`\n"
+                                                f"• *Controvalore:* `$2,500.00 USDT`\n"
+                                                f"• *Prezzo:* `${res_short.get('price'):.2f}`\n"
+                                                f"• *Take Profit:* `${res_short.get('take_profit')}` (+2.5% al ribasso)\n"
+                                                f"• *Stop Loss:* `${res_short.get('stop_loss')}` (-1.5% al rialzo)\n\n"
+                                                "💡 _Trading ribassista attivo 24/7 sul conto Demo Bybit._"
+                                            ),
+                                            parse_mode="Markdown"
+                                        )
+                                    except Exception:
+                                        pass
+                                break
+                    except Exception as ex_b:
+                        print(f"[!] Errore screening Bybit {b_sym}: {ex_b}")
+        except Exception as e_bybit:
+            print(f"[!] Errore Bybit background engine: {e_bybit}")
+
     except Exception as e:
         print(f"[!] Errore crypto_auto_risk_manager_job: {e}")
 
@@ -3105,18 +3246,21 @@ async def post_init(application):
         print(f"[!] Errore configurazione scheduler in post_init: {e}")
 
 async def crypto_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Quadro e quotazioni in tempo reale delle principali Crypto negoziabili 24/7 su Alpaca."""
+    """Quadro e quotazioni in tempo reale delle principali Crypto con Long e Short nativo (Bybit & Alpaca)."""
     target_msg = get_target_msg(update)
-    status_msg = await target_msg.reply_text("🪙 *Interrogo il book di negoziazione Crypto 24/7 di Alpaca...*", parse_mode="Markdown")
+    status_msg = await target_msg.reply_text("🪙 *Interrogo i mercati Crypto 24/7 (Alpaca & Bybit Futures)...*", parse_mode="Markdown")
 
     bars = alpaca_service.get_crypto_latest_bars(["BTC/USD", "ETH/USD", "SOL/USD"])
+    bybit_wallet = bybit_service.get_wallet_summary()
+    bybit_positions = bybit_service.get_open_positions()
     eur_usd = MarketDataService.get_eur_usd_rate() or 1.08
 
     lines = [
-        "🪙 *ALPACA CRYPTO TRADING 24/7*",
+        "🪙 *CRYPTO TRADING 24/7 (LONG & SHORT REALTIME)*",
         "────────────────────────",
-        "⚡ *Mercato sempre attivo anche nel Weekend!*",
-        "Tutti i prezzi convertiti con tasso EUR/USD live.\n"
+        "⚡ *Mercati attivi 24/7 anche nel Weekend!*",
+        f"💶 *Tasso EUR/USD live:* `1.00 € = ${eur_usd:.4f}`\n",
+        "📊 *QUOTAZIONI CRYPTO LIVE:*"
     ]
 
     crypto_catalog = [
@@ -3133,20 +3277,41 @@ async def crypto_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         p_eur_str = f"€{price_eur:,.2f}" if price_eur > 0 else "N/D"
         lines.append(f"• *{name}* (`{pair}`): `{p_usd_str}` (`{p_eur_str}`)")
 
+    # Stato posizioni Bybit Futures (Short/Long)
+    lines.append("\n🔻 *POSIZIONI BYBIT FUTURES DEMO (LONG & SHORT):*")
+    if bybit_positions:
+        for bp in bybit_positions:
+            sign_pnl = "🟢 +" if bp['unrealized_pnl'] >= 0 else "🔴 "
+            side_icon = "🟢 LONG" if bp['side'] == "BUY" else "🔻 SHORT"
+            lines.append(f"• `{bp['symbol']}` [{side_icon}]: Qty `{bp['size']}` | In `${bp['entry_price']:.2f}` | *{sign_pnl}${bp['unrealized_pnl']:.2f}* ({bp['pnl_pct']:+.2f}%)")
+    else:
+        lines.append("• _Nessuna posizione aperta su Bybit al momento._")
+
+    bybit_equity = bybit_wallet.get("total_equity", 0.0)
+    lines.append(f"\n💼 *Saldo Demo Bybit:* `${bybit_equity:,.2f} USDT`")
+
     lines.append("\n💡 *Come Operare con Ordine Diretto:*")
-    lines.append("Puoi digitare liberamente in chat:")
-    lines.append("• _\"Compra 100$ di Bitcoin su Alpaca\"_")
-    lines.append("• _\"Compra 200$ di Ethereum\"_")
-    lines.append("• _\"Vendi 50$ di Solana\"_")
-    lines.append("\nOppure seleziona un ordine rapido da $100:")
+    lines.append("Puoi digitare liberamente in chat sia Long che Short:")
+    lines.append("• _\"Shorta Bitcoin con 2500$\"_")
+    lines.append("• _\"Short Solana su Bybit\"_")
+    lines.append("• _\"Compra 2500$ di Ethereum\"_")
+    lines.append("• _\"Chiudi posizione Solana\"_")
 
     keyboard = [
         [
             InlineKeyboardButton("🟠 Compra $2.500 BTC", callback_data="buy_crypto_btc"),
-            InlineKeyboardButton("🔷 Compra $2.500 ETH", callback_data="buy_crypto_eth")
+            InlineKeyboardButton("🔻 Short $2.500 BTC", callback_data="short_crypto_btc")
+        ],
+        [
+            InlineKeyboardButton("🔷 Compra $2.500 ETH", callback_data="buy_crypto_eth"),
+            InlineKeyboardButton("🔻 Short $2.500 ETH", callback_data="short_crypto_eth")
         ],
         [
             InlineKeyboardButton("🟣 Compra $2.500 SOL", callback_data="buy_crypto_sol"),
+            InlineKeyboardButton("🔻 Short $2.500 SOL", callback_data="short_crypto_sol")
+        ],
+        [
+            InlineKeyboardButton("🔄 Aggiorna Crypto", callback_data="cmd_crypto"),
             InlineKeyboardButton("⚡ Saldo Alpaca", callback_data="alpaca_refresh")
         ]
     ]
