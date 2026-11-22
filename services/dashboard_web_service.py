@@ -30,6 +30,8 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <title>SENTINEL // DESK TRADING</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js" defer></script>
+    <script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8/hammer.min.js" defer></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js" defer></script>
     <style>
         /* TEMA LIGHT (PREDEFINITO, LUMINOSO E AD ALTA LEGGIBILITÀ) */
         :root {
@@ -671,6 +673,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         </div>
         <div style="display: flex; justify-content: flex-end; margin-bottom: 8px;">
             <div class="chart-controls mono">
+                <button class="tf-btn" id="btn-reset-zoom" onclick="resetChartZoom()" style="display: none; background: var(--amber); color: #fff; border-color: var(--amber);" data-tip="Ripristina la vista panoramica del grafico originale">🔍 RESET ZOOM</button>
                 <button class="tf-btn active" id="btn-tf-3s" onclick="setTimeframe('3s')">3S</button>
                 <button class="tf-btn" id="btn-tf-1m" onclick="setTimeframe('1m')">1M</button>
                 <button class="tf-btn" id="btn-tf-1h" onclick="setTimeframe('1h')">1H</button>
@@ -801,6 +804,14 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         let chartInstance = null;
         let currentTimeframe = '3s';
         let currentInstance = 'bybit'; // 'bybit' | 'alpaca' | 'total'
+
+        function resetChartZoom() {
+            if (chartInstance && typeof chartInstance.resetZoom === 'function') {
+                chartInstance.resetZoom();
+                const rBtn = document.getElementById('btn-reset-zoom');
+                if (rBtn) rBtn.style.display = 'none';
+            }
+        }
 
         function setChartInstance(inst) {
             currentInstance = inst;
@@ -1003,6 +1014,30 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                             intersect: false,
                         },
                         plugins: {
+                            zoom: {
+                                pan: {
+                                    enabled: true,
+                                    mode: 'x',
+                                    onPanComplete: function() {
+                                        const rBtn = document.getElementById('btn-reset-zoom');
+                                        if (rBtn) rBtn.style.display = 'inline-block';
+                                    }
+                                },
+                                zoom: {
+                                    wheel: {
+                                        enabled: true,
+                                        speed: 0.1
+                                    },
+                                    pinch: {
+                                        enabled: true
+                                    },
+                                    mode: 'x',
+                                    onZoomComplete: function() {
+                                        const rBtn = document.getElementById('btn-reset-zoom');
+                                        if (rBtn) rBtn.style.display = 'inline-block';
+                                    }
+                                }
+                            },
                             legend: {
                                 display: true,
                                 position: 'top',
