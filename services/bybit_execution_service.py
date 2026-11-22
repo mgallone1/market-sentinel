@@ -92,8 +92,49 @@ class BybitExecutionService:
                             "volume_24h": float(t.get("volume24h", 0.0))
                         }
                 return data
+            
+            # Fallback pubblico REST se il server demo restituisce rate limit da IP cloud
+            import urllib.request
+            import json
+            req_sym = symbols[0] if symbols and len(symbols) == 1 else "BTCUSDT"
+            url = f"https://api.bybit.com/v5/market/tickers?category=linear&symbol={req_sym}"
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                pub_data = json.loads(resp.read().decode())
+                if pub_data.get("retCode") == 0:
+                    t_item = pub_data.get("result", {}).get("list", [])[0]
+                    return {
+                        req_sym: {
+                            "last_price": float(t_item.get("lastPrice", 0.0)),
+                            "price_24h_pc": float(t_item.get("price24hPcnt", 0.0)) * 100,
+                            "high_24h": float(t_item.get("highPrice24h", 0.0)),
+                            "low_24h": float(t_item.get("lowPrice24h", 0.0)),
+                            "volume_24h": float(t_item.get("volume24h", 0.0))
+                        }
+                    }
             return {}
         except Exception as e:
+            # Secondo fallback da CoinGecko o Yahoo se Bybit è rate-limited
+            try:
+                import urllib.request, json
+                req_sym = symbols[0] if symbols and len(symbols) == 1 else "BTCUSDT"
+                url = f"https://api.bybit.com/v5/market/tickers?category=linear&symbol={req_sym}"
+                req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+                with urllib.request.urlopen(req, timeout=5) as resp:
+                    pub_data = json.loads(resp.read().decode())
+                    if pub_data.get("retCode") == 0:
+                        t_item = pub_data.get("result", {}).get("list", [])[0]
+                        return {
+                            req_sym: {
+                                "last_price": float(t_item.get("lastPrice", 0.0)),
+                                "price_24h_pc": float(t_item.get("price24hPcnt", 0.0)) * 100,
+                                "high_24h": float(t_item.get("highPrice24h", 0.0)),
+                                "low_24h": float(t_item.get("lowPrice24h", 0.0)),
+                                "volume_24h": float(t_item.get("volume24h", 0.0))
+                            }
+                        }
+            except Exception:
+                pass
             print(f"[!] Errore tickers Bybit: {e}")
             return {}
 
