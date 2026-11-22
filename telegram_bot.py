@@ -2911,28 +2911,34 @@ async def crypto_auto_risk_manager_job(application):
     try:
         # 1. Bybit Perpetual Futures Engine (Long & SHORT nativo 24/7)
         bybit_positions = bybit_service.get_open_positions()
-        # Monitor dinamico Take Profit (+0.80%), Stop Loss (-0.60%) e Break-Even Protettivo (+0.30%) sulle posizioni Bybit
+        # Monitor dinamico Take Profit (+1.50% esteso), Trailing Stop progressivo e Break-Even Protettivo (+0.30%) sulle posizioni Bybit
         for bp in bybit_positions:
             bsym = bp["symbol"]
             pnl_pct = bp["pnl_pct"]
             unrealized = bp["unrealized_pnl"]
             bside = bp["side"]
             entry_p = bp["entry_price"]
+            mark_p = bp.get("mark_price", entry_p)
+            curr_sl = float(bp.get("stop_loss", 0.0) or 0.0)
             
-            # PROTEZIONE BREAK-EVEN: Se il trade supera il +0.30% (coprendo abbondantemente tutte le commissioni di ~0.11%),
-            # blocca il profitto spostando lo Stop Loss al prezzo di pareggio (+0.08% per coprire fee e spread).
-            if pnl_pct >= 0.30:
+            # 1. LIVELLO 1: PROTEZIONE BREAK-EVEN AL +0.30% (Copre commissioni e chiude a zero rischio)
+            if 0.30 <= pnl_pct < 0.70:
                 be_sl = round(entry_p * 1.0008, 4) if bside == "BUY" else round(entry_p * 0.9992, 4)
-                # Verifica se non è già stato aggiornato
-                curr_sl = float(bp.get("stop_loss", 0.0) or 0.0)
                 if (bside == "BUY" and curr_sl < entry_p) or (bside == "SELL" and (curr_sl <= 0 or curr_sl > entry_p)):
                     bybit_service.update_stop_loss(bsym, be_sl)
-                    print(f"🛡️ [Bybit Break-Even] Spostato Stop Loss su {bsym} [{bside}] a Break-Even ({be_sl}) dopo aver superato le commissioni!")
+                    print(f"🛡️ [Day-Trader Break-Even] Spostato Stop Loss su {bsym} [{bside}] a Break-Even ({be_sl}) dopo superamento fee!")
 
-            # TP Scalping a +0.80% (o superiore) e SL di protezione a -0.60%
-            if pnl_pct >= 0.80 or pnl_pct <= -0.60:
+            # 2. LIVELLO 2: TRAILING PROFIT LOCK AL +0.70% (Blocca almeno +0.40% di profitto netto in tasca)
+            elif pnl_pct >= 0.70:
+                trail_sl = round(entry_p * 1.0040, 4) if bside == "BUY" else round(entry_p * 0.9960, 4)
+                if (bside == "BUY" and curr_sl < trail_sl) or (bside == "SELL" and (curr_sl <= 0 or curr_sl > trail_sl)):
+                    bybit_service.update_stop_loss(bsym, trail_sl)
+                    print(f"🚀 [Day-Trader Trailing Lock] Spostato Stop Loss su {bsym} [{bside}] a +0.40% locked profit ({trail_sl})!")
+
+            # 3. TARGET TAKE PROFIT DINAMICO ESTESO (+1.50% per trade importanti ~$225 USDT netti)
+            if pnl_pct >= 1.50 or pnl_pct <= -0.60:
                 bybit_service.close_position(bsym)
-                action_label = f"🎯 *BYBIT SCALPING TAKE PROFIT INCASSATO (+{pnl_pct:.2f}%)*" if pnl_pct >= 0.80 else f"🛑 *BYBIT STOP LOSS ESEGUITO ({pnl_pct:.2f}%)*"
+                action_label = f"🎯 *DAY TRADER CORE TAKE PROFIT (+{pnl_pct:.2f}%)*" if pnl_pct >= 1.50 else f"🛑 *STOP LOSS CHIUSO ({pnl_pct:.2f}%)*"
                 for uid in AUTHORIZED_USER_IDS:
                     try:
                         await application.bot.send_message(
@@ -2941,8 +2947,8 @@ async def crypto_auto_risk_manager_job(application):
                                 f"{action_label}\n"
                                 f"────────────────────────\n"
                                 f"• *Asset:* `{bsym}` [{bside}]\n"
-                                f"• *Risultato Netto Incassato:* `${unrealized:+.2f} USDT` ({pnl_pct:+.2f}%)\n"
-                                "Operazione conclusa e liquidata a mercato su Bybit."
+                                f"• *Profitto Netto Realizzato:* `${unrealized:+.2f} USDT` ({pnl_pct:+.2f}%)\n"
+                                "Strategia Day-Trader Suite eseguita con successo su Bybit."
                             ),
                             parse_mode="Markdown"
                         )
@@ -2983,17 +2989,31 @@ async def crypto_auto_risk_manager_job(application):
                     ema50 = float(close.ewm(span=50, adjust=False).mean().iloc[-1])
                     last_c = float(close.iloc[-1])
 
-                    # Segnale SHORT: RSI elevato (>= 58) oppure rottura ribassista sotto le medie
-                    if rsi >= 58 or (last_c < ema20 < ema50):
-                        print(f"📉 [Bybit Futures] Rilevato segnale SHORT su {b_sym} (RSI: {rsi:.1f}). Invio ordine Short Scalping $15,000...")
-                        res_order = bybit_service.place_order(b_sym, side="Sell", notional_usd=15000.0, take_profit_pct=0.8, stop_loss_pct=0.6)
-                        order_type_label = "SHORT (Ribassista)"
+                    # Calcolo ATR e Volatilità su barre 15m (Day-Trader Suite Logic)
+                    high = df['High'].iloc[:, 0] if isinstance(df['High'], pd.DataFrame) else df['High']
+                    low = df['Low'].iloc[:, 0] if isinstance(df['Low'], pd.DataFrame) else df['Low']
+                    tr1 = high - low
+                    tr2 = (high - close.shift(1)).abs()
+                    tr3 = (low - close.shift(1)).abs()
+                    tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+                    atr14 = float(tr.rolling(14).mean().iloc[-1])
+                    atr_pct = (atr14 / last_c) * 100
+
+                    # Opening Range Breakout (ORB) su ultime 4 barre da 15m (1 ora)
+                    or_high = float(high.iloc[-5:-1].max())
+                    or_low = float(low.iloc[-5:-1].min())
+
+                    # Segnale SHORT: Rottura sotto ORB Low oppure RSI elevato (>= 58) con trend ribassista
+                    if (last_c < or_low) or rsi >= 58 or (last_c < ema20 < ema50):
+                        print(f"📉 [Day-Trader ORB/ATR] Rilevato segnale SHORT su {b_sym} (RSI: {rsi:.1f}, ATR: {atr_pct:.2f}%). Invio ordine Short $15,000...")
+                        res_order = bybit_service.place_order(b_sym, side="Sell", notional_usd=15000.0, take_profit_pct=1.5, stop_loss_pct=0.6)
+                        order_type_label = "SHORT (Breakout Ribassista ORB)"
                         order_icon = "🔻"
-                    # Segnale LONG: RSI favorevole con trend rialzista
-                    elif rsi <= 55 or (last_c > ema20 > ema50):
-                        print(f"📈 [Bybit Futures] Rilevato segnale LONG su {b_sym} (RSI: {rsi:.1f}). Invio ordine Long Scalping $15,000...")
-                        res_order = bybit_service.place_order(b_sym, side="Buy", notional_usd=15000.0, take_profit_pct=0.8, stop_loss_pct=0.6)
-                        order_type_label = "LONG (Rialzista)"
+                    # Segnale LONG: Rottura sopra ORB High oppure trend forte con RSI favorevole
+                    elif (last_c > or_high) or rsi <= 55 or (last_c > ema20 > ema50):
+                        print(f"📈 [Day-Trader ORB/ATR] Rilevato segnale LONG su {b_sym} (RSI: {rsi:.1f}, ATR: {atr_pct:.2f}%). Invio ordine Long $15,000...")
+                        res_order = bybit_service.place_order(b_sym, side="Buy", notional_usd=15000.0, take_profit_pct=1.5, stop_loss_pct=0.6)
+                        order_type_label = "LONG (Breakout Rialzista ORB)"
                         order_icon = "🟢"
                     else:
                         continue
@@ -3004,16 +3024,16 @@ async def crypto_auto_risk_manager_job(application):
                                 await application.bot.send_message(
                                     chat_id=uid,
                                     text=(
-                                        f"{order_icon} *BYBIT FUTURES DEMO — NUOVO TRADE SCALPING 24/7* 🚀\n"
+                                        f"{order_icon} *DAY-TRADER CORE SUITE — NUOVO TRADE 24/7* 🚀\n"
                                         "────────────────────────\n"
                                         f"• *Contratto:* `{b_sym}`\n"
                                         f"• *Operazione:* `{order_type_label}`\n"
                                         f"• *Controvalore:* `$15,000.00 USDT`\n"
                                         f"• *Prezzo Esecuzione:* `${res_order.get('price'):.2f}`\n"
-                                        f"• *Take Profit:* `${res_order.get('take_profit')}` (+0.80% ~+$120 USDT)\n"
-                                        f"• *Stop Loss:* `${res_order.get('stop_loss')}` (-0.60%)\n"
-                                        f"• *Protezione Fee:* Break-Even automatico al +0.30%\n\n"
-                                        "💡 _Scalping rapido ad alta frequenza sul conto Bybit._"
+                                        f"• *Take Profit Target:* `${res_order.get('take_profit')}` (+1.50% ~+$225 USDT)\n"
+                                        f"• *Trailing Lock:* Stop a +0.40% locked al raggiungimento di +0.70%\n"
+                                        f"• *Break-Even Guard:* Rischio azzerato al +0.30%\n\n"
+                                        "💡 _Strategia Opening Range Breakout & ATR Volatility._"
                                     ),
                                     parse_mode="Markdown"
                                 )
