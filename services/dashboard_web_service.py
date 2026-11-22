@@ -580,32 +580,32 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             <span class="mono" style="font-size: 10px; color: var(--text-dim);">LIVE DELTA</span>
         </div>
         <div class="tf-grid mono">
-            <div class="tf-card active" onclick="setTimeframe('3s')">
+            <div class="tf-card active" id="card-tf-3s" onclick="setTimeframe('3s')">
                 <div class="tf-header">Ogni 3s</div>
                 <div class="tf-delta" id="delta-3s-val">$0.00</div>
                 <div class="tf-pct" id="delta-3s-pct">0.00%</div>
             </div>
-            <div class="tf-card" onclick="setTimeframe('1m')">
+            <div class="tf-card" id="card-tf-1m" onclick="setTimeframe('1m')">
                 <div class="tf-header">1 Minuto</div>
                 <div class="tf-delta" id="delta-1m-val">$0.00</div>
                 <div class="tf-pct" id="delta-1m-pct">0.00%</div>
             </div>
-            <div class="tf-card" onclick="setTimeframe('1h')">
+            <div class="tf-card" id="card-tf-1h" onclick="setTimeframe('1h')">
                 <div class="tf-header">1 Ora</div>
                 <div class="tf-delta" id="delta-1h-val">$0.00</div>
                 <div class="tf-pct" id="delta-1h-pct">0.00%</div>
             </div>
-            <div class="tf-card" onclick="setTimeframe('1d')">
+            <div class="tf-card" id="card-tf-1d" onclick="setTimeframe('1d')">
                 <div class="tf-header">1 Giorno</div>
                 <div class="tf-delta" id="delta-1d-val">$0.00</div>
                 <div class="tf-pct" id="delta-1d-pct">0.00%</div>
             </div>
-            <div class="tf-card" onclick="setTimeframe('1w')">
+            <div class="tf-card" id="card-tf-1w" onclick="setTimeframe('1w')">
                 <div class="tf-header">1 Settimana</div>
                 <div class="tf-delta" id="delta-1w-val">$0.00</div>
                 <div class="tf-pct" id="delta-1w-pct">0.00%</div>
             </div>
-            <div class="tf-card" onclick="setTimeframe('1M')">
+            <div class="tf-card" id="card-tf-1M" onclick="setTimeframe('1M')">
                 <div class="tf-header">1 Mese</div>
                 <div class="tf-delta" id="delta-1M-val">$0.00</div>
                 <div class="tf-pct" id="delta-1M-pct">0.00%</div>
@@ -797,6 +797,11 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 if (btn) {
                     if (t === tf) btn.classList.add('active');
                     else btn.classList.remove('active');
+                }
+                const card = document.getElementById('card-tf-' + t);
+                if (card) {
+                    if (t === tf) card.classList.add('active');
+                    else card.classList.remove('active');
                 }
             });
             fetchData();
