@@ -1992,20 +1992,21 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 }).join('');
             }
 
-            // 7. History Table
-            document.getElementById('closed-count-label').innerText = `${bClosed.length} eseguiti`;
+            // 7. History Table (Ordinamento Rigoroso: Più Recente in Alto)
+            const sortedClosed = [...bClosed].sort((a, b) => parseInt(b.updatedTime || 0) - parseInt(a.updatedTime || 0));
+            document.getElementById('closed-count-label').innerText = `${sortedClosed.length} eseguiti`;
             const hBody = document.getElementById('history-tbody');
-            if (bClosed.length === 0) {
+            if (sortedClosed.length === 0) {
                 hBody.innerHTML = `<tr><td colspan="6" style="text-align: center; padding: 20px 0; color: var(--text-dim);">Nessun trade chiuso recente.</td></tr>`;
             } else {
-                hBody.innerHTML = bClosed.slice(0, 15).map(c => {
+                hBody.innerHTML = sortedClosed.slice(0, 20).map(c => {
                     const pVal = parseFloat(c.closedPnl || 0);
                     const pClass = pVal >= 0 ? 'val-up' : 'val-down';
                     const pSign = pVal >= 0 ? '+' : '';
                     const timeStr = c.updatedTime ? new Date(parseInt(c.updatedTime)).toLocaleTimeString('it-IT') : '--:--';
                     return `
                         <tr>
-                            <td style="color: var(--text-muted);">${timeStr}</td>
+                            <td style="color: var(--text-muted); font-weight: 500;">${timeStr}</td>
                             <td style="font-weight: 700; color: var(--text-main);">${c.symbol}</td>
                             <td>${c.side}</td>
                             <td>$${parseFloat(c.avgEntryPrice || 0).toFixed(3)} &rarr; $${parseFloat(c.avgExitPrice || 0).toFixed(3)}</td>
@@ -2329,8 +2330,10 @@ def _fetch_all_live_data_sync(tf: str):
         b_pos = []
 
     try:
-        b_closed_res = _bybit_service.session.get_closed_pnl(category="linear", limit=25)
-        b_closed = b_closed_res.get("result", {}).get("list", [])
+        b_closed_res = _bybit_service.session.get_closed_pnl(category="linear", limit=50)
+        raw_closed = b_closed_res.get("result", {}).get("list", [])
+        # Ordina esplicitamente dal più recente al più vecchio (epoch timestamp descrescente)
+        b_closed = sorted(raw_closed, key=lambda c: int(c.get("updatedTime", 0) or 0), reverse=True)
     except Exception:
         b_closed = []
 
