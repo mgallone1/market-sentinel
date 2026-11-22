@@ -68,6 +68,19 @@ day_trader_svc = DayTraderService()
 sentinel_svc = ProactiveSentinelService()
 ACTIVE_CHAT_IDS: Set[int] = set()
 
+def get_target_chat_ids() -> Set[int]:
+    """Restituisce l'insieme di tutti i chat_id registrati su Supabase e attivi nella sessione."""
+    target_ids = set(ACTIVE_CHAT_IDS)
+    try:
+        db_ids = supabase_svc.get_active_chat_ids()
+        if db_ids:
+            target_ids.update(db_ids)
+    except Exception:
+        pass
+    if not target_ids:
+        target_ids.add(424093845)
+    return target_ids
+
 class AsyncReentrantLock:
     """Lock asincrono rientrante per garantire l'elaborazione ordinata per singolo utente senza deadlock."""
     def __init__(self):
@@ -2880,7 +2893,7 @@ async def auto_flatten_overnight_job(application):
             for s in stock_positions:
                 alpaca_service.close_position(s)
             # Invia notifica di sicurezza
-            for user_id in AUTHORIZED_USER_IDS:
+            for user_id in get_target_chat_ids():
                 try:
                     await application.bot.send_message(
                         chat_id=user_id,
@@ -2930,15 +2943,42 @@ def _get_btc_macro_bias():
         print(f"[!] Errore calcolo bias BTC macro: {e_bias}")
         return "NEUTRAL"
 
+# Stato storico tracciato in memoria per notifiche push tempestive (Zero Spam)
+_LAST_NOTIFIED_MACRO_BIAS: Optional[str] = None
+_POSITION_RISK_STAGE: Dict[str, str] = {}  # {symbol: "INITIAL" | "BE_SAFE" | "LOCK_PROFIT"}
+
 def _sync_crypto_risk_and_screening():
-    """Motore quantitativo istituzionale: allineamento Macro BTC, gestione R:R 1:3 e zero conflitto portafoglio."""
+    """Motore quantitativo istituzionale: allineamento Macro BTC, Dynamic Compounding Sizing e Risk Alerts."""
+    global _LAST_NOTIFIED_MACRO_BIAS
+    notification_events = []
     try:
         # 1. Leggi trend macro da BTC (Timeframe 4 Ore)
         macro_bias = _get_btc_macro_bias()
         print(f"🌊 [Macro Bias BTC 4H] Direzione di mercato: {macro_bias}")
 
-        # 2. Gestione posizioni aperte Bybit
+        if macro_bias in ["BULLISH", "BEARISH"] and _LAST_NOTIFIED_MACRO_BIAS != macro_bias:
+            bias_icon = "🟢" if macro_bias == "BULLISH" else "🔻"
+            bias_title = "RIALZISTA (BULLISH)" if macro_bias == "BULLISH" else "RIBASSISTA (BEARISH)"
+            bias_allowed = "Apertura esclusiva di posizioni LONG su breakout di forza" if macro_bias == "BULLISH" else "Apertura esclusiva di posizioni SHORT su breakout di debolezza"
+            notification_events.append((
+                f"{bias_icon} *MACRO TREND SHIELD BTC 4H: {bias_title}*\n"
+                f"────────────────────────\n"
+                f"• *Nuova Direzionalità:* `{macro_bias}`\n"
+                f"• *Regola Portafoglio:* {bias_allowed}.\n"
+                f"• *Asset Scudo:* BTCUSDT (Timeframe 4 Ore - EMA 20/50).\n"
+                f"💡 _Protezione attiva: zero conflitti Long/Short simultanei._"
+            ))
+            _LAST_NOTIFIED_MACRO_BIAS = macro_bias
+
+        # 2. Gestione posizioni aperte Bybit e Scudi Protettivi
         bybit_positions = bybit_service.get_open_positions()
+        current_symbols = {bp["symbol"] for bp in bybit_positions}
+
+        # Pulisci stage per posizioni non più aperte
+        stale_syms = [s for s in _POSITION_RISK_STAGE if s not in current_symbols]
+        for s in stale_syms:
+            del _POSITION_RISK_STAGE[s]
+
         for bp in bybit_positions:
             bsym = bp["symbol"]
             pnl_pct = bp["pnl_pct"]
@@ -2947,15 +2987,33 @@ def _sync_crypto_risk_and_screening():
             entry_p = bp["entry_price"]
             curr_sl = float(bp.get("stop_loss", 0.0) or 0.0)
 
-            # A. Se la posizione è in conflitto totale col bias macro (es. LONG aperto durante downtrend macro) ed è in perdita,
-            # chiudila per evitare accumulo di perdite contro-trend
+            if bsym not in _POSITION_RISK_STAGE:
+                _POSITION_RISK_STAGE[bsym] = "INITIAL"
+
+            # A. Chiusura se la posizione è in conflitto totale col bias macro ed è in perdita
             if macro_bias == "BEARISH" and bside == "BUY" and pnl_pct < -0.10:
                 print(f"🛑 [Macro Shield] Chiusura posizione Long contro-trend su {bsym} (Macro: BEARISH).")
                 bybit_service.close_position(bsym)
+                notification_events.append((
+                    f"🛑 *MACRO SHIELD: CHIUSURA PREVENTIVA CONTRO-TREND*\n"
+                    f"────────────────────────\n"
+                    f"• *Contratto:* `{bsym}` [LONG]\n"
+                    f"• *PnL Chiusura:* `${unrealized:+.2f}` ({pnl_pct:+.2f}%)\n"
+                    f"• *Motivazione:* Inversione Macro BTC a BEARISH.\n"
+                    f"💡 _Capitale preservato: evitato accumulo di drawdown contro-trend._"
+                ))
                 continue
             elif macro_bias == "BULLISH" and bside == "SELL" and pnl_pct < -0.10:
                 print(f"🛑 [Macro Shield] Chiusura posizione Short contro-trend su {bsym} (Macro: BULLISH).")
                 bybit_service.close_position(bsym)
+                notification_events.append((
+                    f"🛑 *MACRO SHIELD: CHIUSURA PREVENTIVA CONTRO-TREND*\n"
+                    f"────────────────────────\n"
+                    f"• *Contratto:* `{bsym}` [SHORT]\n"
+                    f"• *PnL Chiusura:* `${unrealized:+.2f}` ({pnl_pct:+.2f}%)\n"
+                    f"• *Motivazione:* Inversione Macro BTC a BULLISH.\n"
+                    f"💡 _Capitale preservato: evitato accumulo di drawdown contro-trend._"
+                ))
                 continue
 
             # B. Break-Even Protettivo (scatta al +0.80% e protegge +0.20% netto)
@@ -2964,6 +3022,16 @@ def _sync_crypto_risk_and_screening():
                 if (bside == "BUY" and curr_sl < entry_p) or (bside == "SELL" and (curr_sl <= 0 or curr_sl > entry_p)):
                     bybit_service.update_stop_loss(bsym, be_sl)
                     print(f"🛡️ [Day-Trader Break-Even] Spostato Stop Loss su {bsym} a BE protetto ({be_sl})!")
+                    if _POSITION_RISK_STAGE.get(bsym) != "BE_SAFE":
+                        _POSITION_RISK_STAGE[bsym] = "BE_SAFE"
+                        notification_events.append((
+                            f"🛡️ *BREAK-EVEN ATTIVATO: RISCHIO AZZERATO*\n"
+                            f"────────────────────────\n"
+                            f"• *Contratto:* `{bsym}` [{bside}]\n"
+                            f"• *Ingresso:* `${entry_p:.4f}` &rarr; *Nuovo SL:* `${be_sl:.4f}`\n"
+                            f"• *Guadagno Fluttuante:* `${unrealized:+.2f}` ({pnl_pct:+.2f}%)\n"
+                            f"• *Garanzia:* Stop alzato a +0.20% netto a totale copertura delle commissioni di exchange."
+                        ))
 
             # C. Trailing Lock (scatta al +1.60% e blocca +1.00% netto)
             elif pnl_pct >= 1.60:
@@ -2971,12 +3039,37 @@ def _sync_crypto_risk_and_screening():
                 if (bside == "BUY" and curr_sl < trail_sl) or (bside == "SELL" and (curr_sl <= 0 or curr_sl > trail_sl)):
                     bybit_service.update_stop_loss(bsym, trail_sl)
                     print(f"🚀 [Trailing Lock] Spostato Stop Loss su {bsym} a +1.00% netto ({trail_sl})!")
+                    if _POSITION_RISK_STAGE.get(bsym) != "LOCK_PROFIT":
+                        _POSITION_RISK_STAGE[bsym] = "LOCK_PROFIT"
+                        notification_events.append((
+                            f"🚀 *TRAILING PROFIT LOCK ATTIVATO*\n"
+                            f"────────────────────────\n"
+                            f"• *Contratto:* `{bsym}` [{bside}]\n"
+                            f"• *Nuovo Stop Garantito:* `${trail_sl:.4f}` (+1.00% Netto)\n"
+                            f"• *PnL Attuale:* `${unrealized:+.2f}` ({pnl_pct:+.2f}%)\n"
+                            f"• *Target R:R 1:3:* In corsa libera verso il Take Profit (+3.60%)."
+                        ))
 
             # D. Target Istituzionale 1:3 (+3.60% TP / -1.20% SL)
             if pnl_pct >= 3.60 or pnl_pct <= -1.20:
                 bybit_service.close_position(bsym)
+                is_tp = pnl_pct >= 3.60
+                event_title = "🎯 *TAKE PROFIT RAGGIUNTO (+3.60%)*" if is_tp else "🛑 *STOP LOSS ESEGUITO (-1.20%)*"
+                notification_events.append((
+                    f"{event_title}\n"
+                    f"────────────────────────\n"
+                    f"• *Contratto:* `{bsym}` [{bside}]\n"
+                    f"• *Risultato Incassato:* `${unrealized:+.2f} USDT` ({pnl_pct:+.2f}%)\n"
+                    f"• *Gestione Disciplinata:* Esecuzione target 1:3 asimmetrico completata su Bybit."
+                ))
 
-        # 3. Screening ingressi selettivi A+ (Massimo 3 posizioni, SOLO nella direzione del Macro Bias)
+        # 3. Dynamic Position Sizing (Fixed Fractional Compounding sul Capitale Bybit)
+        # Calcola la size in percentuale al conto (10% dell'equity totale UTA, min $3,000, max $30,000)
+        wallet = bybit_service.get_wallet_summary()
+        bybit_equity = float(wallet.get("total_equity", 160000.0) or 160000.0)
+        dynamic_notional = round(max(3000.0, min(30000.0, bybit_equity * 0.10)), 0)
+
+        # Screening ingressi selettivi A+ (Massimo 3 posizioni, SOLO nella direzione del Macro Bias)
         bybit_positions = bybit_service.get_open_positions()
         if len(bybit_positions) < 3 and macro_bias in ["BULLISH", "BEARISH"]:
             active_bybit_syms = {bp["symbol"] for bp in bybit_positions}
@@ -3019,24 +3112,56 @@ def _sync_crypto_risk_and_screening():
 
                     # INGRESSO SHORT (Ammesso solo se Macro Bias è BEARISH)
                     if macro_bias == "BEARISH" and (last_c < or_low) and (last_c < ema20 < ema50) and (rsi < 45) and (vol_ratio >= 1.15):
-                        print(f"📉 [Setup A+ SHORT Confluente] {b_sym} con Macro BEARISH (RSI: {rsi:.1f}, VolRatio: {vol_ratio:.2f}x). Ordine $15,000...")
-                        bybit_service.place_order(b_sym, side="Sell", notional_usd=15000.0, take_profit_pct=3.6, stop_loss_pct=1.2)
+                        print(f"📉 [Setup A+ SHORT Confluente] {b_sym} con Macro BEARISH (RSI: {rsi:.1f}, VolRatio: {vol_ratio:.2f}x). Ordine dinamico ${dynamic_notional:,.0f}...")
+                        order_res = bybit_service.place_order(b_sym, side="Sell", notional_usd=dynamic_notional, take_profit_pct=3.6, stop_loss_pct=1.2)
+                        if "error" not in order_res:
+                            notification_events.append((
+                                f"🔻 *NUOVO ORDINE SHORT APERTO (SETUP A+)*\n"
+                                f"────────────────────────\n"
+                                f"• *Asset:* `{b_sym}` ({b_name})\n"
+                                f"• *Notionale Dinamico (10% Equity):* `${dynamic_notional:,.0f}`\n"
+                                f"• *Macro Bias:* `BEARISH` (BTC < EMA50 4H)\n"
+                                f"• *Target R:R 1:3:* Take Profit +3.60% | Stop Loss -1.20%"
+                            ))
                         break
 
                     # INGRESSO LONG (Ammesso solo se Macro Bias è BULLISH)
                     elif macro_bias == "BULLISH" and (last_c > or_high) and (last_c > ema20 > ema50) and (rsi > 55) and (vol_ratio >= 1.15):
-                        print(f"📈 [Setup A+ LONG Confluente] {b_sym} con Macro BULLISH (RSI: {rsi:.1f}, VolRatio: {vol_ratio:.2f}x). Ordine $15,000...")
-                        bybit_service.place_order(b_sym, side="Buy", notional_usd=15000.0, take_profit_pct=3.6, stop_loss_pct=1.2)
+                        print(f"📈 [Setup A+ LONG Confluente] {b_sym} con Macro BULLISH (RSI: {rsi:.1f}, VolRatio: {vol_ratio:.2f}x). Ordine dinamico ${dynamic_notional:,.0f}...")
+                        order_res = bybit_service.place_order(b_sym, side="Buy", notional_usd=dynamic_notional, take_profit_pct=3.6, stop_loss_pct=1.2)
+                        if "error" not in order_res:
+                            notification_events.append((
+                                f"🟢 *NUOVO ORDINE LONG APERTO (SETUP A+)*\n"
+                                f"────────────────────────\n"
+                                f"• *Asset:* `{b_sym}` ({b_name})\n"
+                                f"• *Notionale Dinamico (10% Equity):* `${dynamic_notional:,.0f}`\n"
+                                f"• *Macro Bias:* `BULLISH` (BTC > EMA50 4H)\n"
+                                f"• *Target R:R 1:3:* Take Profit +3.60% | Stop Loss -1.20%"
+                            ))
                         break
                 except Exception as ex:
                     pass
     except Exception as e:
         print(f"[!] Errore sync crypto worker: {e}")
 
+    return notification_events
+
 async def crypto_auto_risk_manager_job(application):
-    """Delega l'elaborazione pesante in un thread asincrono separato per massima reattività."""
+    """Delega l'elaborazione del risk manager al worker thread e invia notifiche Telegram se scattano eventi."""
     import asyncio
-    await asyncio.to_thread(_sync_crypto_risk_and_screening)
+    events = await asyncio.to_thread(_sync_crypto_risk_and_screening)
+    if events and application and application.bot:
+        target_ids = get_target_chat_ids()
+        for event_msg in events:
+            clean_msg = clean_telegram_markdown(event_msg)
+            for uid in target_ids:
+                try:
+                    await application.bot.send_message(chat_id=uid, text=clean_msg, parse_mode="Markdown")
+                except Exception as e_send:
+                    try:
+                        await application.bot.send_message(chat_id=uid, text=strip_markdown(event_msg))
+                    except Exception:
+                        pass
 
 async def sentinel_watchdog_job(application):
     """Esegue il controllo proattivo periodico della sentinella."""

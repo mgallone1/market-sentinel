@@ -818,11 +818,12 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                     Ogni riga di trade contiene le informazioni essenziali per monitorare il rischio al centesimo:
                 </div>
                 <div style="background: var(--surface-elevated); padding: 10px; border-radius: 6px; border: 1px solid var(--border); display: flex; flex-direction: column; gap: 8px; font-size: 11px;">
-                    <div><strong>• PnL Dollari (es. <code>$-1.62</code>):</strong> Il guadagno o la perdita se chiudessi la posizione adesso. Su una size di $15,000, una perdita di $1.62 è solo rumore di mercato microscopico.</div>
+                    <div><strong>• Sizing Dinamico (10% Equity):</strong> La dimensione di ogni posizione viene ricalcolata automaticamente sull'equity totale Bybit (~$16,000 per trade con compounding esponenziale sui guadagni).</div>
+                    <div><strong>• PnL Dollari (es. <code>$-1.62</code>):</strong> Il guadagno o la perdita se chiudessi la posizione adesso. Su una size di ~$16,000, un importo di $1.62 è solo rumore di mercato microscopico (0.01%).</div>
                     <div><strong>• PnL Percentuale (es. <code>-0.01%</code>):</strong> La percentuale esatta di scostamento dal tuo prezzo d'ingresso. Verde = in profitto, Rosso = sotto il prezzo d'ingresso.</div>
-                    <div><strong>• Badge <code>SL -1.20%</code>:</strong> Il paracadute di sicurezza. Se il trade scende a -1.20% (-$180), il bot chiude all'istante la posizione impedendo perdite più grandi.</div>
-                    <div><strong>• Badge <code>BE SAFE +0.20%</code>:</strong> Scatta appena il trade guadagna +0.80%. Lo stop viene alzato sopra l'ingresso: il rischio è azzerato e le commissioni coperte.</div>
-                    <div><strong>• Badge <code>LOCK +1.00%</code>:</strong> Scatta al +1.60%. Blocca un profitto netto di +$150 lasciando correre il trade verso il Take Profit (+3.60% ~+$540).</div>
+                    <div><strong>• Badge <code>SL -1.20%</code>:</strong> Il paracadute di sicurezza. Se il trade scende a -1.20% (~-$190), il bot chiude all'istante la posizione impedendo perdite più grandi. Notifica push immediata su Telegram.</div>
+                    <div><strong>• Badge <code>BE SAFE +0.20%</code>:</strong> Scatta appena il trade guadagna +0.80%. Lo stop viene alzato a +0.20%: il rischio è azzerato e le commissioni coperte. Notifica push su Telegram.</div>
+                    <div><strong>• Badge <code>LOCK +1.00%</code>:</strong> Scatta al +1.60%. Blocca un profitto netto di +1.00% lasciando correre il trade verso il Take Profit (+3.60%). Notifica push su Telegram.</div>
                 </div>
             </div>
 
@@ -1497,7 +1498,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                                 <div class="trade-pnl ${pnlClass}" data-tip="PnL non realizzato: profitto o perdita fluttuante in dollari su questa specifica posizione">
                                     ${pSign}$${p.unrealized_pnl.toFixed(2)}
                                 </div>
-                                <div style="font-size: 11px;" class="${pnlClass}" data-tip="Rendimento percentuale calcolato sul controvalore nozionale di $15,000">
+                                <div style="font-size: 11px;" class="${pnlClass}" data-tip="Rendimento percentuale calcolato sul controvalore nozionale dinamico (10% equity)">
                                     ${pSign}${p.pnl_pct.toFixed(2)}%
                                 </div>
                                 ${guardHtml}
