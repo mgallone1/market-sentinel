@@ -2923,26 +2923,26 @@ async def crypto_auto_risk_manager_job(application):
             mark_p = bp.get("mark_price", entry_p)
             curr_sl = float(bp.get("stop_loss", 0.0) or 0.0)
             
-            # 1. LIVELLO 1: PROTEZIONE BREAK-EVEN AL +0.30% (Copre commissioni e chiude a zero rischio)
-            if 0.30 <= pnl_pct < 0.70:
-                be_sl = round(entry_p * 1.0008, 4) if bside == "BUY" else round(entry_p * 0.9992, 4)
+            # 1. LIVELLO 1: PROTEZIONE BREAK-EVEN AL +0.60% (Copre ampiamente commissioni e chiude a zero rischio)
+            if 0.60 <= pnl_pct < 1.20:
+                be_sl = round(entry_p * 1.0015, 4) if bside == "BUY" else round(entry_p * 0.9985, 4)
                 if (bside == "BUY" and curr_sl < entry_p) or (bside == "SELL" and (curr_sl <= 0 or curr_sl > entry_p)):
                     bybit_service.update_stop_loss(bsym, be_sl)
-                    print(f"🛡️ [Day-Trader Break-Even] Spostato Stop Loss su {bsym} [{bside}] a Break-Even ({be_sl}) dopo superamento fee!")
+                    print(f"🛡️ [Day-Trader Break-Even] Spostato Stop Loss su {bsym} [{bside}] a Break-Even ({be_sl})!")
 
-            # 2. LIVELLO 2: TRAILING PROFIT LOCK AL +0.70% (Blocca almeno +0.40% di profitto netto in tasca)
-            elif pnl_pct >= 0.70:
-                trail_sl = round(entry_p * 1.0040, 4) if bside == "BUY" else round(entry_p * 0.9960, 4)
+            # 2. LIVELLO 2: TRAILING PROFIT LOCK AL +1.20% (Blocca almeno +0.70% di profitto netto)
+            elif pnl_pct >= 1.20:
+                trail_sl = round(entry_p * 1.0070, 4) if bside == "BUY" else round(entry_p * 0.9930, 4)
                 if (bside == "BUY" and curr_sl < trail_sl) or (bside == "SELL" and (curr_sl <= 0 or curr_sl > trail_sl)):
                     bybit_service.update_stop_loss(bsym, trail_sl)
-                    print(f"🚀 [Day-Trader Trailing Lock] Spostato Stop Loss su {bsym} [{bside}] a +0.40% locked profit ({trail_sl})!")
+                    print(f"🚀 [Day-Trader Trailing Lock] Spostato Stop Loss su {bsym} [{bside}] a +0.70% locked profit ({trail_sl})!")
 
-            # 3. TARGET TAKE PROFIT DINAMICO ESTESO (+1.50% per trade importanti ~$225 USDT netti)
-            if pnl_pct >= 1.50 or pnl_pct <= -0.60:
+            # 3. TARGET TAKE PROFIT ISTITUZIONALE (+3.00%) / STOP LOSS DI RESPIRO SU VOLATILITA (-1.20%)
+            if pnl_pct >= 3.00 or pnl_pct <= -1.20:
                 bybit_service.close_position(bsym)
-                is_stop_loss = pnl_pct <= -0.60
-                action_label = f"🎯 *DAY TRADER CORE TAKE PROFIT (+{pnl_pct:.2f}%)*" if pnl_pct >= 1.50 else f"🛑 *STOP LOSS CHIUSO ({pnl_pct:.2f}%)*"
-                reverse_note = "\n🔄 _Trend invertito: il motore avvia subito la ricerca automatica nella direzione opposta._" if is_stop_loss else ""
+                is_stop_loss = pnl_pct <= -1.20
+                action_label = f"🎯 *DAY TRADER CORE TAKE PROFIT (+{pnl_pct:.2f}%)*" if pnl_pct >= 3.00 else f"🛑 *STOP LOSS CHIUSO ({pnl_pct:.2f}%)*"
+                reverse_note = "\n🔄 _Trend invertito: il motore rientra solo su segnale confluente confermato._" if is_stop_loss else ""
                 for uid in AUTHORIZED_USER_IDS:
                     try:
                         await application.bot.send_message(
@@ -2952,15 +2952,15 @@ async def crypto_auto_risk_manager_job(application):
                                 f"────────────────────────\n"
                                 f"• *Asset:* `{bsym}` [{bside}]\n"
                                 f"• *Risultato:* `${unrealized:+.2f} USDT` ({pnl_pct:+.2f}%){reverse_note}\n\n"
-                                "Strategia Day-Trader Suite eseguita con successo su Bybit."
+                                "Strategia Day-Trader Istituzionale eseguita con successo su Bybit."
                             ),
                             parse_mode="Markdown"
                         )
                     except Exception:
                         pass
 
-        # 2. Apertura proattiva sia Long che Short su Bybit: fino a 6 posizioni diversificate
-        if len(bybit_positions) < 6:
+        # 2. Apertura altamente selettiva (Massimo 3 posizioni simultanee sui migliori setup di forza relativa)
+        if len(bybit_positions) < 3:
             active_bybit_syms = {bp["symbol"] for bp in bybit_positions}
             bybit_candidates = [
                 ("SOLUSDT", "SOL-USD", "Solana"),
@@ -2975,13 +2975,13 @@ async def crypto_auto_risk_manager_job(application):
                 ("BNBUSDT", "BNB-USD", "Binance Coin")
             ]
             for b_sym, b_yf, b_name in bybit_candidates:
-                if b_sym in active_bybit_syms:
+                if b_sym in active_bybit_syms or len(active_bybit_syms) >= 3:
                     continue
                 try:
                     import yfinance as yf
                     import pandas as pd
                     df = yf.download(b_yf, period="5d", interval="15m", progress=False)
-                    if df.empty or len(df) < 25:
+                    if df.empty or len(df) < 35:
                         continue
                     close = df["Close"].iloc[:, 0] if isinstance(df["Close"], pd.DataFrame) else df["Close"]
                     delta = close.diff()
@@ -2993,31 +2993,29 @@ async def crypto_auto_risk_manager_job(application):
                     ema50 = float(close.ewm(span=50, adjust=False).mean().iloc[-1])
                     last_c = float(close.iloc[-1])
 
-                    # Calcolo ATR e Volatilità su barre 15m (Day-Trader Suite Logic)
+                    # Volume filter: rottura con volumi superiori alla media
+                    vol = df["Volume"].iloc[:, 0] if isinstance(df["Volume"], pd.DataFrame) else df["Volume"]
+                    avg_vol = float(vol.rolling(20).mean().iloc[-1] or 1.0)
+                    last_vol = float(vol.iloc[-1] or 0.0)
+                    vol_ratio = last_vol / (avg_vol + 1e-5)
+
+                    # Range degli ultimi 60 minuti
                     high = df['High'].iloc[:, 0] if isinstance(df['High'], pd.DataFrame) else df['High']
                     low = df['Low'].iloc[:, 0] if isinstance(df['Low'], pd.DataFrame) else df['Low']
-                    tr1 = high - low
-                    tr2 = (high - close.shift(1)).abs()
-                    tr3 = (low - close.shift(1)).abs()
-                    tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
-                    atr14 = float(tr.rolling(14).mean().iloc[-1])
-                    atr_pct = (atr14 / last_c) * 100
-
-                    # Opening Range Breakout (ORB) su ultime 4 barre da 15m (1 ora)
                     or_high = float(high.iloc[-5:-1].max())
                     or_low = float(low.iloc[-5:-1].min())
 
-                    # Segnale SHORT: Rottura sotto ORB Low oppure RSI elevato (>= 58) con trend ribassista
-                    if (last_c < or_low) or rsi >= 58 or (last_c < ema20 < ema50):
-                        print(f"📉 [Day-Trader ORB/ATR] Rilevato segnale SHORT su {b_sym} (RSI: {rsi:.1f}, ATR: {atr_pct:.2f}%). Invio ordine Short $15,000...")
-                        res_order = bybit_service.place_order(b_sym, side="Sell", notional_usd=15000.0, take_profit_pct=1.5, stop_loss_pct=0.6)
-                        order_type_label = "SHORT (Breakout Ribassista ORB)"
+                    # CONFLUENZA RIGOROSA SHORT: Rottura or_low + RSI ipercomprato/in flessione (<45) + trend EMA discendente + volumi presenti
+                    if (last_c < or_low) and (last_c < ema20 < ema50) and (rsi < 45) and (vol_ratio >= 1.1):
+                        print(f"📉 [Confluenza Istituzionale SHORT] Rilevato setup A+ su {b_sym} (RSI: {rsi:.1f}, VolRatio: {vol_ratio:.2f}x). Invio ordine Short $15,000...")
+                        res_order = bybit_service.place_order(b_sym, side="Sell", notional_usd=15000.0, take_profit_pct=3.0, stop_loss_pct=1.2)
+                        order_type_label = "SHORT (Breakout Confluente Trend-Following)"
                         order_icon = "🔻"
-                    # Segnale LONG: Rottura sopra ORB High oppure trend forte con RSI favorevole
-                    elif (last_c > or_high) or rsi <= 55 or (last_c > ema20 > ema50):
-                        print(f"📈 [Day-Trader ORB/ATR] Rilevato segnale LONG su {b_sym} (RSI: {rsi:.1f}, ATR: {atr_pct:.2f}%). Invio ordine Long $15,000...")
-                        res_order = bybit_service.place_order(b_sym, side="Buy", notional_usd=15000.0, take_profit_pct=1.5, stop_loss_pct=0.6)
-                        order_type_label = "LONG (Breakout Rialzista ORB)"
+                    # CONFLUENZA RIGOROSA LONG: Rottura or_high + RSI forte (>55) + trend EMA ascendente + volumi presenti
+                    elif (last_c > or_high) and (last_c > ema20 > ema50) and (rsi > 55) and (vol_ratio >= 1.1):
+                        print(f"📈 [Confluenza Istituzionale LONG] Rilevato setup A+ su {b_sym} (RSI: {rsi:.1f}, VolRatio: {vol_ratio:.2f}x). Invio ordine Long $15,000...")
+                        res_order = bybit_service.place_order(b_sym, side="Buy", notional_usd=15000.0, take_profit_pct=3.0, stop_loss_pct=1.2)
+                        order_type_label = "LONG (Breakout Confluente Trend-Following)"
                         order_icon = "🟢"
                     else:
                         continue
