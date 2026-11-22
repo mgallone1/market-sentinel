@@ -746,14 +746,14 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         </div>
         <div class="compass-box">
             <div class="compass-top">
-                <div>
+                <div data-tip="Health &amp; Alignment Score (0-100): indice sintetico dello stato di salute del trading quantitativo. Misura la convergenza di Win Rate, Profit Factor, Expected Value e allineamento con lo Scudo Macro BTC 4H. Sopra 60 = assetto solido ed efficiente; sotto 40 = scatta la protezione conservativa.">
                     <div style="font-size: 9px; color: var(--text-muted); text-transform: uppercase;" class="mono">Health &amp; Alignment Score</div>
                     <div class="compass-score-wrap mono">
                         <span class="compass-score" id="compass-score-val">--</span>
                         <span style="font-size: 12px; color: var(--text-dim);">/ 100</span>
                     </div>
                 </div>
-                <div id="compass-badge-el" class="compass-badge badge-amber mono">CALCOLO</div>
+                <div id="compass-badge-el" class="compass-badge badge-amber mono" data-tip="Verdetto sintetico del Trading Compass sullo stato complessivo dell'operatività in corso">CALCOLO</div>
             </div>
             <div class="compass-desc" id="compass-desc-el">
                 Inizializzazione diagnostica probabilistica...
