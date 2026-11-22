@@ -2938,7 +2938,9 @@ async def crypto_auto_risk_manager_job(application):
             # 3. TARGET TAKE PROFIT DINAMICO ESTESO (+1.50% per trade importanti ~$225 USDT netti)
             if pnl_pct >= 1.50 or pnl_pct <= -0.60:
                 bybit_service.close_position(bsym)
+                is_stop_loss = pnl_pct <= -0.60
                 action_label = f"🎯 *DAY TRADER CORE TAKE PROFIT (+{pnl_pct:.2f}%)*" if pnl_pct >= 1.50 else f"🛑 *STOP LOSS CHIUSO ({pnl_pct:.2f}%)*"
+                reverse_note = "\n🔄 _Trend invertito: il motore avvia subito la ricerca automatica nella direzione opposta._" if is_stop_loss else ""
                 for uid in AUTHORIZED_USER_IDS:
                     try:
                         await application.bot.send_message(
@@ -2947,7 +2949,7 @@ async def crypto_auto_risk_manager_job(application):
                                 f"{action_label}\n"
                                 f"────────────────────────\n"
                                 f"• *Asset:* `{bsym}` [{bside}]\n"
-                                f"• *Profitto Netto Realizzato:* `${unrealized:+.2f} USDT` ({pnl_pct:+.2f}%)\n"
+                                f"• *Risultato:* `${unrealized:+.2f} USDT` ({pnl_pct:+.2f}%){reverse_note}\n\n"
                                 "Strategia Day-Trader Suite eseguita con successo su Bybit."
                             ),
                             parse_mode="Markdown"
