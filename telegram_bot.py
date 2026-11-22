@@ -3223,7 +3223,7 @@ def build_alpaca_dashboard_text(summary: Dict[str, Any]) -> Tuple[str, InlineKey
 
     keyboard = []
     if positions:
-        msg += f"📈 *POSIZIONI ATTIVE A MERCATO ({len(positions)}):*\n"
+        msg += f"📈 *POSIZIONI ATTIVE A MERCATO ALPACA ({len(positions)}):*\n"
         for p in positions:
             sym = p['symbol']
             side = p['side'].upper()
@@ -3234,9 +3234,21 @@ def build_alpaca_dashboard_text(summary: Dict[str, Any]) -> Tuple[str, InlineKey
             entry_p = float(p.get('avg_entry_price', 0))
             sign = "🟢 +" if pl >= 0 else "🔴 "
             msg += f"  • `{sym}` ({side} x{qty}): Carico `${entry_p:.2f}` -> Attuale `${curr:.2f}` | P&L: {sign}${pl:.2f} ({plpc:+.2f}%)\n"
-        keyboard.append([InlineKeyboardButton("🚨 Chiudi Tutte le Posizioni", callback_data="alpaca_close_all")])
+        keyboard.append([InlineKeyboardButton("🚨 Chiudi Tutte le Posizioni Alpaca", callback_data="alpaca_close_all")])
     else:
-        msg += "💤 *Nessuna posizione attualmente a mercato.*\n"
+        msg += "💤 *Nessuna azione Wall Street aperta su Alpaca (100% Cash USD).*\n"
+
+    # Mostra anche le posizioni Crypto attive su Bybit Demo per non lasciare dubbi
+    try:
+        b_pos = bybit_service.get_open_positions()
+        if b_pos:
+            msg += f"\n🪙 *POSIZIONI CRYPTO ATTIVE SU BYBIT DEMO ({len(b_pos)}):*\n"
+            for bp in b_pos:
+                b_sign = "🟢 +" if bp['unrealized_pnl'] >= 0 else "🔴 "
+                b_side = "LONG" if bp['side'] == "BUY" else "SHORT"
+                msg += f"  • `{bp['symbol']}` [{b_side}]: P&L: *{b_sign}${bp['unrealized_pnl']:.2f}* ({bp['pnl_pct']:+.2f}%)\n"
+    except Exception:
+        pass
 
     # Sezione Movimenti e Trade Chiusi Recenti (Ultime sessioni / Giornata)
     if recent_closed:
