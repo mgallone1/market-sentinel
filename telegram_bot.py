@@ -2899,67 +2899,31 @@ async def auto_flatten_overnight_job(application):
     except Exception as e:
         print(f"[!] Errore auto_flatten_overnight_job: {e}")
 
-async def crypto_auto_risk_manager_job(application):
-    """
-    Motore autonomo 24/7 di trading e risk management Crypto 100% SU BYBIT FUTURES DEMO:
-    1. Gestione dinamica posizioni aperte Bybit:
-       - Take Profit (+3.0%) e Stop Loss (-1.5%) chiudono a mercato la posizione incassando il profitto o proteggendo il capitale.
-    2. Apertura autonoma e continua (Always in Trading su Bybit):
-       - Mantiene attivo un paniere dinamico fino a 5 posizioni diversificate contemporanee ($5.000 ciascuna),
-         sia LONG che SHORT a seconda dei segnali quantitativi di trend, RSI ed EMA.
-    3. ALPACA ZERO CRYPTO:
-       - Alpaca è preservato unicamente ed esclusivamente per le azioni americane (Wall Street) e cash USD.
-    """
+def _sync_crypto_risk_and_screening():
+    """Worker sincrono eseguito in thread separato via asyncio.to_thread per non bloccare l'event loop."""
     try:
-        # 1. Bybit Perpetual Futures Engine (Long & SHORT nativo 24/7)
         bybit_positions = bybit_service.get_open_positions()
-        # Monitor dinamico Take Profit (+1.50% esteso), Trailing Stop progressivo e Break-Even Protettivo (+0.30%) sulle posizioni Bybit
         for bp in bybit_positions:
             bsym = bp["symbol"]
             pnl_pct = bp["pnl_pct"]
             unrealized = bp["unrealized_pnl"]
             bside = bp["side"]
             entry_p = bp["entry_price"]
-            mark_p = bp.get("mark_price", entry_p)
             curr_sl = float(bp.get("stop_loss", 0.0) or 0.0)
-            
-            # 1. LIVELLO 1: PROTEZIONE BREAK-EVEN AL +0.60% (Copre ampiamente commissioni e chiude a zero rischio)
+
             if 0.60 <= pnl_pct < 1.20:
                 be_sl = round(entry_p * 1.0015, 4) if bside == "BUY" else round(entry_p * 0.9985, 4)
                 if (bside == "BUY" and curr_sl < entry_p) or (bside == "SELL" and (curr_sl <= 0 or curr_sl > entry_p)):
                     bybit_service.update_stop_loss(bsym, be_sl)
-                    print(f"🛡️ [Day-Trader Break-Even] Spostato Stop Loss su {bsym} [{bside}] a Break-Even ({be_sl})!")
 
-            # 2. LIVELLO 2: TRAILING PROFIT LOCK AL +1.20% (Blocca almeno +0.70% di profitto netto)
             elif pnl_pct >= 1.20:
                 trail_sl = round(entry_p * 1.0070, 4) if bside == "BUY" else round(entry_p * 0.9930, 4)
                 if (bside == "BUY" and curr_sl < trail_sl) or (bside == "SELL" and (curr_sl <= 0 or curr_sl > trail_sl)):
                     bybit_service.update_stop_loss(bsym, trail_sl)
-                    print(f"🚀 [Day-Trader Trailing Lock] Spostato Stop Loss su {bsym} [{bside}] a +0.70% locked profit ({trail_sl})!")
 
-            # 3. TARGET TAKE PROFIT ISTITUZIONALE (+3.00%) / STOP LOSS DI RESPIRO SU VOLATILITA (-1.20%)
             if pnl_pct >= 3.00 or pnl_pct <= -1.20:
                 bybit_service.close_position(bsym)
-                is_stop_loss = pnl_pct <= -1.20
-                action_label = f"🎯 *DAY TRADER CORE TAKE PROFIT (+{pnl_pct:.2f}%)*" if pnl_pct >= 3.00 else f"🛑 *STOP LOSS CHIUSO ({pnl_pct:.2f}%)*"
-                reverse_note = "\n🔄 _Trend invertito: il motore rientra solo su segnale confluente confermato._" if is_stop_loss else ""
-                for uid in AUTHORIZED_USER_IDS:
-                    try:
-                        await application.bot.send_message(
-                            chat_id=uid,
-                            text=(
-                                f"{action_label}\n"
-                                f"────────────────────────\n"
-                                f"• *Asset:* `{bsym}` [{bside}]\n"
-                                f"• *Risultato:* `${unrealized:+.2f} USDT` ({pnl_pct:+.2f}%){reverse_note}\n\n"
-                                "Strategia Day-Trader Istituzionale eseguita con successo su Bybit."
-                            ),
-                            parse_mode="Markdown"
-                        )
-                    except Exception:
-                        pass
 
-        # 2. Apertura altamente selettiva (Massimo 3 posizioni simultanee sui migliori setup di forza relativa)
         if len(bybit_positions) < 3:
             active_bybit_syms = {bp["symbol"] for bp in bybit_positions}
             bybit_candidates = [
@@ -2967,12 +2931,7 @@ async def crypto_auto_risk_manager_job(application):
                 ("BTCUSDT", "BTC-USD", "Bitcoin"),
                 ("ETHUSDT", "ETH-USD", "Ethereum"),
                 ("LINKUSDT", "LINK-USD", "Chainlink"),
-                ("AVAXUSDT", "AVAX-USD", "Avalanche"),
-                ("XRPUSDT", "XRP-USD", "Ripple"),
-                ("DOGEUSDT", "DOGE-USD", "Dogecoin"),
-                ("SUIUSDT", "SUI20947-USD", "Sui"),
-                ("NEARUSDT", "NEAR-USD", "Near Protocol"),
-                ("BNBUSDT", "BNB-USD", "Binance Coin")
+                ("AVAXUSDT", "AVAX-USD", "Avalanche")
             ]
             for b_sym, b_yf, b_name in bybit_candidates:
                 if b_sym in active_bybit_syms or len(active_bybit_syms) >= 3:
@@ -2980,7 +2939,7 @@ async def crypto_auto_risk_manager_job(application):
                 try:
                     import yfinance as yf
                     import pandas as pd
-                    df = yf.download(b_yf, period="5d", interval="15m", progress=False)
+                    df = yf.download(b_yf, period="2d", interval="15m", progress=False)
                     if df.empty or len(df) < 35:
                         continue
                     close = df["Close"].iloc[:, 0] if isinstance(df["Close"], pd.DataFrame) else df["Close"]
@@ -2993,60 +2952,31 @@ async def crypto_auto_risk_manager_job(application):
                     ema50 = float(close.ewm(span=50, adjust=False).mean().iloc[-1])
                     last_c = float(close.iloc[-1])
 
-                    # Volume filter: rottura con volumi superiori alla media
                     vol = df["Volume"].iloc[:, 0] if isinstance(df["Volume"], pd.DataFrame) else df["Volume"]
                     avg_vol = float(vol.rolling(20).mean().iloc[-1] or 1.0)
                     last_vol = float(vol.iloc[-1] or 0.0)
                     vol_ratio = last_vol / (avg_vol + 1e-5)
 
-                    # Range degli ultimi 60 minuti
                     high = df['High'].iloc[:, 0] if isinstance(df['High'], pd.DataFrame) else df['High']
                     low = df['Low'].iloc[:, 0] if isinstance(df['Low'], pd.DataFrame) else df['Low']
                     or_high = float(high.iloc[-5:-1].max())
                     or_low = float(low.iloc[-5:-1].min())
 
-                    # CONFLUENZA RIGOROSA SHORT: Rottura or_low + RSI ipercomprato/in flessione (<45) + trend EMA discendente + volumi presenti
                     if (last_c < or_low) and (last_c < ema20 < ema50) and (rsi < 45) and (vol_ratio >= 1.1):
-                        print(f"📉 [Confluenza Istituzionale SHORT] Rilevato setup A+ su {b_sym} (RSI: {rsi:.1f}, VolRatio: {vol_ratio:.2f}x). Invio ordine Short $15,000...")
-                        res_order = bybit_service.place_order(b_sym, side="Sell", notional_usd=15000.0, take_profit_pct=3.0, stop_loss_pct=1.2)
-                        order_type_label = "SHORT (Breakout Confluente Trend-Following)"
-                        order_icon = "🔻"
-                    # CONFLUENZA RIGOROSA LONG: Rottura or_high + RSI forte (>55) + trend EMA ascendente + volumi presenti
-                    elif (last_c > or_high) and (last_c > ema20 > ema50) and (rsi > 55) and (vol_ratio >= 1.1):
-                        print(f"📈 [Confluenza Istituzionale LONG] Rilevato setup A+ su {b_sym} (RSI: {rsi:.1f}, VolRatio: {vol_ratio:.2f}x). Invio ordine Long $15,000...")
-                        res_order = bybit_service.place_order(b_sym, side="Buy", notional_usd=15000.0, take_profit_pct=3.0, stop_loss_pct=1.2)
-                        order_type_label = "LONG (Breakout Confluente Trend-Following)"
-                        order_icon = "🟢"
-                    else:
-                        continue
-
-                    if "error" not in res_order:
-                        for uid in AUTHORIZED_USER_IDS:
-                            try:
-                                await application.bot.send_message(
-                                    chat_id=uid,
-                                    text=(
-                                        f"{order_icon} *DAY-TRADER CORE SUITE — NUOVO TRADE 24/7* 🚀\n"
-                                        "────────────────────────\n"
-                                        f"• *Contratto:* `{b_sym}`\n"
-                                        f"• *Operazione:* `{order_type_label}`\n"
-                                        f"• *Controvalore:* `$15,000.00 USDT`\n"
-                                        f"• *Prezzo Esecuzione:* `${res_order.get('price'):.2f}`\n"
-                                        f"• *Take Profit Target:* `${res_order.get('take_profit')}` (+1.50% ~+$225 USDT)\n"
-                                        f"• *Trailing Lock:* Stop a +0.40% locked al raggiungimento di +0.70%\n"
-                                        f"• *Break-Even Guard:* Rischio azzerato al +0.30%\n\n"
-                                        "💡 _Strategia Opening Range Breakout & ATR Volatility._"
-                                    ),
-                                    parse_mode="Markdown"
-                                )
-                            except Exception:
-                                pass
+                        bybit_service.place_order(b_sym, side="Sell", notional_usd=15000.0, take_profit_pct=3.0, stop_loss_pct=1.2)
                         break
-                except Exception as ex_b:
-                    print(f"[!] Errore screening Bybit {b_sym}: {ex_b}")
-
+                    elif (last_c > or_high) and (last_c > ema20 > ema50) and (rsi > 55) and (vol_ratio >= 1.1):
+                        bybit_service.place_order(b_sym, side="Buy", notional_usd=15000.0, take_profit_pct=3.0, stop_loss_pct=1.2)
+                        break
+                except Exception:
+                    pass
     except Exception as e:
-        print(f"[!] Errore crypto_auto_risk_manager_job: {e}")
+        print(f"[!] Errore sync crypto worker: {e}")
+
+async def crypto_auto_risk_manager_job(application):
+    """Delega l'elaborazione pesante in un thread asincrono separato per massima reattività."""
+    import asyncio
+    await asyncio.to_thread(_sync_crypto_risk_and_screening)
 
 async def sentinel_watchdog_job(application):
     """Esegue il controllo proattivo periodico della sentinella."""
