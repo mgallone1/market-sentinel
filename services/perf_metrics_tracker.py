@@ -196,9 +196,9 @@ class PerfMetricsTracker:
             "3s": (1, 300),              # Ultimi 5 minuti a tick di 3s
             "1m": (60, 3600),            # Ultimi 60 minuti a tick di 1 minuto
             "1h": (3600, 172800),        # Ultime 48 ore a tick di 1 ora
-            "1d": (86400, 2592000),      # Ultimi 30 giorni a tick di 1 giorno
-            "1w": (604800, 7257600),     # Ultime 12 settimane a tick di 1 settimana
-            "1M": (2592000, 31536000)    # Ultimi 12 mesi a tick di 1 mese
+            "1d": (14400, 2592000),      # Vista Giornaliera: punti ogni 4 ore
+            "1w": (43200, 7257600),      # Vista Settimanale: punti ogni 12 ore (curva ricca)
+            "1M": (86400, 31536000)      # Vista Mensile: punti giornalieri (30 punti completi)
         }
 
         step_seconds, max_window = tf_config.get(timeframe, (1, 300))
