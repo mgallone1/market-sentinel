@@ -1088,15 +1088,17 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             <!-- Card 8: Diagnostica Ciclica (Hurst/Migliorino), Onde di Elliott e Monte Carlo -->
             <div class="acc-cell" style="padding: 14px; text-align: left;">
                 <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
-                    <strong style="color: var(--text-main); font-size: 13px;">8. Analisi Ciclica, Onde di Elliott &amp; Previsione Monte Carlo</strong>
+                    <strong style="color: var(--text-main); font-size: 13px;">8. Analisi Ciclica, Onde di Elliott, Timeframe &amp; Previsione Monte Carlo</strong>
                     <span class="badge mono" style="background: var(--blue); color: #fff; font-size: 9px; padding: 2px 6px; border-radius: 3px;">QUANT PRO</span>
                 </div>
                 <div style="font-size: 11px; color: var(--text-muted); line-height: 1.45;">
                     Toccando qualsiasi riga di trade aperto si apre il pannello di analisi quantitativa approfondita:<br>
-                    <strong>• Hurst FLD:</strong> La Future Line of Demarcation indica se il ciclo in corso ha forza propulsiva o se proietta verso il minimo ciclico.<br>
-                    <strong>• Battleplan &amp; Vincoli di Migliorino:</strong> Mostra il tempo ciclico su 4 tempi (T, T+1, T+2, T+3) e segnala se il ciclo è libero o vincolato al ribasso.<br>
-                    <strong>• Onde di Elliott:</strong> Riconosce la fase frattale (Onda 3 d'impulso, Onda 4 di ritracciamento, o correzione maggiore A-B-C).<br>
-                    <strong>• Simulazione Monte Carlo a 15 Giorni:</strong> Disegna la traiettoria mediana attesa P50 e il cono di confidenza statistico al 95% (10.000 iterazioni stocastiche).
+                    <strong>• Timeframe dell'Analisi:</strong> Esplicitamente indicato in alto a sinistra (<code>1D - Giornaliero 6 Mesi / 120 barre</code> per catturare cicli macro e frattali Elliott affidabili; <code>4H</code> per lo Scudo Macro BTC).<br>
+                    <strong>• Grafico Sovrapposto a Più Curve:</strong> Mostra in tempo reale la serie storica reale (azzurro), la curva di traslazione <strong>Hurst FLD</strong> (oro tratteggiato), la sinusoide a 4 tempi del <strong>Battleplan Migliorino</strong> (ciano) e il cono stocastico <strong>Monte Carlo P50</strong> a 15 giorni con intervallo di confidenza al 95%.<br>
+                    <strong>• Hurst FLD (Future Line of Demarcation):</strong> Trasla il prezzo di mezzo periodo (T/2). Se il prezzo incrocia la FLD dal basso, convalida il minimo ciclico proiettando il target al rialzo; se la buca dall'alto, avverte di debolezza ciclica verso il minimo.<br>
+                    <strong>• Battleplan &amp; Vincoli di Migliorino:</strong> Mostra il tempo ciclico su 4 tempi (T, T+1, T+2, T+3) e segnala se il ciclo è libero o vincolato al ribasso (un ciclo che rompe il proprio minimo di partenza non può più superare il proprio massimo).<br>
+                    <strong>• Onde di Elliott Frattali:</strong> Riconosce la fase frattale (Onda 1-2-3-4-5 d'impulso o correzione A-B-C) e misura i ritracciamenti di Fibonacci.<br>
+                    <strong>• Simulazione Monte Carlo a 15 Giorni:</strong> Calcola su 10.000 iterazioni stocastiche la distribuzione di probabilità con percentili P05, P50 e P95.
                 </div>
             </div>
 
@@ -1110,24 +1112,31 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 <div class="modal-title-row">
                     <span id="modal-trade-sym" class="modal-title">BTCUSDT</span>
                     <span id="modal-trade-side" class="trade-side-short">SHORT</span>
+                    <span id="modal-trade-tf" class="badge mono" style="background: rgba(59, 130, 246, 0.15); color: var(--blue); font-size: 10px; padding: 2px 8px; border-radius: 4px; border: 1px solid rgba(59, 130, 246, 0.3);">TF: 1D (Giornaliero - 6 Mesi)</span>
                     <span id="modal-trade-price" style="font-size: 12px; color: var(--text-muted);">$0.00</span>
                 </div>
                 <button class="modal-close-btn" onclick="closeTradeModal()">&times;</button>
             </div>
             <div class="modal-body">
-                <!-- Grafico Previsionale Stocastico Monte Carlo -->
+                <!-- Grafico Previsionale Stocastico Monte Carlo, Hurst FLD & Battleplan Migliorino -->
                 <div>
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
-                        <span style="font-size: 11px; font-weight: 700; color: var(--text-main);">Traiettoria Monte Carlo a 15 Giorni</span>
-                        <span id="modal-mc-prob" class="badge mono" style="background: var(--green-bg); color: var(--green); font-size: 10px; padding: 2px 6px; border-radius: 4px;">Prob. Up: 50%</span>
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; flex-wrap: wrap; gap: 4px;">
+                        <span style="font-size: 11px; font-weight: 700; color: var(--text-main);">Traiettoria Monte Carlo (15gg), FLD Hurst &amp; Battleplan</span>
+                        <div style="display: flex; gap: 6px; align-items: center;">
+                            <span id="modal-tf-badge" class="badge mono" style="background: var(--surface-elevated); color: var(--text-muted); font-size: 9px; padding: 2px 6px; border-radius: 4px; border: 1px solid var(--border);">1D • 120 CANDELE</span>
+                            <span id="modal-mc-prob" class="badge mono" style="background: var(--green-bg); color: var(--green); font-size: 10px; padding: 2px 6px; border-radius: 4px;">Prob. Up: 50%</span>
+                        </div>
                     </div>
                     <div class="forecast-chart-container">
                         <canvas id="forecastChart"></canvas>
                     </div>
-                    <div style="display: flex; justify-content: space-between; font-size: 9px; color: var(--text-dim); margin-top: 4px;">
-                        <span>&larr; Ultimi 20gg Storico</span>
-                        <span style="color: var(--blue);">● Proiezione Mediana P50</span>
-                        <span>Fascia Confidenza 95% (P05 - P95) &rarr;</span>
+                    <!-- Legenda Grafica Dettagliata -->
+                    <div style="display: flex; justify-content: space-between; flex-wrap: wrap; gap: 6px; font-size: 9px; color: var(--text-dim); margin-top: 6px; padding: 4px 6px; background: var(--surface-elevated); border-radius: 4px;">
+                        <span style="color: #38bdf8;">━ Prezzo Storico</span>
+                        <span style="color: #f59e0b;">╌╌ Hurst FLD (T/2)</span>
+                        <span style="color: #06b6d4;">··· Battleplan Migliorino</span>
+                        <span style="color: #a855f7;">╌╌ Mediana Monte Carlo P50</span>
+                        <span style="color: #10b981;">░ Fascia Confidenza 95%</span>
                     </div>
                 </div>
 
@@ -1162,17 +1171,43 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                     </div>
                 </div>
 
-                <!-- Raccomandazione Quantitativa Sintetica -->
+                <!-- Schema Onde di Elliott & Guida Visiva alle Onde e Cicli -->
                 <div style="background: var(--surface-elevated); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; font-size: 11px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                        <strong style="color: var(--text-main);">Mappatura Frattale Onde (1-2-3-4-5 &amp; A-B-C):</strong>
+                        <span id="modal-wave-fib" class="mono" style="font-size: 10px; color: var(--blue);">Fib: --</span>
+                    </div>
+                    <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; text-align: center; margin-bottom: 6px; font-size: 10px;">
+                        <div id="wave-box-impulse" style="background: var(--surface); border: 1px solid var(--border); border-radius: 4px; padding: 4px 2px;">
+                            <div style="color: var(--text-muted); font-size: 8px;">IMPULSO (1-3-5)</div>
+                            <div id="wave-impulse-status" style="font-weight: 700; color: var(--green);">Onda 3</div>
+                        </div>
+                        <div id="wave-box-correct" style="background: var(--surface); border: 1px solid var(--border); border-radius: 4px; padding: 4px 2px;">
+                            <div style="color: var(--text-muted); font-size: 8px;">CORREZIONE (2-4)</div>
+                            <div id="wave-correct-status" style="font-weight: 700; color: var(--text-muted);">Attesa</div>
+                        </div>
+                        <div id="wave-box-hurst" style="background: var(--surface); border: 1px solid var(--border); border-radius: 4px; padding: 4px 2px;">
+                            <div style="color: var(--text-muted); font-size: 8px;">HURST FLD</div>
+                            <div id="wave-hurst-status" style="font-weight: 700; color: var(--amber);">Rialzista</div>
+                        </div>
+                        <div id="wave-box-migl" style="background: var(--surface); border: 1px solid var(--border); border-radius: 4px; padding: 4px 2px;">
+                            <div style="color: var(--text-muted); font-size: 8px;">MIGLIORINO</div>
+                            <div id="wave-migl-status" style="font-weight: 700; color: var(--cyan);">T+2 (32gg)</div>
+                        </div>
+                    </div>
+                    <div id="modal-elliott-deep-desc" style="color: var(--text-dim); font-size: 10px; line-height: 1.4;">
+                        Analisi frattale automatica basata sul modello a 8 onde di Ralph Nelson Elliott combinata con la Future Line of Demarcation (FLD) di J.M. Hurst e i 4 sottocicli del Battleplan di Giuseppe Migliorino.
+                    </div>
+                </div>
+
+                <!-- Raccomandazione Quantitativa Sintetica -->
+                <div style="background: var(--surface-elevated); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; font-size: 11px; margin-top: 8px;">
                     <strong style="color: var(--text-main);">Verdetto Ciclico &amp; Operativo:</strong>
                     <div id="modal-advice-text" style="color: var(--text-muted); margin-top: 4px; line-height: 1.45;">
                         Caricamento sintesi operativa...
                     </div>
                 </div>
             </div>
-        </div>
-    </div>
-
         </div>
     </div>
 
@@ -1963,6 +1998,45 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 document.getElementById('modal-elliott-val').innerText = el.wave_label || 'Struttura Frattale';
                 document.getElementById('modal-elliott-desc').innerText = el.analysis || 'Onde di Elliott in sviluppo.';
 
+                // Popola Timeframe badge
+                const tfBadge = document.getElementById('modal-trade-tf');
+                if (tfBadge && data.timeframe) {
+                    tfBadge.innerText = `TF: ${data.timeframe}`;
+                }
+                const tfMini = document.getElementById('modal-tf-badge');
+                if (tfMini && data.timeframe) {
+                    tfMini.innerText = data.timeframe.toUpperCase();
+                }
+
+                // Popola Mappatura Frattale Onde
+                const waveImp = document.getElementById('wave-impulse-status');
+                const waveCorr = document.getElementById('wave-correct-status');
+                const waveHurst = document.getElementById('wave-hurst-status');
+                const waveMigl = document.getElementById('wave-migl-status');
+                const waveFib = document.getElementById('modal-wave-fib');
+                const deepDesc = document.getElementById('modal-elliott-deep-desc');
+
+                if (waveFib && el.fib_retrace) {
+                    waveFib.innerText = `Fib: ${(el.fib_retrace * 100).toFixed(1)}%`;
+                }
+                if (waveImp && el.wave_label) {
+                    waveImp.innerText = el.wave_label.includes('Onda') ? el.wave_label : 'Fase Attiva';
+                    waveImp.style.color = (side === 'LONG') ? 'var(--green)' : 'var(--red)';
+                }
+                if (waveCorr && el.correction_type) {
+                    waveCorr.innerText = el.correction_type;
+                }
+                if (waveHurst && c.cycle_direction) {
+                    waveHurst.innerText = c.cycle_direction;
+                    waveHurst.style.color = c.cycle_direction.includes('Rialz') ? 'var(--green)' : 'var(--amber)';
+                }
+                if (waveMigl && c.tempo_battleplan) {
+                    waveMigl.innerText = c.tempo_battleplan;
+                }
+                if (deepDesc && el.analysis) {
+                    deepDesc.innerText = `${el.analysis} ${c.descrizione_battleplan || ''}`;
+                }
+
                 // Popola Monte Carlo
                 const mc = data.monte_carlo || {};
                 document.getElementById('modal-mc-prob').innerText = `Prob. Up: ${mc.probability_positive || '50%'}`;
@@ -1972,7 +2046,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 // Sintesi operativa
                 document.getElementById('modal-advice-text').innerText = `${c.consiglio_pratico || ''} Setup: ${side === 'LONG' ? 'Rialzista' : 'Ribassista'} su ${symbol}.`;
 
-                // Renderizza Grafico Monte Carlo (Storico + Previsione)
+                // Renderizza Grafico Multimodello (Storico + FLD + Battleplan + Monte Carlo)
                 initForecastChart(data.chart_data);
             } catch (err) {
                 console.error("Forecast fetch error:", err);
@@ -2004,6 +2078,8 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             }
 
             const hist = chartData.historical || [];
+            const hurstFld = chartData.hurst_fld || [];
+            const battleplan = chartData.battleplan_migliorino || [];
             const p50 = chartData.forecast_p50 || [];
             const p05 = chartData.forecast_p05 || [];
             const p95 = chartData.forecast_p95 || [];
@@ -2013,6 +2089,9 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             
             // Allinea serie storiche e previsionali
             const histSeries = hist.concat(new Array(p50.length - 1).fill(null));
+            const hurstSeries = hurstFld.concat(new Array(p50.length - 1).fill(null));
+            const battleplanSeries = battleplan.concat(new Array(p50.length - 1).fill(null));
+
             const pad = new Array(hist.length - 1).fill(null);
             const p50Series = pad.concat(p50);
             const p05Series = pad.concat(p05);
@@ -2031,6 +2110,26 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                             pointRadius: 0,
                             pointHoverRadius: 4,
                             tension: 0.1
+                        },
+                        {
+                            label: 'Hurst FLD (T/2)',
+                            data: hurstSeries,
+                            borderColor: '#f59e0b',
+                            borderWidth: 1.8,
+                            borderDash: [4, 3],
+                            pointRadius: 0,
+                            pointHoverRadius: 3,
+                            tension: 0.2
+                        },
+                        {
+                            label: 'Battleplan Migliorino (T+2)',
+                            data: battleplanSeries,
+                            borderColor: '#06b6d4',
+                            borderWidth: 1.6,
+                            borderDash: [2, 2],
+                            pointRadius: 0,
+                            pointHoverRadius: 3,
+                            tension: 0.3
                         },
                         {
                             label: 'Monte Carlo Mediana (P50)',

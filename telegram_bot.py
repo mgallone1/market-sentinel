@@ -2956,7 +2956,10 @@ def _sync_crypto_risk_and_screening():
         macro_bias = _get_btc_macro_bias()
         print(f"🌊 [Macro Bias BTC 4H] Direzione di mercato: {macro_bias}")
 
-        if macro_bias in ["BULLISH", "BEARISH"] and _LAST_NOTIFIED_MACRO_BIAS != macro_bias:
+        # Inizializza al primo ciclo senza spammare la notifica di avvio
+        if _LAST_NOTIFIED_MACRO_BIAS is None:
+            _LAST_NOTIFIED_MACRO_BIAS = macro_bias
+        elif macro_bias in ["BULLISH", "BEARISH"] and _LAST_NOTIFIED_MACRO_BIAS != macro_bias:
             bias_icon = "🟢" if macro_bias == "BULLISH" else "🔻"
             bias_title = "RIALZISTA (BULLISH)" if macro_bias == "BULLISH" else "RIBASSISTA (BEARISH)"
             bias_allowed = "Apertura esclusiva di posizioni LONG su breakout di forza" if macro_bias == "BULLISH" else "Apertura esclusiva di posizioni SHORT su breakout di debolezza"
