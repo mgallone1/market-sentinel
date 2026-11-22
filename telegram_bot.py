@@ -1771,13 +1771,13 @@ async def _handle_text_message_core(update: Update, context: ContextTypes.DEFAUL
                     )
                 )
             )
-            # Se l'utente specifica un importo in valuta lo usa, altrimenti assegna $5.000
+            # Se l'utente specifica un importo in valuta lo usa, altrimenti assegna default aggressivo di $15.000
             if unit in ["$", "usd", "euro", "dollari"]:
                 notional_amt = val_num
             elif unit in ["azioni", "quote", "crypto", "pezzi"] and val_num <= 10:
-                notional_amt = val_num * 5000.0
+                notional_amt = val_num * 15000.0
             else:
-                notional_amt = 5000.0
+                notional_amt = 15000.0
 
             side_bybit = "Buy" if side.lower() in ["buy", "long", "compra"] else "Sell"
             action_label = "LONG (Rialzista)" if side_bybit == "Buy" else "SHORT (Ribassista)"
@@ -2969,14 +2969,14 @@ async def crypto_auto_risk_manager_job(application):
 
                     # Segnale SHORT: RSI elevato (>= 60) oppure rottura ribassista sotto le medie
                     if rsi >= 60 or (last_c < ema20 < ema50):
-                        print(f"📉 [Bybit Futures] Rilevato segnale SHORT su {b_sym} (RSI: {rsi:.1f}). Invio ordine Short $5,000...")
-                        res_order = bybit_service.place_order(b_sym, side="Sell", notional_usd=5000.0, take_profit_pct=3.0, stop_loss_pct=1.5)
+                        print(f"📉 [Bybit Futures] Rilevato segnale SHORT su {b_sym} (RSI: {rsi:.1f}). Invio ordine Short $15,000...")
+                        res_order = bybit_service.place_order(b_sym, side="Sell", notional_usd=15000.0, take_profit_pct=3.0, stop_loss_pct=1.5)
                         order_type_label = "SHORT (Ribassista)"
                         order_icon = "🔻"
                     # Segnale LONG: RSI favorevole con trend rialzista
                     elif rsi <= 55 and (last_c > ema20 > ema50):
-                        print(f"📈 [Bybit Futures] Rilevato segnale LONG su {b_sym} (RSI: {rsi:.1f}). Invio ordine Long $5,000...")
-                        res_order = bybit_service.place_order(b_sym, side="Buy", notional_usd=5000.0, take_profit_pct=3.0, stop_loss_pct=1.5)
+                        print(f"📈 [Bybit Futures] Rilevato segnale LONG su {b_sym} (RSI: {rsi:.1f}). Invio ordine Long $15,000...")
+                        res_order = bybit_service.place_order(b_sym, side="Buy", notional_usd=15000.0, take_profit_pct=3.0, stop_loss_pct=1.5)
                         order_type_label = "LONG (Rialzista)"
                         order_icon = "🟢"
                     else:
@@ -2992,7 +2992,7 @@ async def crypto_auto_risk_manager_job(application):
                                         "────────────────────────\n"
                                         f"• *Contratto:* `{b_sym}`\n"
                                         f"• *Operazione:* `{order_type_label}`\n"
-                                        f"• *Controvalore:* `$5,000.00 USDT`\n"
+                                        f"• *Controvalore:* `$15,000.00 USDT`\n"
                                         f"• *Prezzo Esecuzione:* `${res_order.get('price'):.2f}`\n"
                                         f"• *Take Profit:* `${res_order.get('take_profit')}` (+3.0%)\n"
                                         f"• *Stop Loss:* `${res_order.get('stop_loss')}` (-1.5%)\n\n"
