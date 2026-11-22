@@ -422,6 +422,49 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             font-weight: 700;
         }
 
+        
+        /* TOOLTIPS INTERATTIVI ELEVATI (HOVER E TAP) */
+        [data-tip] {
+            position: relative;
+            cursor: help;
+        }
+        [data-tip]:hover::after,
+        [data-tip]:focus::after {
+            content: attr(data-tip);
+            position: absolute;
+            bottom: calc(100% + 6px);
+            left: 50%;
+            transform: translateX(-50%);
+            padding: 6px 10px;
+            border-radius: 6px;
+            background: #0f172a;
+            color: #f8fafc;
+            font-size: 11px;
+            line-height: 1.35;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            font-weight: 500;
+            white-space: normal;
+            width: max-content;
+            max-width: 230px;
+            text-align: center;
+            z-index: 999;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.25);
+            pointer-events: none;
+            border: 1px solid rgba(255,255,255,0.15);
+        }
+        [data-tip]:hover::before,
+        [data-tip]:focus::before {
+            content: '';
+            position: absolute;
+            bottom: calc(100% + 1px);
+            left: 50%;
+            transform: translateX(-50%);
+            border: 5px solid transparent;
+            border-top-color: #0f172a;
+            z-index: 999;
+            pointer-events: none;
+        }
+
         /* Bottom Tab Bar */
         .tabbar {
             position: fixed;
@@ -523,23 +566,23 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 
             <!-- 4 Metric Cards: Expected Value, Realized R:R, In-The-Money Ratio, Profit Factor -->
             <div class="diag-grid mono">
-                <div class="diag-cell">
+                <div class="diag-cell" data-tip="Valore monetario atteso per trade: se positivo indica che la strategia guadagna nel lungo periodo">
                     <div class="diag-label">Expected Value (EV)</div>
                     <div class="diag-val" id="diag-ev-val">$0.00</div>
                     <div class="diag-sub">Utile atteso per trade</div>
                 </div>
-                <div class="diag-cell">
-                    <div class="diag-label">R:R Reale vs Target</div>
+                <div class="diag-cell" data-tip="Valore monetario atteso per trade: se positivo indica che la strategia guadagna nel lungo periodo">
+                    <div class="diag-label" data-tip="Rapporto Rischio/Rendimento: quanto guadagni quando vinci rispetto a quanto perdi quando vieni stoppato (target minimo 1:2.5)">R:R Reale vs Target</div>
                     <div class="diag-val" id="diag-rr-val">1:0.0</div>
                     <div class="diag-sub">Target min: 1:2.5</div>
                 </div>
-                <div class="diag-cell">
-                    <div class="diag-label">Posizioni in Gain</div>
+                <div class="diag-cell" data-tip="Valore monetario atteso per trade: se positivo indica che la strategia guadagna nel lungo periodo">
+                    <div class="diag-label" data-tip="Percentuale di contratti aperti che si trovano attualmente in profitto non realizzato">Posizioni in Gain</div>
                     <div class="diag-val" id="diag-itm-val">0%</div>
                     <div class="diag-sub" id="diag-prot-sub">0 protette Break-Even</div>
                 </div>
-                <div class="diag-cell">
-                    <div class="diag-label">Profit Factor</div>
+                <div class="diag-cell" data-tip="Valore monetario atteso per trade: se positivo indica che la strategia guadagna nel lungo periodo">
+                    <div class="diag-label" data-tip="Profitti lordi totali divisi per perdite lorde totali. Superiore a 1.5 indica un forte vantaggio">Profit Factor</div>
                     <div class="diag-val" id="diag-pf-val">0.00</div>
                     <div class="diag-sub">Gross Win / Gross Loss</div>
                 </div>
@@ -551,22 +594,22 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     <div class="section">
         <div class="acc-grid mono">
             <div class="acc-cell">
-                <div class="acc-label">Equity Totale</div>
+                <div class="acc-label" data-tip="Patrimonio complessivo convertito in USD sommando il conto Bybit Futures e il broker Alpaca Wall Street">Equity Totale</div>
                 <div class="acc-val" id="total-equity">$0.00</div>
                 <div class="acc-sub">Bybit + Alpaca</div>
             </div>
             <div class="acc-cell">
-                <div class="acc-label">Bybit UTA</div>
+                <div class="acc-label" data-tip="Capitale su Bybit Unified Trading Account dedicato al trading algoritmico 24/7 sui derivati Crypto">Bybit UTA</div>
                 <div class="acc-val" id="bybit-equity">$0.00</div>
                 <div class="acc-sub" id="bybit-cash">Disponibile: $0</div>
             </div>
             <div class="acc-cell">
-                <div class="acc-label">Alpaca Equities</div>
+                <div class="acc-label" data-tip="Valore del conto azionario su Alpaca Securities (NYSE & NASDAQ), separato dalle Crypto">Alpaca Equities</div>
                 <div class="acc-val" id="alpaca-equity">$0.00</div>
                 <div class="acc-sub" id="alpaca-bp">BP: $0</div>
             </div>
             <div class="acc-cell">
-                <div class="acc-label">PnL Non Realizzato</div>
+                <div class="acc-label" data-tip="Guadagno o perdita fluttuante delle posizioni attualmente aperte a mercato">PnL Non Realizzato</div>
                 <div class="acc-val" id="total-unrealized">$0.00</div>
                 <div class="acc-sub" id="active-positions-count">0 posizioni</div>
             </div>
@@ -581,32 +624,32 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         </div>
         <div class="tf-grid mono">
             <div class="tf-card active" id="card-tf-3s" onclick="setTimeframe('3s')">
-                <div class="tf-header">Ogni 3s</div>
+                <div class="tf-header" data-tip="Variazione dell'equity negli ultimi 3 secondi (tick in tempo reale)">Ogni 3s</div>
                 <div class="tf-delta" id="delta-3s-val">$0.00</div>
                 <div class="tf-pct" id="delta-3s-pct">0.00%</div>
             </div>
             <div class="tf-card" id="card-tf-1m" onclick="setTimeframe('1m')">
-                <div class="tf-header">1 Minuto</div>
+                <div class="tf-header" data-tip="Variazione dell'equity registrata nell'ultimo minuto">1 Minuto</div>
                 <div class="tf-delta" id="delta-1m-val">$0.00</div>
                 <div class="tf-pct" id="delta-1m-pct">0.00%</div>
             </div>
             <div class="tf-card" id="card-tf-1h" onclick="setTimeframe('1h')">
-                <div class="tf-header">1 Ora</div>
+                <div class="tf-header" data-tip="Variazione cumulativa del capitale nelle ultime 60 minuti">1 Ora</div>
                 <div class="tf-delta" id="delta-1h-val">$0.00</div>
                 <div class="tf-pct" id="delta-1h-pct">0.00%</div>
             </div>
             <div class="tf-card" id="card-tf-1d" onclick="setTimeframe('1d')">
-                <div class="tf-header">1 Giorno</div>
+                <div class="tf-header" data-tip="Rendimento delle ultime 24 ore rispetto al saldo della sessione precedente">1 Giorno</div>
                 <div class="tf-delta" id="delta-1d-val">$0.00</div>
                 <div class="tf-pct" id="delta-1d-pct">0.00%</div>
             </div>
             <div class="tf-card" id="card-tf-1w" onclick="setTimeframe('1w')">
-                <div class="tf-header">1 Settimana</div>
+                <div class="tf-header" data-tip="Performance progressiva cumulativa negli ultimi 7 giorni">1 Settimana</div>
                 <div class="tf-delta" id="delta-1w-val">$0.00</div>
                 <div class="tf-pct" id="delta-1w-pct">0.00%</div>
             </div>
             <div class="tf-card" id="card-tf-1M" onclick="setTimeframe('1M')">
-                <div class="tf-header">1 Mese</div>
+                <div class="tf-header" data-tip="Rendimento complessivo a 30 giorni">1 Mese</div>
                 <div class="tf-delta" id="delta-1M-val">$0.00</div>
                 <div class="tf-pct" id="delta-1M-pct">0.00%</div>
             </div>
@@ -1184,11 +1227,11 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                     const pSign = p.unrealized_pnl >= 0 ? '+' : '';
                     const pnlClass = p.unrealized_pnl >= 0 ? 'val-up' : 'val-down';
 
-                    let guardHtml = `<span class="trade-guard">SL -1.20%</span>`;
+                    let guardHtml = `<span class="trade-guard" data-tip="Stop Loss attivo: chiusura automatica protettiva se la posizione perde l'1.20% (-$180)">SL -1.20%</span>`;
                     if (p.pnl_pct >= 1.60) {
-                        guardHtml = `<span class="trade-guard guard-lock">LOCK +1.00%</span>`;
+                        guardHtml = `<span class="trade-guard guard-lock" data-tip="Trailing Profit Lock attivo: lo stop è stato alzato per garantire almeno il +1.00% netto di guadagno">LOCK +1.00%</span>`;
                     } else if (p.pnl_pct >= 0.80) {
-                        guardHtml = `<span class="trade-guard guard-be">BE SAFE +0.20%</span>`;
+                        guardHtml = `<span class="trade-guard guard-be" data-tip="Break-Even Safe attivo: rischio azzerato, stop spostato a +0.20% a copertura delle commissioni">BE SAFE +0.20%</span>`;
                     }
 
                     return `
@@ -1206,10 +1249,10 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                                 </div>
                             </div>
                             <div class="trade-right">
-                                <div class="trade-pnl ${pnlClass}">
+                                <div class="trade-pnl ${pnlClass}" data-tip="PnL non realizzato: profitto o perdita fluttuante in dollari su questa specifica posizione">
                                     ${pSign}$${p.unrealized_pnl.toFixed(2)}
                                 </div>
-                                <div style="font-size: 11px;" class="${pnlClass}">
+                                <div style="font-size: 11px;" class="${pnlClass}" data-tip="Rendimento percentuale calcolato sul controvalore nozionale di $15,000">
                                     ${pSign}${p.pnl_pct.toFixed(2)}%
                                 </div>
                                 ${guardHtml}
