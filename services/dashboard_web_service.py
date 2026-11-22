@@ -730,86 +730,93 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         updateClock();
 
         function initChart(snapshots) {
-            const ctx = document.getElementById('perfChart').getContext('2d');
-            const labels = snapshots.map(s => {
-                const d = new Date(s.epoch * 1000);
-                if (currentTimeframe === '1d' || currentTimeframe === '1w' || currentTimeframe === '1M') {
-                    return d.toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit' }) + ' ' + d.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' });
+            try {
+                if (typeof Chart === 'undefined') return;
+                const canvas = document.getElementById('perfChart');
+                if (!canvas) return;
+                const ctx = canvas.getContext('2d');
+                const labels = snapshots.map(s => {
+                    const d = new Date(s.epoch * 1000);
+                    if (currentTimeframe === '1d' || currentTimeframe === '1w' || currentTimeframe === '1M') {
+                        return d.toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit' }) + ' ' + d.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' });
+                    }
+                    return d.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit', second: (currentTimeframe === '3s' ? '2-digit' : undefined) });
+                });
+                const equity = snapshots.map(s => s.total_equity);
+                const pnl = snapshots.map(s => s.cumulative_realized_pnl);
+
+                if (chartInstance) {
+                    chartInstance.data.labels = labels;
+                    chartInstance.data.datasets[0].data = equity;
+                    chartInstance.data.datasets[1].data = pnl;
+                    chartInstance.update('none');
+                    return;
                 }
-                return d.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit', second: (currentTimeframe === '3s' ? '2-digit' : undefined) });
-            });
-            const equity = snapshots.map(s => s.total_equity);
-            const pnl = snapshots.map(s => s.cumulative_realized_pnl);
 
-            if (chartInstance) {
-                chartInstance.data.labels = labels;
-                chartInstance.data.datasets[0].data = equity;
-                chartInstance.data.datasets[1].data = pnl;
-                chartInstance.update('none');
-                return;
-            }
-
-            chartInstance = new Chart(ctx, {
-                type: 'line',
-                data: {
-                    labels: labels,
-                    datasets: [
-                        {
-                            label: 'Equity ($)',
-                            data: equity,
-                            borderColor: '#22c55e',
-                            borderWidth: 1.5,
-                            backgroundColor: 'transparent',
-                            pointRadius: 1,
-                            tension: 0.1,
-                            yAxisID: 'y'
-                        },
-                        {
-                            label: 'PnL ($)',
-                            data: pnl,
-                            borderColor: '#f59e0b',
-                            borderWidth: 1.5,
-                            borderDash: [3, 3],
-                            backgroundColor: 'transparent',
-                            pointRadius: 1,
-                            tension: 0.1,
-                            yAxisID: 'y1'
-                        }
-                    ]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    animation: false,
-                    plugins: {
-                        legend: { display: false }
-                    },
-                    scales: {
-                        x: {
-                            grid: { color: '#141414' },
-                            ticks: { color: '#555', font: { family: 'SF Mono, monospace', size: 9 }, maxTicksLimit: 5 }
-                        },
-                        y: {
-                            position: 'left',
-                            grid: { color: '#141414' },
-                            ticks: {
-                                color: '#22c55e',
-                                font: { family: 'SF Mono, monospace', size: 9 },
-                                callback: val => '$' + (val / 1000).toFixed(1) + 'k'
+                chartInstance = new Chart(ctx, {
+                    type: 'line',
+                    data: {
+                        labels: labels,
+                        datasets: [
+                            {
+                                label: 'Equity ($)',
+                                data: equity,
+                                borderColor: '#22c55e',
+                                borderWidth: 1.5,
+                                backgroundColor: 'transparent',
+                                pointRadius: 1,
+                                tension: 0.1,
+                                yAxisID: 'y'
+                            },
+                            {
+                                label: 'PnL ($)',
+                                data: pnl,
+                                borderColor: '#f59e0b',
+                                borderWidth: 1.5,
+                                borderDash: [3, 3],
+                                backgroundColor: 'transparent',
+                                pointRadius: 1,
+                                tension: 0.1,
+                                yAxisID: 'y1'
                             }
+                        ]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        animation: false,
+                        plugins: {
+                            legend: { display: false }
                         },
-                        y1: {
-                            position: 'right',
-                            grid: { drawOnChartArea: false },
-                            ticks: {
-                                color: '#f59e0b',
-                                font: { family: 'SF Mono, monospace', size: 9 },
-                                callback: val => '$' + val.toFixed(0)
+                        scales: {
+                            x: {
+                                grid: { color: '#141414' },
+                                ticks: { color: '#555', font: { family: 'SF Mono, monospace', size: 9 }, maxTicksLimit: 5 }
+                            },
+                            y: {
+                                position: 'left',
+                                grid: { color: '#141414' },
+                                ticks: {
+                                    color: '#22c55e',
+                                    font: { family: 'SF Mono, monospace', size: 9 },
+                                    callback: val => '$' + (val / 1000).toFixed(1) + 'k'
+                                }
+                            },
+                            y1: {
+                                position: 'right',
+                                grid: { drawOnChartArea: false },
+                                ticks: {
+                                    color: '#f59e0b',
+                                    font: { family: 'SF Mono, monospace', size: 9 },
+                                    callback: val => '$' + val.toFixed(0)
+                                }
                             }
                         }
                     }
-                }
-            });
+                });
+            } catch (errChart) {
+                console.error("Chart render error:", errChart);
+            }
         }
 
         let consecutiveErrors = 0;
@@ -848,30 +855,48 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             const variations = data.variations || {};
             const compass = data.compass || {};
 
-            // 1. Trading Compass & Edge Score
-            const cScore = compass.health_score || 50;
-            const scoreEl = document.getElementById('compass-score-val');
-            scoreEl.innerText = cScore;
-            
-            const badgeEl = document.getElementById('compass-badge-el');
-            badgeEl.innerText = compass.verdict || 'CALCOLO';
-            
-            const col = compass.verdict_color || 'amber';
-            badgeEl.className = 'compass-badge badge-' + col + ' mono';
-            scoreEl.style.color = (col === 'green' ? 'var(--green)' : (col === 'red' ? 'var(--red)' : 'var(--amber)'));
+            // 1. Trading Compass & Edge Score (RENDERIZZAZIONE IMMEDIATA E PROTETTA)
+            try {
+                const cScore = typeof compass.health_score === 'number' ? compass.health_score : 50;
+                const scoreEl = document.getElementById('compass-score-val');
+                if (scoreEl) scoreEl.innerText = cScore;
+                
+                const badgeEl = document.getElementById('compass-badge-el');
+                if (badgeEl) {
+                    badgeEl.innerText = compass.verdict || 'ALLINEATO';
+                    const col = compass.verdict_color || 'amber';
+                    badgeEl.className = 'compass-badge badge-' + col + ' mono';
+                    if (scoreEl) {
+                        scoreEl.style.color = (col === 'green' ? 'var(--green)' : (col === 'red' ? 'var(--red)' : 'var(--amber)'));
+                    }
+                }
 
-            document.getElementById('compass-desc-el').innerText = compass.verdict_desc || '';
+                const descEl = document.getElementById('compass-desc-el');
+                if (descEl) descEl.innerText = compass.verdict_desc || 'Parametri quantitativi monitorati regolarmente.';
 
-            // 4 Diag Metrics
-            const evEl = document.getElementById('diag-ev-val');
-            const evSign = (compass.expected_value_usd || 0) >= 0 ? '+' : '';
-            evEl.innerText = `${evSign}$${(compass.expected_value_usd || 0).toFixed(2)}`;
-            evEl.className = 'diag-val ' + ((compass.expected_value_usd || 0) >= 0 ? 'val-up' : 'val-down');
+                // 4 Diag Metrics
+                const evEl = document.getElementById('diag-ev-val');
+                if (evEl) {
+                    const evVal = compass.expected_value_usd || 0;
+                    const evSign = evVal >= 0 ? '+' : '';
+                    evEl.innerText = `${evSign}$${evVal.toFixed(2)}`;
+                    evEl.className = 'diag-val ' + (evVal >= 0 ? 'val-up' : 'val-down');
+                }
 
-            document.getElementById('diag-rr-val').innerText = `1:${(compass.realized_rr || 0).toFixed(1)}`;
-            document.getElementById('diag-itm-val').innerText = `${compass.open_itm_ratio || 0}%`;
-            document.getElementById('diag-prot-sub').innerText = `${compass.protected_positions_count || 0} a Break-Even`;
-            document.getElementById('diag-pf-val').innerText = (compass.profit_factor || 0).toFixed(2);
+                const rrEl = document.getElementById('diag-rr-val');
+                if (rrEl) rrEl.innerText = `1:${(compass.realized_rr || 0).toFixed(1)}`;
+
+                const itmEl = document.getElementById('diag-itm-val');
+                if (itmEl) itmEl.innerText = `${compass.open_itm_ratio || 0}%`;
+
+                const protSub = document.getElementById('diag-prot-sub');
+                if (protSub) protSub.innerText = `${compass.protected_positions_count || 0} a Break-Even`;
+
+                const pfEl = document.getElementById('diag-pf-val');
+                if (pfEl) pfEl.innerText = (compass.profit_factor || 0).toFixed(2);
+            } catch (errCompass) {
+                console.error("Compass render error:", errCompass);
+            }
 
             // 2. Acc Summary
             const bEq = bWallet.total_equity || 0;
