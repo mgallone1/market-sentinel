@@ -1,11 +1,10 @@
 """
 Web Dashboard Service for Market Sentinel.
-Design: PURE FINANCIAL TERMINAL (Broker Grade, Apple Dark OLED).
-Includes:
-- TRADING COMPASS: Health Score (0-100), Directional Edge Verdict, Realized R:R, Expected Value (EV $/trade)
-- Monitor Multi-Timeframe per Variazioni (3s, 1m, 1h, 1d, 1w, 1M)
-- Chart.js a 2 assi con ricampionamento dinamico
-- Lista posizioni Bybit a riga singola con indicatore di stato rischio e fee
+Design: Professional Dual-Theme Financial Terminal (Light Mode & Dark Mode switchable).
+- Light Mode: Elegante, arioso, pulito (sfondo #F8FAFC, card #FFFFFF, bordi #E2E8F0, testo ad alto contrasto #0F172A).
+- Dark Mode: Slate istituzionale (sfondo #0F172A, card #1E293B, bordi #334155, testo #F8FAFC).
+- Switcher istantaneo a 1-tap in alto a destra (sole/luna) con salvataggio preferenza in localStorage.
+- 100% ottimizzato per iPhone e Desktop con grafici Chart.js che adattano colori assi e griglia al tema.
 """
 
 import json
@@ -23,32 +22,57 @@ _bybit_service: BybitExecutionService = None
 _alpaca_service: AlpacaExecutionService = None
 
 DASHBOARD_HTML = """<!DOCTYPE html>
-<html lang="it">
+<html lang="it" data-theme="light">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-status-bar-style" content="black">
-    <meta name="theme-color" content="#000000">
-    <title>TERMINAL // SENTINEL COMPASS</title>
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <title>SENTINEL // DESK TRADING</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
+        /* TEMA LIGHT (PREDEFINITO, LUMINOSO E AD ALTA LEGGIBILITÀ) */
         :root {
-            --bg: #000000;
-            --surface: #0a0a0a;
-            --border: #1a1a1a;
-            --border-subtle: #121212;
-            --text-main: #f0f0f0;
-            --text-muted: #737373;
-            --text-dim: #454545;
-            --green: #22c55e;
-            --green-bg: #052e16;
-            --red: #ef4444;
-            --red-bg: #450a0a;
-            --amber: #f59e0b;
-            --amber-bg: #2d1800;
-            --blue: #3b82f6;
+            --bg: #f8fafc;
+            --surface: #ffffff;
+            --surface-elevated: #f1f5f9;
+            --border: #e2e8f0;
+            --border-subtle: #edf2f7;
+            --text-main: #0f172a;
+            --text-muted: #64748b;
+            --text-dim: #94a3b8;
+            --green: #15803d;
+            --green-bg: #dcfce7;
+            --red: #b91c1c;
+            --red-bg: #fee2e2;
+            --amber: #b45309;
+            --amber-bg: #fef3c7;
+            --blue: #2563eb;
+            --chart-grid: rgba(226, 232, 240, 0.8);
+            --chart-tick: #64748b;
         }
+
+        /* TEMA DARK (SLATE ISTITUZIONALE, NON NERO CIECO) */
+        [data-theme="dark"] {
+            --bg: #0b0f19;
+            --surface: #131b2e;
+            --surface-elevated: #1a243d;
+            --border: #233150;
+            --border-subtle: #19243c;
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+            --text-dim: #64748b;
+            --green: #22c55e;
+            --green-bg: rgba(34, 197, 94, 0.15);
+            --red: #ef4444;
+            --red-bg: rgba(239, 68, 68, 0.15);
+            --amber: #f59e0b;
+            --amber-bg: rgba(245, 158, 11, 0.15);
+            --blue: #3b82f6;
+            --chart-grid: rgba(35, 49, 80, 0.5);
+            --chart-tick: #94a3b8;
+        }
+
         * {
             box-sizing: border-box;
             margin: 0;
@@ -62,8 +86,9 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             font-size: 13px;
             line-height: 1.4;
             padding-top: env(safe-area-inset-top, 0px);
-            padding-bottom: calc(env(safe-area-inset-bottom, 20px) + 56px);
+            padding-bottom: calc(env(safe-area-inset-bottom, 20px) + 60px);
             overflow-x: hidden;
+            transition: background-color 0.2s ease, color 0.2s ease;
         }
         .mono {
             font-family: "SF Mono", Menlo, Monaco, Consolas, monospace;
@@ -72,7 +97,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 
         /* Top Bar */
         .topbar {
-            background: #000000;
+            background: var(--surface);
             border-bottom: 1px solid var(--border);
             padding: 10px 16px;
             display: flex;
@@ -81,34 +106,47 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             position: sticky;
             top: 0;
             z-index: 50;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.03);
         }
         .topbar-title {
             font-weight: 700;
             font-size: 14px;
-            color: #fff;
+            color: var(--text-main);
             display: flex;
             align-items: center;
             gap: 8px;
         }
         .status-dot {
-            width: 7px;
-            height: 7px;
+            width: 8px;
+            height: 8px;
             border-radius: 50%;
             background: var(--green);
             display: inline-block;
         }
-        .refresh-btn {
-            background: #111;
-            border: 1px solid #262626;
-            color: #ccc;
+        .topbar-actions {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .theme-toggle-btn, .refresh-btn {
+            background: var(--surface-elevated);
+            border: 1px solid var(--border);
+            color: var(--text-main);
             font-size: 11px;
             font-weight: 600;
-            padding: 6px 12px;
-            border-radius: 4px;
+            padding: 6px 10px;
+            border-radius: 6px;
             cursor: pointer;
             font-family: inherit;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            touch-action: manipulation;
         }
-        .refresh-btn:active { background: #222; }
+        .theme-toggle-btn:active, .refresh-btn:active {
+            opacity: 0.8;
+            transform: scale(0.97);
+        }
 
         /* Section Container */
         .section {
@@ -133,9 +171,9 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         .compass-box {
             background: var(--surface);
             border: 1px solid var(--border);
-            border-radius: 4px;
-            padding: 12px;
-            margin-top: 4px;
+            border-radius: 8px;
+            padding: 12px 14px;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.02);
         }
         .compass-top {
             display: flex;
@@ -150,24 +188,24 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             gap: 6px;
         }
         .compass-score {
-            font-size: 24px;
+            font-size: 26px;
             font-weight: 800;
         }
         .compass-badge {
             font-size: 10px;
             font-weight: 800;
-            padding: 3px 8px;
-            border-radius: 3px;
+            padding: 4px 8px;
+            border-radius: 4px;
             text-transform: uppercase;
             letter-spacing: 0.5px;
         }
-        .badge-green { background: var(--green-bg); color: var(--green); border: 1px solid rgba(34,197,94,0.3); }
-        .badge-amber { background: var(--amber-bg); color: var(--amber); border: 1px solid rgba(245,158,11,0.3); }
-        .badge-red { background: var(--red-bg); color: var(--red); border: 1px solid rgba(239,68,68,0.3); }
+        .badge-green { background: var(--green-bg); color: var(--green); border: 1px solid var(--green); }
+        .badge-amber { background: var(--amber-bg); color: var(--amber); border: 1px solid var(--amber); }
+        .badge-red { background: var(--red-bg); color: var(--red); border: 1px solid var(--red); }
 
         .compass-desc {
             font-size: 11px;
-            color: #aaa;
+            color: var(--text-muted);
             margin-top: 8px;
             line-height: 1.4;
         }
@@ -183,20 +221,21 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             .diag-grid { grid-template-columns: repeat(4, 1fr); }
         }
         .diag-cell {
-            background: #0d0d0d;
-            border: 1px solid #1a1a1a;
+            background: var(--surface-elevated);
+            border: 1px solid var(--border);
             padding: 8px 10px;
-            border-radius: 3px;
+            border-radius: 6px;
         }
         .diag-label {
             font-size: 9px;
             color: var(--text-muted);
             text-transform: uppercase;
+            font-weight: 600;
         }
         .diag-val {
-            font-size: 13px;
+            font-size: 14px;
             font-weight: 700;
-            color: #fff;
+            color: var(--text-main);
             margin-top: 2px;
         }
         .diag-sub {
@@ -218,7 +257,8 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             background: var(--surface);
             border: 1px solid var(--border);
             padding: 10px 12px;
-            border-radius: 4px;
+            border-radius: 8px;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.02);
         }
         .acc-label {
             font-size: 10px;
@@ -226,11 +266,12 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             text-transform: uppercase;
             letter-spacing: 0.5px;
             margin-bottom: 4px;
+            font-weight: 600;
         }
         .acc-val {
             font-size: 16px;
             font-weight: 700;
-            color: #fff;
+            color: var(--text-main);
         }
         .acc-sub {
             font-size: 10px;
@@ -252,14 +293,14 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             background: var(--surface);
             border: 1px solid var(--border);
             padding: 8px;
-            border-radius: 4px;
+            border-radius: 6px;
             text-align: center;
             cursor: pointer;
-            transition: border-color 0.15s ease;
+            transition: all 0.15s ease;
         }
         .tf-card.active {
-            border-color: #444;
-            background: #121212;
+            border-color: var(--blue);
+            background: var(--surface-elevated);
         }
         .tf-header {
             font-size: 10px;
@@ -284,25 +325,29 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             gap: 4px;
         }
         .tf-btn {
-            background: #111;
-            border: 1px solid #222;
-            color: #888;
+            background: var(--surface-elevated);
+            border: 1px solid var(--border);
+            color: var(--text-muted);
             font-size: 10px;
             font-weight: 700;
             padding: 3px 8px;
-            border-radius: 3px;
+            border-radius: 4px;
             cursor: pointer;
             font-family: inherit;
         }
         .tf-btn.active {
-            background: #262626;
+            background: var(--blue);
             color: #fff;
-            border-color: #444;
+            border-color: var(--blue);
         }
         .chart-wrap {
-            height: 170px;
+            height: 180px;
             position: relative;
             margin-top: 8px;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 8px;
         }
         .metrics-bar {
             display: flex;
@@ -313,38 +358,39 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             font-size: 11px;
         }
         .metric-item span { color: var(--text-muted); margin-right: 4px; }
-        .metric-item strong { color: #fff; }
+        .metric-item strong { color: var(--text-main); }
 
         /* Watchlist Row */
         .trade-row {
             background: var(--surface);
             border: 1px solid var(--border);
-            border-radius: 4px;
-            padding: 10px 12px;
+            border-radius: 8px;
+            padding: 10px 14px;
             margin-bottom: 8px;
             display: flex;
             justify-content: space-between;
             align-items: center;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.02);
         }
-        .trade-row:active { background: #141414; }
+        .trade-row:active { background: var(--surface-elevated); }
         .trade-left { display: flex; flex-direction: column; gap: 2px; }
         .trade-symbol-row { display: flex; align-items: center; gap: 6px; }
-        .trade-symbol { font-size: 14px; font-weight: 700; color: #fff; }
+        .trade-symbol { font-size: 14px; font-weight: 700; color: var(--text-main); }
         .trade-side-long {
             font-size: 9px;
             font-weight: 800;
             color: var(--green);
             background: var(--green-bg);
-            padding: 1px 4px;
-            border-radius: 2px;
+            padding: 2px 5px;
+            border-radius: 4px;
         }
         .trade-side-short {
             font-size: 9px;
             font-weight: 800;
             color: var(--red);
             background: var(--red-bg);
-            padding: 1px 4px;
-            border-radius: 2px;
+            padding: 2px 5px;
+            border-radius: 4px;
         }
         .trade-detail { font-size: 11px; color: var(--text-muted); }
         .trade-right {
@@ -358,20 +404,22 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         .trade-guard {
             font-size: 10px;
             padding: 2px 6px;
-            border-radius: 2px;
-            background: #141414;
-            color: #999;
-            border: 1px solid #262626;
+            border-radius: 4px;
+            background: var(--surface-elevated);
+            color: var(--text-muted);
+            border: 1px solid var(--border);
         }
         .guard-be {
             color: var(--green);
-            border-color: rgba(34,197,94,0.4);
             background: var(--green-bg);
+            border-color: var(--green);
+            font-weight: 700;
         }
         .guard-lock {
             color: var(--amber);
-            border-color: rgba(245,158,11,0.4);
-            background: #2b1700;
+            background: var(--amber-bg);
+            border-color: var(--amber);
+            font-weight: 700;
         }
 
         /* Bottom Tab Bar */
@@ -380,12 +428,13 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             bottom: 0;
             left: 0;
             right: 0;
-            height: 52px;
-            background: #000000;
+            height: 54px;
+            background: var(--surface);
             border-top: 1px solid var(--border);
             display: flex;
             z-index: 100;
             padding-bottom: env(safe-area-inset-bottom, 0px);
+            box-shadow: 0 -1px 3px rgba(0,0,0,0.03);
         }
         .tab-item {
             flex: 1;
@@ -395,13 +444,13 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             justify-content: center;
             font-size: 11px;
             font-weight: 600;
-            color: var(--text-dim);
+            color: var(--text-muted);
             cursor: pointer;
             border: none;
             background: none;
             font-family: inherit;
         }
-        .tab-item.active { color: #ffffff; }
+        .tab-item.active { color: var(--blue); font-weight: 700; }
         .tab-item span.dot {
             width: 4px;
             height: 4px;
@@ -409,7 +458,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             background: transparent;
             margin-top: 3px;
         }
-        .tab-item.active span.dot { background: var(--green); }
+        .tab-item.active span.dot { background: var(--blue); }
 
         .clean-table {
             width: 100%;
@@ -428,7 +477,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         .clean-table td {
             padding: 8px 6px;
             border-bottom: 1px solid var(--border-subtle);
-            color: #ccc;
+            color: var(--text-main);
         }
         .val-up { color: var(--green) !important; font-weight: 600; }
         .val-down { color: var(--red) !important; font-weight: 600; }
@@ -438,14 +487,17 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 </head>
 <body>
 
-    <!-- TOPBAR -->
+    <!-- TOPBAR CON CONTROLLI REFRESH E THEME SWITCH -->
     <div class="topbar">
         <div class="topbar-title">
             <span class="status-dot"></span>
-            <span>SENTINEL COMPASS</span>
+            <span>SENTINEL TRADING</span>
             <span class="mono" style="font-size: 10px; color: var(--text-muted);" id="top-clock">--:--:--</span>
         </div>
-        <button class="refresh-btn mono" onclick="fetchData()">SYNC</button>
+        <div class="topbar-actions">
+            <button class="theme-toggle-btn mono" onclick="toggleTheme()" id="theme-btn">🌙 DARK</button>
+            <button class="refresh-btn mono" onclick="fetchData()">SYNC</button>
+        </div>
     </div>
 
     <!-- 1. TRADING COMPASS: DIREZIONE STRATEGICA & HEALTH SCORE -->
@@ -659,15 +711,15 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         <div style="display: flex; flex-direction: column; gap: 8px;">
             <div class="acc-cell">
                 <div class="acc-label">Taglia &amp; Frequenza</div>
-                <div style="font-size: 12px; color: #fff;">$15,000 USDT per ordine. Scan ogni 2 min sui 10 asset liquidi.</div>
+                <div style="font-size: 12px; color: var(--text-main);"><strong>$15,000 USDT</strong> per ordine. Scan ogni 2 min sui 10 asset liquidi.</div>
             </div>
             <div class="acc-cell">
                 <div class="acc-label">Filtro Confluenza A+</div>
-                <div style="font-size: 12px; color: #fff;">Ingresso solo con EMA 20/50 + RSI + Volume Ratio &ge; 1.1x concordi.</div>
+                <div style="font-size: 12px; color: var(--text-main);">Ingresso solo con <strong>EMA 20/50 + RSI + Volume Ratio &ge; 1.1x</strong> concordi.</div>
             </div>
             <div class="acc-cell">
                 <div class="acc-label">Risk Management Asimmetrico (1:2.5)</div>
-                <div style="font-size: 12px; color: #fff;">Take Profit a +3.00% ($450). Stop Loss a -1.20%. Break-even a +0.60%. Trailing Lock a +1.20%.</div>
+                <div style="font-size: 12px; color: var(--text-main);">Take Profit a <strong>+3.00% ($450)</strong>. Stop Loss a <strong>-1.20%</strong>. Break-even a <strong>+0.60%</strong>. Trailing Lock a <strong>+1.20%</strong>.</div>
             </div>
         </div>
     </div>
@@ -695,6 +747,34 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     <script>
         let chartInstance = null;
         let currentTimeframe = '3s';
+
+        // GESTIONE TEMA LIGHT / DARK CON LOCALSTORAGE
+        function initTheme() {
+            const savedTheme = localStorage.getItem('sentinel_theme') || 'light';
+            document.documentElement.setAttribute('data-theme', savedTheme);
+            updateThemeButtonText(savedTheme);
+        }
+
+        function toggleTheme() {
+            const current = document.documentElement.getAttribute('data-theme') || 'light';
+            const next = current === 'light' ? 'dark' : 'light';
+            document.documentElement.setAttribute('data-theme', next);
+            localStorage.setItem('sentinel_theme', next);
+            updateThemeButtonText(next);
+            if (chartInstance) {
+                chartInstance.destroy();
+                chartInstance = null;
+                fetchData();
+            }
+        }
+
+        function updateThemeButtonText(theme) {
+            const btn = document.getElementById('theme-btn');
+            if (btn) {
+                btn.innerText = theme === 'light' ? '🌙 DARK' : '☀️ LIGHT';
+            }
+        }
+        initTheme();
 
         function showTab(tabName) {
             ['bybit', 'alpaca', 'history', 'rules'].forEach(t => {
@@ -735,6 +815,11 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 const canvas = document.getElementById('perfChart');
                 if (!canvas) return;
                 const ctx = canvas.getContext('2d');
+
+                const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+                const gridColor = isDark ? 'rgba(35, 49, 80, 0.4)' : 'rgba(226, 232, 240, 0.8)';
+                const tickColor = isDark ? '#94a3b8' : '#64748b';
+
                 const labels = snapshots.map(s => {
                     const d = new Date(s.epoch * 1000);
                     if (currentTimeframe === '1d' || currentTimeframe === '1w' || currentTimeframe === '1M') {
@@ -761,21 +846,22 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                             {
                                 label: 'Equity ($)',
                                 data: equity,
-                                borderColor: '#22c55e',
-                                borderWidth: 1.5,
-                                backgroundColor: 'transparent',
-                                pointRadius: 1,
-                                tension: 0.1,
+                                borderColor: '#15803d',
+                                borderWidth: 2,
+                                backgroundColor: isDark ? 'rgba(34, 197, 94, 0.05)' : 'rgba(21, 128, 61, 0.05)',
+                                pointRadius: 1.5,
+                                tension: 0.15,
+                                fill: true,
                                 yAxisID: 'y'
                             },
                             {
                                 label: 'PnL ($)',
                                 data: pnl,
-                                borderColor: '#f59e0b',
-                                borderWidth: 1.5,
+                                borderColor: '#b45309',
+                                borderWidth: 1.8,
                                 borderDash: [3, 3],
                                 backgroundColor: 'transparent',
-                                pointRadius: 1,
+                                pointRadius: 1.5,
                                 tension: 0.1,
                                 yAxisID: 'y1'
                             }
@@ -790,14 +876,14 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                         },
                         scales: {
                             x: {
-                                grid: { color: '#141414' },
-                                ticks: { color: '#555', font: { family: 'SF Mono, monospace', size: 9 }, maxTicksLimit: 5 }
+                                grid: { color: gridColor },
+                                ticks: { color: tickColor, font: { family: 'SF Mono, monospace', size: 9 }, maxTicksLimit: 5 }
                             },
                             y: {
                                 position: 'left',
-                                grid: { color: '#141414' },
+                                grid: { color: gridColor },
                                 ticks: {
-                                    color: '#22c55e',
+                                    color: '#15803d',
                                     font: { family: 'SF Mono, monospace', size: 9 },
                                     callback: val => '$' + (val / 1000).toFixed(1) + 'k'
                                 }
@@ -806,7 +892,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                                 position: 'right',
                                 grid: { drawOnChartArea: false },
                                 ticks: {
-                                    color: '#f59e0b',
+                                    color: '#b45309',
                                     font: { family: 'SF Mono, monospace', size: 9 },
                                     callback: val => '$' + val.toFixed(0)
                                 }
@@ -1017,7 +1103,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                     const uSign = u >= 0 ? '+' : '';
                     return `
                         <tr>
-                            <td style="font-weight: 700; color: #fff;">${ap.symbol}</td>
+                            <td style="font-weight: 700; color: var(--text-main);">${ap.symbol}</td>
                             <td>${ap.qty}</td>
                             <td>$${parseFloat(ap.avg_entry_price || 0).toFixed(2)}</td>
                             <td>$${parseFloat(ap.current_price || 0).toFixed(2)}</td>
@@ -1042,7 +1128,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                     return `
                         <tr>
                             <td style="color: var(--text-muted);">${timeStr}</td>
-                            <td style="font-weight: 700; color: #fff;">${c.symbol}</td>
+                            <td style="font-weight: 700; color: var(--text-main);">${c.symbol}</td>
                             <td>${c.side}</td>
                             <td>$${parseFloat(c.avgEntryPrice || 0).toFixed(3)} &rarr; $${parseFloat(c.avgExitPrice || 0).toFixed(3)}</td>
                             <td style="color: var(--text-dim);">$${(parseFloat(c.openFee || 0) + parseFloat(c.closeFee || 0)).toFixed(2)}</td>
