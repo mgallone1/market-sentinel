@@ -759,24 +759,86 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         </table>
     </div>
 
-    <!-- 8. TAB 4: REGOLE TRADING -->
-    <div class="section hidden" id="view-rules">
+    <!-- 8. TAB 4: GUIDA COMPLETA & MANUALE OPERATIVO -->
+    <div class="section hidden" id="view-guide">
         <div class="section-header">
-            <span class="section-title">Parametri di Esecuzione Quantitativa</span>
+            <span class="section-title">📖 Guida Operativa &amp; Significato Indicatori</span>
+            <span class="mono" style="font-size: 10px; color: var(--text-dim);">MANUALE PRATICO</span>
         </div>
-        <div style="display: flex; flex-direction: column; gap: 8px;">
-            <div class="acc-cell">
-                <div class="acc-label">Taglia &amp; Frequenza</div>
-                <div style="font-size: 12px; color: var(--text-main);"><strong>$15,000 USDT</strong> per ordine. Scan ogni 2 min sui 10 asset liquidi.</div>
+        
+        <div style="display: flex; flex-direction: column; gap: 14px;">
+            
+            <!-- Card 1: Monitoraggio Singole Posizioni -->
+            <div class="acc-cell" style="padding: 14px; text-align: left;">
+                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
+                    <strong style="color: var(--text-main); font-size: 13px;">1. Come Leggere una Posizione Aperta</strong>
+                    <span class="badge mono" style="background: var(--blue); color: #fff; font-size: 9px; padding: 2px 6px; border-radius: 3px;">TRADE LIVE</span>
+                </div>
+                <div style="font-size: 12px; color: var(--text-muted); line-height: 1.5; margin-bottom: 10px;">
+                    Ogni riga di trade contiene le informazioni essenziali per monitorare il rischio al centesimo:
+                </div>
+                <div style="background: var(--surface-elevated); padding: 10px; border-radius: 6px; border: 1px solid var(--border); display: flex; flex-direction: column; gap: 8px; font-size: 11px;">
+                    <div><strong>• PnL Dollari (es. <code>$-1.62</code>):</strong> Il guadagno o la perdita se chiudessi la posizione adesso. Su una size di $15,000, una perdita di $1.62 è solo rumore di mercato microscopico.</div>
+                    <div><strong>• PnL Percentuale (es. <code>-0.01%</code>):</strong> La percentuale esatta di scostamento dal tuo prezzo d'ingresso. Verde = in profitto, Rosso = sotto il prezzo d'ingresso.</div>
+                    <div><strong>• Badge <code>SL -1.20%</code>:</strong> Il paracadute di sicurezza. Se il trade scende a -1.20% (-$180), il bot chiude all'istante la posizione impedendo perdite più grandi.</div>
+                    <div><strong>• Badge <code>BE SAFE +0.20%</code>:</strong> Scatta appena il trade guadagna +0.80%. Lo stop viene alzato sopra l'ingresso: il rischio è azzerato e le commissioni coperte.</div>
+                    <div><strong>• Badge <code>LOCK +1.00%</code>:</strong> Scatta al +1.60%. Blocca un profitto netto di +$150 lasciando correre il trade verso il Take Profit (+3.60% ~+$540).</div>
+                </div>
             </div>
-            <div class="acc-cell">
-                <div class="acc-label">Filtro Confluenza A+</div>
-                <div style="font-size: 12px; color: var(--text-main);">Ingresso solo con <strong>EMA 20/50 + RSI + Volume Ratio &ge; 1.1x</strong> concordi.</div>
+
+            <!-- Card 2: Trading Compass & Metriche Quant -->
+            <div class="acc-cell" style="padding: 14px; text-align: left;">
+                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
+                    <strong style="color: var(--text-main); font-size: 13px;">2. Trading Compass (Diagnostica del Vantaggio)</strong>
+                    <span class="badge mono" style="background: var(--green); color: #fff; font-size: 9px; padding: 2px 6px; border-radius: 3px;">STATISTICA</span>
+                </div>
+                <div style="display: flex; flex-direction: column; gap: 8px; font-size: 11px; line-height: 1.45;">
+                    <div><strong>• Health &amp; Alignment Score (0-100):</strong> Indice sintetico dello stato di salute del trading. Sopra 60 indica forte allineamento col trend; sotto 40 scatta la protezione conservativa.</div>
+                    <div><strong>• Expected Value (EV):</strong> Il valore matematico atteso per ogni trade. Se positivo (es. <code>+$45</code>), ogni operazione genera mediamente 45 dollari di profitto nel tempo.</div>
+                    <div><strong>• R:R Reale vs Target:</strong> Rapporto tra vincita media e perdita media. Con Take Profit +3.6% e Stop Loss -1.2%, il rapporto target è <strong>1:3.0</strong> (1 euro di rischio per 3 euro di potenziale utile).</div>
+                    <div><strong>• Profit Factor:</strong> Rapporto tra tutti i profitti lordi e tutte le perdite lorde. Valori sopra 1.5 indicano un sistema statistico profittevole.</div>
+                    <div><strong>• Posizioni in Gain &amp; Break-Even:</strong> Indica quanti dei contratti aperti sono già in attivo e quanti hanno il rischio totalmente azzerato.</div>
+                </div>
             </div>
-            <div class="acc-cell">
-                <div class="acc-label">Risk Management Asimmetrico (1:2.5)</div>
-                <div style="font-size: 12px; color: var(--text-main);">Take Profit a <strong>+3.00% ($450)</strong>. Stop Loss a <strong>-1.20%</strong>. Break-even a <strong>+0.60%</strong>. Trailing Lock a <strong>+1.20%</strong>.</div>
+
+            <!-- Card 3: Regola Aurea Macro BTC Shield -->
+            <div class="acc-cell" style="padding: 14px; text-align: left;">
+                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
+                    <strong style="color: var(--text-main); font-size: 13px;">3. Lo Scudo Macro BTC 4H (Zero Conflitti)</strong>
+                    <span class="badge mono" style="background: var(--amber); color: #fff; font-size: 9px; padding: 2px 6px; border-radius: 3px;">TREND FOLLOWING</span>
+                </div>
+                <div style="font-size: 11px; color: var(--text-muted); line-height: 1.45;">
+                    Per evitare che le posizioni Long e Short si annullino a vicenda o che il bot compri mentre il mercato crolla, il sistema interroga il trend a 4 Ore di Bitcoin:<br>
+                    <strong>• Trend Ribassista (BTC &lt; EMA 50):</strong> Il bot apre <strong>esclusivamente posizioni SHORT</strong> sui breakout di debolezza.<br>
+                    <strong>• Trend Rialzista (BTC &gt; EMA 50):</strong> Il bot apre <strong>esclusivamente posizioni LONG</strong> sulla forza.<br>
+                    <strong>• Risultato:</strong> Tutto il portafoglio spinge nella stessa direzione, evitando perdite incrociate e azzerando le doppie commissioni.
+                </div>
             </div>
+
+            <!-- Card 4: Separazione Bybit e Alpaca -->
+            <div class="acc-cell" style="padding: 14px; text-align: left;">
+                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
+                    <strong style="color: var(--text-main); font-size: 13px;">4. Separazione dei Broker (Crypto vs Wall Street)</strong>
+                </div>
+                <div style="font-size: 11px; color: var(--text-muted); line-height: 1.45;">
+                    <strong>• Bybit Futures (UTA):</strong> Opera 24/7 (weekend compreso) sui derivati crypto liquidi (BTC, ETH, SOL, LINK, AVAX, XRP).<br>
+                    <strong>• Alpaca Securities (USA):</strong> Opera esclusivamente sulle azioni di Wall Street (NYSE e NASDAQ) dal lunedì al venerdì (15:30 - 22:00 CET). Durante il weekend è giustamente fermo con posizioni chiuse e liquidità protetta in dollari cash.<br>
+                    <strong>• Grafici Separati:</strong> Cliccando sui pulsanti sopra il grafico puoi isolare il rendimento del solo broker crypto o delle sole azioni americane.
+                </div>
+            </div>
+
+            <!-- Card 5: Timeframe e Grafico Zoomabile -->
+            <div class="acc-cell" style="padding: 14px; text-align: left;">
+                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
+                    <strong style="color: var(--text-main); font-size: 13px;">5. Timeframe e Zoom Interattivo</strong>
+                </div>
+                <div style="font-size: 11px; color: var(--text-muted); line-height: 1.45;">
+                    <strong>• Timeframe (3S, 1M, 1H, 1D, 1W, 1MO):</strong> Permette di visualizzare sia il micro-tick in tempo reale che l'andamento a lungo termine fino a 30 giorni.<br>
+                    <strong>• Zoom su iPhone:</strong> Pizzica con due dita direttamente sul grafico per ingrandire o rimpicciolire qualsiasi candela. Clicca <code>🔍 RESET ZOOM</code> per tornare alla panoramica.<br>
+                    <strong>• Tooltip al Tocco:</strong> Tocca con il dito qualsiasi punto o numero per leggere la guida contestuale immediata.
+                </div>
+            </div>
+
         </div>
     </div>
 
@@ -794,8 +856,8 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             <span>Storico</span>
             <span class="dot"></span>
         </button>
-        <button class="tab-item" id="tab-btn-rules" onclick="showTab('rules')">
-            <span>Regole</span>
+        <button class="tab-item" id="tab-btn-guide" onclick="showTab('guide')">
+            <span>📖 Guida Desk</span>
             <span class="dot"></span>
         </button>
     </nav>
@@ -864,7 +926,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         initTheme();
 
         function showTab(tabName) {
-            ['bybit', 'alpaca', 'history', 'rules'].forEach(t => {
+            ['bybit', 'alpaca', 'history', 'guide'].forEach(t => {
                 const view = document.getElementById('view-' + t);
                 const btn = document.getElementById('tab-btn-' + t);
                 if (t === tabName) {
