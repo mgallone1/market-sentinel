@@ -73,7 +73,11 @@ class BybitExecutionService:
     def get_realtime_tickers(self, symbols: Optional[List[str]] = None) -> Dict[str, Dict[str, Any]]:
         """Recupera le quotazioni live dei contratti USDT perpetual."""
         try:
-            res = self.session.get_tickers(category="linear")
+            # Se è richiesto un solo simbolo, lo passiamo direttamente come parametro per evitare payload enormi e rate limit
+            params = {"category": "linear"}
+            if symbols and len(symbols) == 1:
+                params["symbol"] = symbols[0]
+            res = self.session.get_tickers(**params)
             if res.get("retCode") == 0:
                 data = {}
                 target_syms = set(symbols) if symbols else None
