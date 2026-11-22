@@ -19,9 +19,31 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from typing import Dict, Any, List
 
-DB_PATH = Path(__file__).parent.parent / "perf_history.db"
+import shutil
 
-def init_perf_db(db_path=DB_PATH):
+def get_persistent_db_path() -> Path:
+    """Determina il percorso del database: volume persistente Railway (/app/data) con fallback locale."""
+    mount_dir = Path("/app/data")
+    local_dir = Path(__file__).parent.parent
+    legacy_file = local_dir / "perf_history.db"
+
+    if mount_dir.exists():
+        persistent_file = mount_dir / "perf_history.db"
+        # Se esiste un database legacy nella root del container ma non nel volume, migralo
+        if legacy_file.exists() and not persistent_file.exists():
+            try:
+                shutil.copy2(legacy_file, persistent_file)
+                print(f"📦 [Storage] Migrato storico esistente in volume persistente: {persistent_file}")
+            except Exception as e:
+                print(f"[!] Errore migrazione database su volume: {e}")
+        return persistent_file
+    return legacy_file
+
+DB_PATH = get_persistent_db_path()
+
+def init_perf_db(db_path=None):
+    if db_path is None:
+        db_path = get_persistent_db_path()
     with sqlite3.connect(db_path) as conn:
         cursor = conn.cursor()
         cursor.execute("""
@@ -46,8 +68,8 @@ def init_perf_db(db_path=DB_PATH):
 init_perf_db()
 
 class PerfMetricsTracker:
-    def __init__(self, db_path=DB_PATH):
-        self.db_path = db_path
+    def __init__(self, db_path=None):
+        self.db_path = db_path or get_persistent_db_path()
         init_perf_db(self.db_path)
         self._ensure_baseline_history()
 
