@@ -3114,7 +3114,20 @@ def _sync_crypto_risk_and_screening():
                     or_low = float(low.iloc[-5:-1].min())
 
                     # INGRESSO SHORT (Ammesso solo se Macro Bias è BEARISH)
-                    if macro_bias == "BEARISH" and (last_c < or_low) and (last_c < ema20 < ema50) and (rsi < 45) and (vol_ratio >= 1.15):
+                    # Verifica Confluenza Ciclica Hurst/Migliorino ed Elliott
+                    if macro_bias == "BEARISH" and (last_c < or_low) and (last_c < ema20 < ema50) and (rsi < 48) and (vol_ratio >= 1.10):
+                        # Convalida quantitativa profonda: verifica se la ciclica di Hurst e il Battleplan confermano o non ostacolano il setup
+                        try:
+                            from services.deep_trade_analysis_service import get_deep_trade_forecast
+                            forecast_check = get_deep_trade_forecast(b_sym)
+                            vincolo = forecast_check.get("cycle", {}).get("vincolo_migliorino", "LIBERO")
+                            # Se il ciclo è vincolato al rialzo o in spinta d'acquisto opposta, scarta il trade per proteggere il capitale
+                            if "RIALZISTA FORZATO" in vincolo.upper():
+                                print(f"⚠️ [Filtro Ciclico Ignorato Short] {b_sym} ha vincolo ciclico rialzista in corso. Trade scartato.")
+                                continue
+                        except Exception as e_fc:
+                            print(f"[!] Warning verifica ciclica forecast: {e_fc}")
+
                         print(f"📉 [Setup A+ SHORT Confluente] {b_sym} con Macro BEARISH (RSI: {rsi:.1f}, VolRatio: {vol_ratio:.2f}x). Ordine dinamico ${dynamic_notional:,.0f}...")
                         order_res = bybit_service.place_order(b_sym, side="Sell", notional_usd=dynamic_notional, take_profit_pct=3.6, stop_loss_pct=1.2)
                         if "error" not in order_res:
@@ -3129,7 +3142,19 @@ def _sync_crypto_risk_and_screening():
                         break
 
                     # INGRESSO LONG (Ammesso solo se Macro Bias è BULLISH)
-                    elif macro_bias == "BULLISH" and (last_c > or_high) and (last_c > ema20 > ema50) and (rsi > 55) and (vol_ratio >= 1.15):
+                    elif macro_bias == "BULLISH" and (last_c > or_high) and (last_c > ema20 > ema50) and (rsi > 52) and (vol_ratio >= 1.10):
+                        # Convalida quantitativa profonda: verifica se la ciclica di Hurst e il Battleplan confermano o non ostacolano il setup
+                        try:
+                            from services.deep_trade_analysis_service import get_deep_trade_forecast
+                            forecast_check = get_deep_trade_forecast(b_sym)
+                            vincolo = forecast_check.get("cycle", {}).get("vincolo_migliorino", "LIBERO")
+                            # Se il ciclo è vincolato al ribasso, scarta l'ingresso long
+                            if "RIBASSISTA" in vincolo.upper():
+                                print(f"⚠️ [Filtro Ciclico Ignorato Long] {b_sym} ha vincolo ciclico ribassista in corso. Trade scartato.")
+                                continue
+                        except Exception as e_fc:
+                            print(f"[!] Warning verifica ciclica forecast: {e_fc}")
+
                         print(f"📈 [Setup A+ LONG Confluente] {b_sym} con Macro BULLISH (RSI: {rsi:.1f}, VolRatio: {vol_ratio:.2f}x). Ordine dinamico ${dynamic_notional:,.0f}...")
                         order_res = bybit_service.place_order(b_sym, side="Buy", notional_usd=dynamic_notional, take_profit_pct=3.6, stop_loss_pct=1.2)
                         if "error" not in order_res:

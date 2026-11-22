@@ -1757,28 +1757,37 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             pnlEl.className = 'acc-val ' + (totPnl >= 0 ? 'val-up' : 'val-down');
             document.getElementById('active-positions-count').innerText = `${bPositions.length} posizioni`;
 
-            // 3. Variazioni Multi-Timeframe (Separazione Istanza Istantanea)
+            // 3. Variazioni Multi-Timeframe (Separazione Istanza Istantanea e PnL Trading)
             ['3s', '1m', '1h', '1d', '1w', '1M'].forEach(tf => {
-                const baseV = variations[tf] || { delta_equity: 0, delta_equity_pct: 0 };
+                const baseV = variations[tf] || { delta_equity: 0, delta_equity_pct: 0, delta_trading_pnl: 0 };
                 let targetDelta = baseV.delta_equity;
                 let targetPct = baseV.delta_equity_pct;
+                let tradingPnlDelta = typeof baseV.delta_trading_pnl === 'number' ? baseV.delta_trading_pnl : baseV.delta_pnl;
 
                 if (currentInstance === 'bybit' && baseV.bybit) {
                     targetDelta = baseV.bybit.delta_equity;
                     targetPct = baseV.bybit.delta_equity_pct;
+                    if (typeof baseV.bybit.delta_trading_pnl === 'number') {
+                        tradingPnlDelta = baseV.bybit.delta_trading_pnl;
+                    }
                 } else if (currentInstance === 'alpaca' && baseV.alpaca) {
                     targetDelta = baseV.alpaca.delta_equity;
                     targetPct = baseV.alpaca.delta_equity_pct;
+                    tradingPnlDelta = baseV.delta_pnl;
                 }
 
                 const vVal = document.getElementById(`delta-${tf}-val`);
                 const vPct = document.getElementById(`delta-${tf}-pct`);
                 if (vVal && vPct) {
-                    const dSign = targetDelta >= 0 ? '+' : '';
-                    vVal.innerText = `${dSign}$${targetDelta.toFixed(2)}`;
-                    vPct.innerText = `${dSign}${targetPct.toFixed(2)}%`;
+                    // Quando visualizziamo Bybit Crypto, usiamo tradingPnlDelta per riflettere l'operatività reale dei contratti
+                    const displayDelta = (currentInstance === 'bybit' && typeof tradingPnlDelta === 'number') ? tradingPnlDelta : targetDelta;
+                    const dSign = displayDelta >= 0 ? '+' : '';
+                    vVal.innerText = `${dSign}$${displayDelta.toFixed(2)}`;
+                    
+                    const pctVal = (currentInstance === 'bybit' && bEq > 0) ? (displayDelta / (bEq || 1) * 100) : targetPct;
+                    vPct.innerText = `${dSign}${pctVal.toFixed(2)}%`;
 
-                    const vClass = targetDelta > 0 ? 'val-up' : (targetDelta < 0 ? 'val-down' : 'val-neutral');
+                    const vClass = displayDelta > 0 ? 'val-up' : (displayDelta < 0 ? 'val-down' : 'val-neutral');
                     vVal.className = `tf-delta ${vClass}`;
                     vPct.className = `tf-pct ${vClass}`;
                 }
@@ -1831,10 +1840,11 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                     const sl = p.stop_loss || (isLong ? entry * 0.988 : entry * 1.012);
                     const tp = p.take_profit || (isLong ? entry * 1.036 : entry * 0.964);
 
-                    // Calcolo percentuale di completamento verso TP (+3.60%)
-                    const pctGain = p.pnl_pct || 0;
+                    // Calcolo percentuale di completamento verso TP (+3.60% teorico di trade o distanza TP)
+                    const pctGain = typeof p.pnl_pct === 'number' ? p.pnl_pct : 0;
                     const tpProgress = Math.max(0, Math.min(100, (pctGain / 3.60) * 100));
                     const progressColor = pctGain >= 1.60 ? 'var(--amber)' : (pctGain > 0 ? 'var(--green)' : 'var(--red)');
+                    const distTp = (3.60 - pctGain).toFixed(2);
 
                     // Canvas ID per mini-candlestick / sparkline
                     const sparkId = `sparkline-pos-${idx}`;
@@ -2288,7 +2298,7 @@ def _fetch_all_live_data_sync(tf: str):
         print(f"[!] Errore registrazione snapshot: {e_snap}")
 
     history = perf_tracker.get_timeframe_history(tf)
-    variations = perf_tracker.get_variations(tot_eq, cum_real, bybit_eq=b_eq, alpaca_eq=a_eq)
+    variations = perf_tracker.get_variations(tot_eq, cum_real, bybit_eq=b_eq, alpaca_eq=a_eq, current_unrealized_pnl=unreal_pnl)
     compass_metrics = trading_compass.compute_edge_metrics(b_closed, b_pos, tot_eq)
 
     return {

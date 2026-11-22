@@ -276,9 +276,11 @@ class PerfMetricsTracker:
             return []
 
     def get_variations(self, current_equity: float, current_realized_pnl: float,
-                       bybit_eq: float = 0.0, alpaca_eq: float = 0.0) -> Dict[str, Dict[str, Any]]:
+                       bybit_eq: float = 0.0, alpaca_eq: float = 0.0,
+                       current_unrealized_pnl: float = 0.0) -> Dict[str, Dict[str, Any]]:
         """
-        Calcola la variazione di Equity e PnL rispetto all'inizio di ciascun timeframe:
+        Calcola la variazione di Equity, PnL e Net Trading PnL (Realizzato + Fluttuante)
+        rispetto all'inizio di ciascun timeframe:
         - 3 secondi fa
         - 1 minuto fa
         - 1 ora fa
@@ -308,7 +310,7 @@ class PerfMetricsTracker:
                     
                     # 1. Cerca il record più vicino prima o uguale a target_epoch
                     cursor.execute("""
-                        SELECT total_equity, bybit_equity, alpaca_equity, cumulative_realized_pnl
+                        SELECT total_equity, bybit_equity, alpaca_equity, cumulative_realized_pnl, unrealized_pnl
                         FROM equity_snapshots
                         WHERE epoch <= ?
                         ORDER BY epoch DESC
@@ -318,7 +320,7 @@ class PerfMetricsTracker:
 
                     if not row:
                         cursor.execute("""
-                            SELECT total_equity, bybit_equity, alpaca_equity, cumulative_realized_pnl
+                            SELECT total_equity, bybit_equity, alpaca_equity, cumulative_realized_pnl, unrealized_pnl
                             FROM equity_snapshots
                             ORDER BY epoch ASC
                             LIMIT 1
@@ -330,10 +332,15 @@ class PerfMetricsTracker:
                         past_bybit = float(row["bybit_equity"])
                         past_alpaca = float(row["alpaca_equity"])
                         past_pnl = float(row["cumulative_realized_pnl"])
+                        past_unreal = float(row["unrealized_pnl"] or 0.0)
                         
                         diff_eq = current_equity - past_eq
                         diff_eq_pct = (diff_eq / (past_eq or 1.0)) * 100
                         diff_pnl = current_realized_pnl - past_pnl
+
+                        # Net Trading PnL Delta = delta PnL chiuso + delta PnL aperto
+                        # Isola le prestazioni operative del bot dalla fluttuazione passiva di BTC/ETH spot nel wallet
+                        diff_trading_pnl = diff_pnl + (current_unrealized_pnl - past_unreal)
 
                         diff_bybit = bybit_eq - past_bybit
                         diff_bybit_pct = (diff_bybit / (past_bybit or 1.0)) * 100
@@ -341,7 +348,7 @@ class PerfMetricsTracker:
                         diff_alpaca = alpaca_eq - past_alpaca
                         diff_alpaca_pct = (diff_alpaca / (past_alpaca or 1.0)) * 100
                     else:
-                        diff_eq = diff_eq_pct = diff_pnl = 0.0
+                        diff_eq = diff_eq_pct = diff_pnl = diff_trading_pnl = 0.0
                         diff_bybit = diff_bybit_pct = 0.0
                         diff_alpaca = diff_alpaca_pct = 0.0
 
@@ -349,9 +356,11 @@ class PerfMetricsTracker:
                         "delta_equity": round(diff_eq, 2),
                         "delta_equity_pct": round(diff_eq_pct, 4),
                         "delta_pnl": round(diff_pnl, 2),
+                        "delta_trading_pnl": round(diff_trading_pnl, 2),
                         "bybit": {
                             "delta_equity": round(diff_bybit, 2),
-                            "delta_equity_pct": round(diff_bybit_pct, 4)
+                            "delta_equity_pct": round(diff_bybit_pct, 4),
+                            "delta_trading_pnl": round(diff_trading_pnl, 2)
                         },
                         "alpaca": {
                             "delta_equity": round(diff_alpaca, 2),
