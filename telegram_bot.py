@@ -3075,18 +3075,19 @@ async def crypto_auto_risk_manager_job(application):
                         except Exception:
                             pass
 
-        # 3. Bybit Perpetual Futures Engine (Long & SHORT nativo 24/7)
+        # 3. Bybit Perpetual Futures Engine (Long & SHORT nativo 24/7 con allocazione aggressiva $5,000)
         try:
             bybit_positions = bybit_service.get_open_positions()
-            # Monitor TP (+2.5%) / SL (-1.5%) sulle posizioni Bybit
+            # Monitor dinamico Take Profit (+3.0%) e Stop Loss (-1.5%) sulle posizioni Bybit
             for bp in bybit_positions:
                 bsym = bp["symbol"]
                 pnl_pct = bp["pnl_pct"]
                 unrealized = bp["unrealized_pnl"]
                 bside = bp["side"]
-                if pnl_pct >= 2.5 or pnl_pct <= -1.5:
+                # TP al +3.0% e SL al -1.5%
+                if pnl_pct >= 3.0 or pnl_pct <= -1.5:
                     bybit_service.close_position(bsym)
-                    action_label = f"🎯 *BYBIT TAKE PROFIT RAGGIUNTO (+{pnl_pct:.2f}%)*" if pnl_pct >= 2.5 else f"🛑 *BYBIT STOP LOSS ESEGUITO ({pnl_pct:.2f}%)*"
+                    action_label = f"🎯 *BYBIT TAKE PROFIT RAGGIUNTO (+{pnl_pct:.2f}%)*" if pnl_pct >= 3.0 else f"🛑 *BYBIT STOP LOSS ESEGUITO ({pnl_pct:.2f}%)*"
                     for uid in AUTHORIZED_USER_IDS:
                         try:
                             await application.bot.send_message(
@@ -3103,13 +3104,15 @@ async def crypto_auto_risk_manager_job(application):
                         except Exception:
                             pass
 
-            # Apertura automatica di posizioni Short/Long su Bybit Futures se abbiamo meno di 2 posizioni
-            if len(bybit_positions) < 2:
+            # Apertura proattiva sia Long che Short su Bybit: manteniamo fino a 3 posizioni contemporanee per massimizzare il rendimento
+            if len(bybit_positions) < 3:
                 active_bybit_syms = {bp["symbol"] for bp in bybit_positions}
                 bybit_candidates = [
                     ("BTCUSDT", "BTC-USD", "Bitcoin"),
+                    ("SOLUSDT", "SOL-USD", "Solana"),
                     ("ETHUSDT", "ETH-USD", "Ethereum"),
-                    ("SOLUSDT", "SOL-USD", "Solana")
+                    ("LINKUSDT", "LINK-USD", "Chainlink"),
+                    ("AVAXUSDT", "AVAX-USD", "Avalanche")
                 ]
                 for b_sym, b_yf, b_name in bybit_candidates:
                     if b_sym in active_bybit_syms:
@@ -3130,31 +3133,42 @@ async def crypto_auto_risk_manager_job(application):
                         ema50 = float(close.ewm(span=50, adjust=False).mean().iloc[-1])
                         last_c = float(close.iloc[-1])
 
-                        # Segnale SHORT Bybit: Ipercomprato o rottura al ribasso sotto le medie
-                        if rsi > 70 or (last_c < ema20 < ema50):
-                            print(f"📉 [Bybit Futures] Rilevato segnale SHORT su {b_sym} (RSI: {rsi:.1f}). Invio ordine Short...")
-                            res_short = bybit_service.place_order(b_sym, side="Sell", notional_usd=2500.0, take_profit_pct=2.5, stop_loss_pct=1.5)
-                            if "error" not in res_short:
-                                for uid in AUTHORIZED_USER_IDS:
-                                    try:
-                                        await application.bot.send_message(
-                                            chat_id=uid,
-                                            text=(
-                                                "📉 *BYBIT FUTURES DEMO — NUOVO ORDINE SHORT 24/7* 🔻\n"
-                                                "────────────────────────\n"
-                                                f"• *Contratto:* `{b_sym}`\n"
-                                                f"• *Posizione:* `SHORT (Vendita allo Scoperto)`\n"
-                                                f"• *Controvalore:* `$2,500.00 USDT`\n"
-                                                f"• *Prezzo:* `${res_short.get('price'):.2f}`\n"
-                                                f"• *Take Profit:* `${res_short.get('take_profit')}` (+2.5% al ribasso)\n"
-                                                f"• *Stop Loss:* `${res_short.get('stop_loss')}` (-1.5% al rialzo)\n\n"
-                                                "💡 _Trading ribassista attivo 24/7 sul conto Demo Bybit._"
-                                            ),
-                                            parse_mode="Markdown"
-                                        )
-                                    except Exception:
-                                        pass
-                                break
+                        # Segnale SHORT: RSI elevato (> 65) oppure rottura ribassista sotto le medie
+                        if rsi >= 65 or (last_c < ema20 < ema50):
+                            print(f"📉 [Bybit Futures] Rilevato segnale SHORT su {b_sym} (RSI: {rsi:.1f}). Invio ordine Short $5,000...")
+                            res_order = bybit_service.place_order(b_sym, side="Sell", notional_usd=5000.0, take_profit_pct=3.0, stop_loss_pct=1.5)
+                            order_type_label = "SHORT (Ribassista)"
+                            order_icon = "🔻"
+                        # Segnale LONG: RSI favorevole con trend rialzista
+                        elif rsi <= 55 and (last_c > ema20 > ema50):
+                            print(f"📈 [Bybit Futures] Rilevato segnale LONG su {b_sym} (RSI: {rsi:.1f}). Invio ordine Long $5,000...")
+                            res_order = bybit_service.place_order(b_sym, side="Buy", notional_usd=5000.0, take_profit_pct=3.0, stop_loss_pct=1.5)
+                            order_type_label = "LONG (Rialzista)"
+                            order_icon = "🟢"
+                        else:
+                            continue
+
+                        if "error" not in res_order:
+                            for uid in AUTHORIZED_USER_IDS:
+                                try:
+                                    await application.bot.send_message(
+                                        chat_id=uid,
+                                        text=(
+                                            f"{order_icon} *BYBIT FUTURES DEMO — NUOVO TRADE 24/7* 🚀\n"
+                                            "────────────────────────\n"
+                                            f"• *Contratto:* `{b_sym}`\n"
+                                            f"• *Operazione:* `{order_type_label}`\n"
+                                            f"• *Controvalore:* `$5,000.00 USDT`\n"
+                                            f"• *Prezzo Esecuzione:* `${res_order.get('price'):.2f}`\n"
+                                            f"• *Take Profit:* `${res_order.get('take_profit')}` (+3.0%)\n"
+                                            f"• *Stop Loss:* `${res_order.get('stop_loss')}` (-1.5%)\n\n"
+                                            "💡 _Massimizzazione del conto demo Bybit (50.000 USDT)._"
+                                        ),
+                                        parse_mode="Markdown"
+                                    )
+                                except Exception:
+                                    pass
+                            break
                     except Exception as ex_b:
                         print(f"[!] Errore screening Bybit {b_sym}: {ex_b}")
         except Exception as e_bybit:
