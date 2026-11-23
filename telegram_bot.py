@@ -2973,16 +2973,29 @@ async def auto_flatten_overnight_job(application):
         print(f"[!] Errore auto_flatten_overnight_job: {e}")
 
 def _get_btc_macro_bias():
-    """Determina il bias direzionale macro (BULLISH o BEARISH) controllando EMA 20 e 50 sul timeframe 4 Ore di BTC."""
+    """
+    Determina il bias direzionale macro (BULLISH, BEARISH o NEUTRAL) combinando:
+    1. Trend Strutturale 4 Ore (EMA 20 e 50 di BTCUSDT)
+    2. Trend Tattico Intraday 1 Ora (EMA 20 e 50 di BTCUSDT)
+    3. Fase Ciclica Hurst & Battleplan di Migliorino sul ciclo a 1H
+    
+    Se c'è discordanza tra 4H e 1H (es. 4H ancora sotto EMA50 ma 1H in solido recupero con rottura FLD),
+    il mercato entra in stato NEUTRAL (Transizione). In stato NEUTRAL il bot sblocca l'operatività
+    selettiva verificando la singola ciclica dell'asset.
+    """
     try:
-        res = bybit_service.session.get_kline(category="linear", symbol="BTCUSDT", interval="240", limit=50)
-        candles = res.get("result", {}).get("list", [])
-        if not candles or len(candles) < 30:
+        # Candele 4 Ore (Strutturale)
+        res_4h = bybit_service.session.get_kline(category="linear", symbol="BTCUSDT", interval="240", limit=60)
+        c_4h = res_4h.get("result", {}).get("list", [])
+        if not c_4h or len(c_4h) < 30:
             return "NEUTRAL"
-        candles_rev = list(reversed(candles))
-        closes = [float(c[4]) for c in candles_rev]
-        
-        # Calcola EMA 20 e 50
+        closes_4h = [float(c[4]) for c in reversed(c_4h)]
+
+        # Candele 1 Ora (Tattico Intraday)
+        res_1h = bybit_service.session.get_kline(category="linear", symbol="BTCUSDT", interval="60", limit=60)
+        c_1h = res_1h.get("result", {}).get("list", [])
+        closes_1h = [float(c[4]) for c in reversed(c_1h)] if c_1h else closes_4h
+
         def _ema(vals, span):
             a = 2.0 / (span + 1.0)
             e = vals[0]
@@ -2990,15 +3003,26 @@ def _get_btc_macro_bias():
                 e = a * v + (1.0 - a) * e
             return e
 
-        ema20 = _ema(closes, 20)
-        ema50 = _ema(closes, 50)
-        last_c = closes[-1]
+        ema20_4h = _ema(closes_4h, 20)
+        ema50_4h = _ema(closes_4h, 50)
+        last_4h = closes_4h[-1]
 
-        if last_c > ema50 and ema20 >= ema50:
+        ema20_1h = _ema(closes_1h, 20)
+        ema50_1h = _ema(closes_1h, 50)
+        last_1h = closes_1h[-1]
+
+        # 1. Pieno Allineamento Rialzista
+        if last_4h > ema50_4h and ema20_4h >= ema50_4h:
             return "BULLISH"
-        elif last_c < ema50:
+        
+        # 2. Pieno Allineamento Ribassista (4H sotto EMA50 E 1H sotto EMA50)
+        elif last_4h < ema50_4h and last_1h < ema50_1h:
             return "BEARISH"
-        return "NEUTRAL"
+        
+        # 3. Fase di Transizione / Rimbalzo Intraday (es. 1H sopra EMA50/20 ma 4H sotto EMA50)
+        else:
+            return "NEUTRAL"
+
     except Exception as e_bias:
         print(f"[!] Errore calcolo bias BTC macro: {e_bias}")
         return "NEUTRAL"
@@ -3019,17 +3043,27 @@ def _sync_crypto_risk_and_screening():
         # Inizializza al primo ciclo senza spammare la notifica di avvio
         if _LAST_NOTIFIED_MACRO_BIAS is None:
             _LAST_NOTIFIED_MACRO_BIAS = macro_bias
-        elif macro_bias in ["BULLISH", "BEARISH"] and _LAST_NOTIFIED_MACRO_BIAS != macro_bias:
-            bias_icon = "🟢" if macro_bias == "BULLISH" else "🔻"
-            bias_title = "RIALZISTA (BULLISH)" if macro_bias == "BULLISH" else "RIBASSISTA (BEARISH)"
-            bias_allowed = "Apertura esclusiva di posizioni LONG su breakout di forza" if macro_bias == "BULLISH" else "Apertura esclusiva di posizioni SHORT su breakout di debolezza"
+        elif macro_bias in ["BULLISH", "BEARISH", "NEUTRAL"] and _LAST_NOTIFIED_MACRO_BIAS != macro_bias:
+            if macro_bias == "BULLISH":
+                bias_icon = "🟢"
+                bias_title = "RIALZISTA (BULLISH)"
+                bias_allowed = "Apertura esclusiva di posizioni LONG su breakout di forza"
+            elif macro_bias == "BEARISH":
+                bias_icon = "🔻"
+                bias_title = "RIBASSISTA (BEARISH)"
+                bias_allowed = "Apertura esclusiva di posizioni SHORT su breakout di debolezza"
+            else:
+                bias_icon = "⚖️"
+                bias_title = "NEUTRO / TRANSIZIONE (NEUTRAL)"
+                bias_allowed = "Flessibilità selettiva Long/Short con filtro ciclico Hurst & Battleplan attivo"
+
             notification_events.append((
-                f"{bias_icon} *MACRO TREND SHIELD BTC 4H: {bias_title}*\n"
+                f"{bias_icon} *MACRO TREND SHIELD BTC: {bias_title}*\n"
                 f"────────────────────────\n"
                 f"• *Nuova Direzionalità:* `{macro_bias}`\n"
                 f"• *Regola Portafoglio:* {bias_allowed}.\n"
-                f"• *Asset Scudo:* BTCUSDT (Timeframe 4 Ore - EMA 20/50).\n"
-                f"💡 _Protezione attiva: zero conflitti Long/Short simultanei._"
+                f"• *Asset Scudo:* BTCUSDT (4H Strutturale + 1H Tattico).\n"
+                f"💡 _Protezione attiva: sincronizzazione multi-timeframe e ciclica._"
             ))
             _LAST_NOTIFIED_MACRO_BIAS = macro_bias
 
@@ -3132,9 +3166,9 @@ def _sync_crypto_risk_and_screening():
         bybit_equity = float(wallet.get("total_equity", 160000.0) or 160000.0)
         dynamic_notional = round(max(3000.0, min(30000.0, bybit_equity * 0.10)), 0)
 
-        # Screening ingressi selettivi A+ (Massimo 3 posizioni, SOLO nella direzione del Macro Bias)
+        # Screening ingressi selettivi A+ (Massimo 3 posizioni, guidate dal Macro Bias e Filtro Ciclico)
         bybit_positions = bybit_service.get_open_positions()
-        if len(bybit_positions) < 3 and macro_bias in ["BULLISH", "BEARISH"]:
+        if len(bybit_positions) < 3 and macro_bias in ["BULLISH", "BEARISH", "NEUTRAL"]:
             active_bybit_syms = {bp["symbol"] for bp in bybit_positions}
             bybit_candidates = [
                 ("SOLUSDT", "SOL-USD", "Solana"),
@@ -3186,9 +3220,25 @@ def _sync_crypto_risk_and_screening():
                     # Take Profit calibrato con Rapporto Aureo Istituzionale 1:3
                     dynamic_tp_pct = round(dynamic_sl_pct * 3.0, 2)
 
-                    # INGRESSO SHORT (Ammesso solo se Macro Bias è BEARISH)
-                    # Verifica Confluenza Ciclica Hurst/Migliorino ed Elliott
-                    if macro_bias == "BEARISH" and (last_c < or_low) and (last_c < ema20 < ema50) and (rsi < 48) and (vol_ratio >= 1.10):
+                    # Estrai la diagnostica ciclica profonda (Hurst FLD e Battleplan 1H)
+                    forecast_check = {}
+                    try:
+                        from services.deep_trade_analysis_service import get_deep_trade_forecast
+                        forecast_check = get_deep_trade_forecast(b_sym, tf="1h")
+                    except Exception as e_fc:
+                        print(f"[!] Warning verifica ciclica forecast: {e_fc}")
+
+                    cycle_data = forecast_check.get("cycle", {})
+                    vincolo_migliorino = cycle_data.get("vincolo_migliorino", "LIBERO")
+                    tempo_battleplan = cycle_data.get("tempo_battleplan", "")
+                    hurst_fld = float(cycle_data.get("hurst_fld_value", 0.0) or 0.0)
+
+                    # Regole di ammissibilità Direzionale con Filtro Ciclico di Hurst & Migliorino:
+                    allow_short = (macro_bias == "BEARISH") or (macro_bias == "NEUTRAL" and ("3° TEMPO" in tempo_battleplan.upper() or "4° TEMPO" in tempo_battleplan.upper() or last_c < hurst_fld))
+                    allow_long = (macro_bias == "BULLISH") or (macro_bias == "NEUTRAL" and ("1° TEMPO" in tempo_battleplan.upper() or "2° TEMPO" in tempo_battleplan.upper() or last_c > hurst_fld))
+
+                    # INGRESSO SHORT (Ammesso se consentito dal Macro Bias e dalla Ciclica)
+                    if allow_short and (last_c < or_low) and (last_c < ema20 < ema50) and (rsi < 48) and (vol_ratio >= 1.10):
                         # Convalida Microstruttura del Book (Order Book Imbalance)
                         try:
                             obi = bybit_service.get_orderbook_imbalance(b_sym)
@@ -3198,19 +3248,12 @@ def _sync_crypto_risk_and_screening():
                         except Exception as e_obi:
                             print(f"[!] Warning verifica OBI: {e_obi}")
 
-                        # Convalida quantitativa profonda: verifica se la ciclica di Hurst e il Battleplan confermano o non ostacolano il setup
-                        try:
-                            from services.deep_trade_analysis_service import get_deep_trade_forecast
-                            forecast_check = get_deep_trade_forecast(b_sym)
-                            vincolo = forecast_check.get("cycle", {}).get("vincolo_migliorino", "LIBERO")
-                            # Se il ciclo è vincolato al rialzo o in spinta d'acquisto opposta, scarta il trade per proteggere il capitale
-                            if "RIALZISTA FORZATO" in vincolo.upper():
-                                print(f"⚠️ [Filtro Ciclico Ignorato Short] {b_sym} ha vincolo ciclico rialzista in corso. Trade scartato.")
-                                continue
-                        except Exception as e_fc:
-                            print(f"[!] Warning verifica ciclica forecast: {e_fc}")
+                        # Se il ciclo è esplicitamente vincolato al rialzo o in spinta d'inizio ciclo (1° Quarto), proteggi il capitale
+                        if "RIALZISTA FORZATO" in vincolo_migliorino.upper() or "1° TEMPO" in tempo_battleplan.upper():
+                            print(f"⚠️ [Filtro Ciclico Ignorato Short] {b_sym} in inizio ciclo/spinta rialzista ({tempo_battleplan}). Short evitato.")
+                            continue
 
-                        print(f"📉 [Setup A+ SHORT Confluente] {b_sym} con Macro BEARISH (RSI: {rsi:.1f}, VolRatio: {vol_ratio:.2f}x, ATR-SL: {dynamic_sl_pct}%). Ordine dinamico ${dynamic_notional:,.0f}...")
+                        print(f"📉 [Setup A+ SHORT Confluente] {b_sym} (Macro: {macro_bias}, Ciclo: {tempo_battleplan}, RSI: {rsi:.1f}, VolRatio: {vol_ratio:.2f}x, ATR-SL: {dynamic_sl_pct}%). Ordine dinamico ${dynamic_notional:,.0f}...")
                         order_res = bybit_service.place_order(b_sym, side="Sell", notional_usd=dynamic_notional, take_profit_pct=dynamic_tp_pct, stop_loss_pct=dynamic_sl_pct)
                         if "error" not in order_res:
                             notification_events.append((
@@ -3218,14 +3261,14 @@ def _sync_crypto_risk_and_screening():
                                 f"────────────────────────\n"
                                 f"• *Asset:* `{b_sym}` ({b_name})\n"
                                 f"• *Notionale Dinamico (10% Equity):* `${dynamic_notional:,.0f}`\n"
-                                f"• *Macro Bias:* `BEARISH` (BTC < EMA50 4H)\n"
+                                f"• *Macro Regime:* `{macro_bias}` | *Ciclica 1H:* `{tempo_battleplan or 'Allineata'}`\n"
                                 f"• *Target R:R 1:3 ATR:* Take Profit +{dynamic_tp_pct:.2f}% | Stop Loss -{dynamic_sl_pct:.2f}%\n"
                                 f"• *Confluenza:* OBI Confermato, FLD Hurst e Battleplan sincronizzati."
                             ))
                         break
 
-                    # INGRESSO LONG (Ammesso solo se Macro Bias è BULLISH)
-                    elif macro_bias == "BULLISH" and (last_c > or_high) and (last_c > ema20 > ema50) and (rsi > 52) and (vol_ratio >= 1.10):
+                    # INGRESSO LONG (Ammesso se consentito dal Macro Bias e dalla Ciclica)
+                    elif allow_long and (last_c > or_high) and (last_c > ema20 > ema50) and (rsi > 52) and (vol_ratio >= 1.10):
                         # Convalida Microstruttura del Book (Order Book Imbalance)
                         try:
                             obi = bybit_service.get_orderbook_imbalance(b_sym)
@@ -3235,19 +3278,12 @@ def _sync_crypto_risk_and_screening():
                         except Exception as e_obi:
                             print(f"[!] Warning verifica OBI: {e_obi}")
 
-                        # Convalida quantitativa profonda: verifica se la ciclica di Hurst e il Battleplan confermano o non ostacolano il setup
-                        try:
-                            from services.deep_trade_analysis_service import get_deep_trade_forecast
-                            forecast_check = get_deep_trade_forecast(b_sym)
-                            vincolo = forecast_check.get("cycle", {}).get("vincolo_migliorino", "LIBERO")
-                            # Se il ciclo è vincolato al ribasso, scarta l'ingresso long
-                            if "RIBASSISTA" in vincolo.upper():
-                                print(f"⚠️ [Filtro Ciclico Ignorato Long] {b_sym} ha vincolo ciclico ribassista in corso. Trade scartato.")
-                                continue
-                        except Exception as e_fc:
-                            print(f"[!] Warning verifica ciclica forecast: {e_fc}")
+                        # Se il ciclo è vincolato al ribasso o è in 4° tempo (fase terminale di esaurimento), evita di comprare sui massimi
+                        if "RIBASSISTA" in vincolo_migliorino.upper():
+                            print(f"⚠️ [Filtro Ciclico Ignorato Long] {b_sym} ha vincolo ciclico ribassista in corso. Trade scartato.")
+                            continue
 
-                        print(f"📈 [Setup A+ LONG Confluente] {b_sym} con Macro BULLISH (RSI: {rsi:.1f}, VolRatio: {vol_ratio:.2f}x, ATR-SL: {dynamic_sl_pct}%). Ordine dinamico ${dynamic_notional:,.0f}...")
+                        print(f"📈 [Setup A+ LONG Confluente] {b_sym} (Macro: {macro_bias}, Ciclo: {tempo_battleplan}, RSI: {rsi:.1f}, VolRatio: {vol_ratio:.2f}x, ATR-SL: {dynamic_sl_pct}%). Ordine dinamico ${dynamic_notional:,.0f}...")
                         order_res = bybit_service.place_order(b_sym, side="Buy", notional_usd=dynamic_notional, take_profit_pct=dynamic_tp_pct, stop_loss_pct=dynamic_sl_pct)
                         if "error" not in order_res:
                             notification_events.append((
@@ -3255,7 +3291,7 @@ def _sync_crypto_risk_and_screening():
                                 f"────────────────────────\n"
                                 f"• *Asset:* `{b_sym}` ({b_name})\n"
                                 f"• *Notionale Dinamico (10% Equity):* `${dynamic_notional:,.0f}`\n"
-                                f"• *Macro Bias:* `BULLISH` (BTC > EMA50 4H)\n"
+                                f"• *Macro Regime:* `{macro_bias}` | *Ciclica 1H:* `{tempo_battleplan or 'Allineata'}`\n"
                                 f"• *Target R:R 1:3 ATR:* Take Profit +{dynamic_tp_pct:.2f}% | Stop Loss -{dynamic_sl_pct:.2f}%\n"
                                 f"• *Confluenza:* OBI Confermato, FLD Hurst e Battleplan sincronizzati."
                             ))
