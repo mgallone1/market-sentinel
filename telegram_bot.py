@@ -3038,7 +3038,7 @@ def _get_equities_macro_bias():
     Determina il bias direzionale macro (BULLISH, BEARISH o NEUTRAL) per Wall Street:
     1. Trend Strutturale Daily (SPY ETF - EMA 20 e 50 Daily)
     2. Trend Tattico Intraday 1 Ora (SPY ETF - EMA 20 e 50 1H)
-    3. Indice VIX (^VIX) per regime di volatilità e stress di mercato.
+    3. Motore Dinamico VIX (^VIX): Delta di variazione (cooling vs spike) e livello assoluto.
     """
     try:
         import yfinance as yf
@@ -3047,7 +3047,7 @@ def _get_equities_macro_bias():
         # Scarica SPY Daily e 1H
         df_spy_1d = yf.download("SPY", period="6mo", interval="1d", progress=False)
         if df_spy_1d.empty or len(df_spy_1d) < 30:
-            return "NEUTRAL", 20.0
+            return "NEUTRAL", 20.0, 0.0
         
         c_1d = df_spy_1d["Close"].iloc[:, 0] if isinstance(df_spy_1d["Close"], pd.DataFrame) else df_spy_1d["Close"]
         ema20_1d = float(c_1d.ewm(span=20, adjust=False).mean().iloc[-1])
@@ -3060,23 +3060,39 @@ def _get_equities_macro_bias():
         ema50_1h = float(c_1h.ewm(span=50, adjust=False).mean().iloc[-1])
         last_1h = float(c_1h.iloc[-1])
 
-        # VIX
-        vix_df = yf.download("^VIX", period="5d", interval="1d", progress=False)
+        # VIX e Delta Volatilità
+        vix_df = yf.download("^VIX", period="10d", interval="1d", progress=False)
         vix_val = 20.0
+        vix_delta_pct = 0.0
         if not vix_df.empty:
             v_close = vix_df["Close"].iloc[:, 0] if isinstance(vix_df["Close"], pd.DataFrame) else vix_df["Close"]
             vix_val = float(v_close.iloc[-1])
+            prev_vix = float(v_close.iloc[-2]) if len(v_close) >= 2 else vix_val
+            vix_delta_pct = ((vix_val - prev_vix) / prev_vix) * 100.0 if prev_vix > 0 else 0.0
 
-        if last_1d > ema50_1d and ema20_1d >= ema50_1d and vix_val < 25.0:
-            return "BULLISH", vix_val
-        elif last_1d < ema50_1d and last_1h < ema50_1h:
-            return "BEARISH", vix_val
+        # Shock VIX: impennata improvvisa della paura (+12% con VIX > 28) o VIX estremo > 40
+        is_vix_shock = (vix_delta_pct > 12.0 and vix_val > 28.0) or (vix_val > 40.0)
+        # Cooling VIX: rientro della volatilità / distensione
+        is_vix_cooling = (vix_delta_pct < -5.0) or (vix_val < 22.0)
+
+        # 1. BULLISH PURO: Trend forte su Daily e 1H senza shock VIX
+        if last_1d > ema50_1d and ema20_1d >= ema50_1d and not is_vix_shock:
+            return "BULLISH", vix_val, vix_delta_pct
+
+        # 2. NEUTRAL (REBOUND / ACCUMULO): Prezzo 1H sopra EMA20 con VIX in distensione o non in shock
+        elif last_1h > ema20_1h and (is_vix_cooling or not is_vix_shock):
+            return "NEUTRAL", vix_val, vix_delta_pct
+
+        # 3. BEARISH PURO: Prezzo sotto medie 1D e 1H con VIX in ascesa o shock attivo
+        elif last_1d < ema50_1d and last_1h < ema20_1h and (is_vix_shock or vix_delta_pct >= 0):
+            return "BEARISH", vix_val, vix_delta_pct
+
         else:
-            return "NEUTRAL", vix_val
+            return "NEUTRAL", vix_val, vix_delta_pct
 
     except Exception as e_eq:
         print(f"[!] Errore calcolo bias equities macro: {e_eq}")
-        return "NEUTRAL", 20.0
+        return "NEUTRAL", 20.0, 0.0
 
 def _sync_alpaca_risk_and_screening():
     """
@@ -3095,9 +3111,10 @@ def _sync_alpaca_risk_and_screening():
         if not is_open:
             return []
 
-        # 2. Leggi Trend Macro SPY e VIX
-        eq_bias, vix_val = _get_equities_macro_bias()
-        print(f"🏛️ [Macro Bias Equities SPY] Direzione Wall Street: {eq_bias} (VIX: {vix_val:.1f})")
+        # 2. Leggi Trend Macro SPY e VIX (con Delta Volatilità)
+        eq_bias, vix_val, vix_delta_pct = _get_equities_macro_bias()
+        vix_status_desc = f"{vix_val:.1f} ({vix_delta_pct:+.1f}%)"
+        print(f"🏛️ [Macro Bias Equities SPY] Direzione Wall Street: {eq_bias} (VIX: {vix_status_desc})")
 
         if _LAST_NOTIFIED_EQUITIES_BIAS is None:
             _LAST_NOTIFIED_EQUITIES_BIAS = eq_bias
@@ -3108,10 +3125,10 @@ def _sync_alpaca_risk_and_screening():
             notification_events.append((
                 f"{bias_icon} *WALL STREET MACRO SHIELD: {bias_title}*\n"
                 f"────────────────────────\n"
-                f"• *Nuova Direzionalità:* `{eq_bias}` | *VIX:* `{vix_val:.1f}`\n"
+                f"• *Nuova Direzionalità:* `{eq_bias}` | *VIX:* `{vix_val:.1f}` ({vix_delta_pct:+.1f}%)\n"
                 f"• *Regola Portafoglio:* {bias_rule}.\n"
                 f"• *Benchmark Scudo:* S&P 500 ETF (SPY Daily + 1H).\n"
-                f"💡 _Protezione attiva: filtro volatilità e rotazione settoriale._"
+                f"💡 _Protezione attiva: dinamica di volatilità VIX e rotazione Alpha._"
             ))
             _LAST_NOTIFIED_EQUITIES_BIAS = eq_bias
 
@@ -3261,16 +3278,18 @@ def _sync_alpaca_risk_and_screening():
                     # Numero di azioni calcolato dal budget dinamico
                     shares = max(1, int(dynamic_shares_budget / last_c))
 
-                    # Regole di ammissibilità direzionale
+                    # Regole di ammissibilità direzionale (BULLISH o NEUTRAL con confluenza ciclica 1H o Prezzo > FLD)
                     allow_long = (eq_bias == "BULLISH") or (eq_bias == "NEUTRAL" and ("1° TEMPO" in tempo_battleplan.upper() or "2° TEMPO" in tempo_battleplan.upper() or last_c > hurst_fld))
 
-                    # VIX Shock Filter: se VIX > 32, divieto di acquisto breakout
-                    if vix_val > 32.0 and allow_long:
-                        print(f"🛡️ [VIX Shield Wall Street] VIX elevato ({vix_val:.1f}). Ingressi Long azionari sospesi per prudenza istituzionale.")
+                    # Dynamic VIX Shock Filter: blocco breakout solo in caso di shock violento in salita (+12% con VIX > 28) o VIX estremo > 40
+                    is_vix_shock_active = (vix_delta_pct > 12.0 and vix_val > 28.0) or (vix_val > 40.0)
+                    if is_vix_shock_active and allow_long:
+                        print(f"🛡️ [VIX Shield Wall Street] VIX Shock in corso (+{vix_delta_pct:.1f}%, valore: {vix_val:.1f}). Ingressi Long sospesi per picco di turbolenza avversa.")
                         continue
 
-                    # INGRESSO LONG
-                    if allow_long and (last_c > ema20 > ema50) and (rsi > 52):
+                    # INGRESSO LONG: trend 1H positivo (Prezzo sopra EMA20 o EMA50), RSI di spinta e ciclo libero
+                    is_uptrend_1h = (last_c > ema20 and last_c > ema50) or (last_c > ema20 and ema20 > ema50)
+                    if allow_long and is_uptrend_1h and (rsi > 50):
                         if "RIBASSISTA" in vincolo_migliorino.upper():
                             print(f"⚠️ [Filtro Ciclico Ignorato Long] {sym} ha vincolo ciclico ribassista. Scartato.")
                             continue
@@ -3287,9 +3306,9 @@ def _sync_alpaca_risk_and_screening():
                                 f"• *Titolo:* `{sym}` (x{shares} quote)\n"
                                 f"• *Controvalore Dinamico (10% Equity):* `${dynamic_shares_budget:,.0f}`\n"
                                 f"• *Macro Regime SPY:* `{eq_bias}` | *Ciclica 1H:* `{tempo_battleplan or 'Allineata'}`\n"
-                                f"• *Alpha vs SPY:* `{alpha:+.2f}%` | *VIX:* `{vix_val:.1f}`\n"
+                                f"• *Alpha vs SPY:* `{alpha:+.2f}%` | *VIX:* `{vix_val:.1f}` ({vix_delta_pct:+.1f}%)\n"
                                 f"• *Target R:R 1:3 ATR:* TP `${target_p:.2f}` (+{dynamic_tp_pct:.2f}%) | SL `${stop_p:.2f}` (-{dynamic_sl_pct:.2f}%)\n"
-                                f"• *Confluenza:* VIX Shield e Battleplan sincronizzati."
+                                f"• *Confluenza:* VIX Dynamic Shield e Battleplan sincronizzati."
                             ))
                         break
             except Exception as e_screening:
