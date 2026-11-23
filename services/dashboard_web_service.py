@@ -688,19 +688,84 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             transform: none;
         }
 
-        /* Bottom Tab Bar */
+        /* Mobile & iPhone Native Architecture Enhancements */
+        body {
+            padding-bottom: calc(70px + env(safe-area-inset-bottom, 15px));
+            -webkit-overflow-scrolling: touch;
+            overscroll-behavior-y: none;
+        }
+
+        .chart-wrap {
+            touch-action: pan-y !important;
+        }
+
+        #perfChart {
+            touch-action: pan-y !important;
+        }
+
+        /* Mobile Responsive Card Layout for Tables */
+        .table-responsive-container {
+            width: 100%;
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
+        }
+
+        @media (max-width: 640px) {
+            .mobile-hide-table {
+                display: none !important;
+            }
+            .mobile-card-list {
+                display: flex !important;
+                flex-direction: column;
+                gap: 8px;
+                padding-top: 6px;
+            }
+            .mobile-trade-card {
+                background: var(--surface-elevated);
+                border: 1px solid var(--border);
+                border-radius: 8px;
+                padding: 10px 12px;
+                display: flex;
+                flex-direction: column;
+                gap: 6px;
+                box-shadow: 0 1px 3px rgba(0,0,0,0.02);
+            }
+            .mobile-trade-card-header {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                border-bottom: 1px solid var(--border-subtle);
+                padding-bottom: 6px;
+            }
+            .mobile-trade-card-grid {
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 4px 10px;
+                font-size: 11px;
+            }
+        }
+
+        @media (min-width: 641px) {
+            .mobile-card-list {
+                display: none !important;
+            }
+        }
+
+        /* Bottom Tab Bar with Ergonomic Touch Targets */
         .tabbar {
             position: fixed;
             bottom: 0;
             left: 0;
             right: 0;
-            height: 54px;
+            height: calc(56px + env(safe-area-inset-bottom, 12px));
             background: var(--surface);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
             border-top: 1px solid var(--border);
             display: flex;
-            z-index: 100;
-            padding-bottom: env(safe-area-inset-bottom, 0px);
-            box-shadow: 0 -1px 3px rgba(0,0,0,0.03);
+            z-index: 1000;
+            padding-bottom: env(safe-area-inset-bottom, 12px);
+            box-shadow: 0 -2px 10px rgba(0,0,0,0.05);
         }
         .tab-item {
             flex: 1;
@@ -708,23 +773,90 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             flex-direction: column;
             align-items: center;
             justify-content: center;
-            font-size: 11px;
+            gap: 2px;
+            font-size: 10px;
             font-weight: 600;
             color: var(--text-muted);
             cursor: pointer;
             border: none;
             background: none;
             font-family: inherit;
+            min-height: 44px;
+            -webkit-tap-highlight-color: transparent;
+            transition: all 0.15s ease;
+            position: relative;
         }
-        .tab-item.active { color: var(--blue); font-weight: 700; }
+        .tab-item svg {
+            width: 19px;
+            height: 19px;
+            stroke-width: 2.1;
+            transition: transform 0.15s ease, stroke 0.15s ease;
+        }
+        .tab-item.active { 
+            color: var(--blue); 
+            font-weight: 700; 
+        }
+        .tab-item.active svg {
+            stroke: var(--blue);
+            transform: scale(1.08);
+        }
         .tab-item span.dot {
-            width: 4px;
-            height: 4px;
-            border-radius: 50%;
+            width: 14px;
+            height: 3px;
+            border-radius: 2px;
             background: transparent;
-            margin-top: 3px;
+            position: absolute;
+            top: 2px;
+            transition: background 0.2s ease;
         }
-        .tab-item.active span.dot { background: var(--blue); }
+        .tab-item.active span.dot { 
+            background: var(--blue); 
+        }
+
+        /* Touch-Friendly Toast Notification for Explanations */
+        .toast-tooltip-mobile {
+            position: fixed;
+            bottom: calc(72px + env(safe-area-inset-bottom, 15px));
+            left: 12px;
+            right: 12px;
+            background: rgba(15, 23, 42, 0.94);
+            color: #ffffff;
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            padding: 12px 14px;
+            border-radius: 10px;
+            font-size: 12px;
+            line-height: 1.45;
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(255, 255, 255, 0.1);
+            z-index: 10000;
+            display: flex;
+            align-items: flex-start;
+            gap: 10px;
+            opacity: 0;
+            pointer-events: none;
+            transform: translateY(12px);
+            transition: opacity 0.25s ease, transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+        .toast-tooltip-mobile.show {
+            opacity: 1;
+            pointer-events: auto;
+            transform: translateY(0);
+        }
+        .toast-tooltip-close {
+            background: rgba(255,255,255,0.15);
+            border: none;
+            color: #ffffff;
+            border-radius: 50%;
+            width: 22px;
+            height: 22px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 11px;
+            cursor: pointer;
+            flex-shrink: 0;
+            margin-top: -1px;
+        }
 
         .clean-table {
             width: 100%;
@@ -1000,25 +1132,28 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             <span class="section-title">Alpaca Wall Street (NYSE / NASDAQ)</span>
             <span class="mono" style="font-size: 10px; color: var(--text-muted);">Orari: 15:30 - 22:00 CET</span>
         </div>
-        <table class="clean-table mono">
-            <thead>
-                <tr>
-                    <th>Ticker</th>
-                    <th>Qty</th>
-                    <th>Ingresso</th>
-                    <th>Attuale</th>
-                    <th>Valore</th>
-                    <th>PnL</th>
-                </tr>
-            </thead>
-            <tbody id="alpaca-tbody">
-                <tr>
-                    <td colspan="6" style="text-align: center; padding: 20px 0; color: var(--text-dim);">
-                        Nessun titolo aperto. Wall Street chiusa nel weekend.
-                    </td>
-                </tr>
-            </tbody>
-        </table>
+        <div class="table-responsive-container mobile-hide-table">
+            <table class="clean-table mono">
+                <thead>
+                    <tr>
+                        <th>Ticker</th>
+                        <th>Qty</th>
+                        <th>Ingresso</th>
+                        <th>Attuale</th>
+                        <th>Valore</th>
+                        <th>PnL</th>
+                    </tr>
+                </thead>
+                <tbody id="alpaca-tbody">
+                    <tr>
+                        <td colspan="6" style="text-align: center; padding: 20px 0; color: var(--text-dim);">
+                            Nessun titolo aperto. Wall Street chiusa nel weekend.
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+        <div id="alpaca-cards-list" class="mobile-card-list mono"></div>
     </div>
 
     <!-- 7. TAB 3: STORICO CHIUSI -->
@@ -1030,27 +1165,30 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 <span class="mono" style="font-size: 10px; color: var(--text-muted);" id="closed-count-label">0 eseguiti</span>
             </div>
         </div>
-        <table class="clean-table mono">
-            <thead>
-                <tr>
-                    <th>Ora</th>
-                    <th>Simbolo</th>
-                    <th>Lato</th>
-                    <th>Investito ($)</th>
-                    <th>Prezzi</th>
-                    <th>Fee</th>
-                    <th>PnL Netto</th>
-                    <th>Resa %</th>
-                </tr>
-            </thead>
-            <tbody id="history-tbody">
-                <tr>
-                    <td colspan="8" style="text-align: center; padding: 20px 0; color: var(--text-dim);">
-                        Nessun trade chiuso di recente.
-                    </td>
-                </tr>
-            </tbody>
-        </table>
+        <div class="table-responsive-container mobile-hide-table">
+            <table class="clean-table mono">
+                <thead>
+                    <tr>
+                        <th>Ora</th>
+                        <th>Simbolo</th>
+                        <th>Lato</th>
+                        <th>Investito ($)</th>
+                        <th>Prezzi</th>
+                        <th>Fee</th>
+                        <th>PnL Netto</th>
+                        <th>Resa %</th>
+                    </tr>
+                </thead>
+                <tbody id="history-tbody">
+                    <tr>
+                        <td colspan="8" style="text-align: center; padding: 20px 0; color: var(--text-dim);">
+                            Nessun trade chiuso di recente.
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+        <div id="history-cards-list" class="mobile-card-list mono"></div>
     </div>
 
     <!-- 8. TAB 4: GUIDA COMPLETA & MANUALE OPERATIVO -->
@@ -1333,25 +1471,35 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         </div>
     </div>
 
-    <!-- BOTTOM TABBAR IPHONE -->
+    <!-- BOTTOM TABBAR IPHONE CON ICONE NATIVE -->
     <nav class="tabbar">
         <button class="tab-item active" id="tab-btn-bybit" onclick="showTab('bybit')">
-            <span>Bybit Futures</span>
             <span class="dot"></span>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>
+            <span>Bybit</span>
         </button>
         <button class="tab-item" id="tab-btn-alpaca" onclick="showTab('alpaca')">
-            <span>Alpaca USA</span>
             <span class="dot"></span>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><line x1="12" y1="1" x2="12" y2="23"></line><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path></svg>
+            <span>Alpaca</span>
         </button>
         <button class="tab-item" id="tab-btn-history" onclick="showTab('history')">
-            <span>Storico</span>
             <span class="dot"></span>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+            <span>Storico</span>
         </button>
         <button class="tab-item" id="tab-btn-guide" onclick="showTab('guide')">
-            <span>📖 Guida Desk</span>
             <span class="dot"></span>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"></path><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"></path></svg>
+            <span>Guida</span>
         </button>
     </nav>
+
+    <!-- TOAST INFORMATIVO PER TOOLTIP SU MOBILE / IPHONE -->
+    <div id="mobile-tooltip-toast" class="toast-tooltip-mobile">
+        <div style="flex: 1;" id="mobile-tooltip-text">Spiegazione dell'indicatore</div>
+        <button class="toast-tooltip-close" onclick="hideMobileToast()">&times;</button>
+    </div>
 
     <script>
         let chartInstance = null;
@@ -1700,7 +1848,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                                         speed: 0.1
                                     },
                                     pinch: {
-                                        enabled: true
+                                        enabled: false // Disabilitato pinch per permettere scroll naturale fluido su iOS
                                     },
                                     mode: 'x',
                                     onZoomComplete: function() {
@@ -2112,65 +2260,135 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 });
             }
 
-            // 6. Alpaca Table
+            // 6. Alpaca Table & Mobile Cards
             const aBody = document.getElementById('alpaca-tbody');
+            const aCards = document.getElementById('alpaca-cards-list');
             if (aPositions.length === 0) {
-                aBody.innerHTML = `<tr><td colspan="6" style="text-align: center; padding: 20px 0; color: var(--text-dim);">Nessun titolo aperto. Wall Street chiusa nel weekend.</td></tr>`;
+                const emptyMsg = `Nessun titolo aperto. Wall Street chiusa nel weekend.`;
+                if (aBody) aBody.innerHTML = `<tr><td colspan="6" style="text-align: center; padding: 20px 0; color: var(--text-dim);">${emptyMsg}</td></tr>`;
+                if (aCards) aCards.innerHTML = `<div style="text-align: center; padding: 20px 0; color: var(--text-dim);">${emptyMsg}</div>`;
             } else {
-                aBody.innerHTML = aPositions.map(ap => {
-                    const u = parseFloat(ap.unrealized_pl || 0);
-                    const uClass = u >= 0 ? 'val-up' : 'val-down';
-                    const uSign = u >= 0 ? '+' : '';
-                    return `
-                        <tr>
-                            <td style="font-weight: 700; color: var(--text-main);">${ap.symbol}</td>
-                            <td>${ap.qty}</td>
-                            <td>$${parseFloat(ap.avg_entry_price || 0).toFixed(2)}</td>
-                            <td>$${parseFloat(ap.current_price || 0).toFixed(2)}</td>
-                            <td>$${parseFloat(ap.market_value || 0).toFixed(2)}</td>
-                            <td class="${uClass}">${uSign}$${u.toFixed(2)}</td>
-                        </tr>
-                    `;
-                }).join('');
+                if (aBody) {
+                    aBody.innerHTML = aPositions.map(ap => {
+                        const u = parseFloat(ap.unrealized_pl || 0);
+                        const uClass = u >= 0 ? 'val-up' : 'val-down';
+                        const uSign = u >= 0 ? '+' : '';
+                        return `
+                            <tr>
+                                <td style="font-weight: 700; color: var(--text-main);">${ap.symbol}</td>
+                                <td>${ap.qty}</td>
+                                <td>$${parseFloat(ap.avg_entry_price || 0).toFixed(2)}</td>
+                                <td>$${parseFloat(ap.current_price || 0).toFixed(2)}</td>
+                                <td>$${parseFloat(ap.market_value || 0).toFixed(2)}</td>
+                                <td class="${uClass}">${uSign}$${u.toFixed(2)}</td>
+                            </tr>
+                        `;
+                    }).join('');
+                }
+                if (aCards) {
+                    aCards.innerHTML = aPositions.map(ap => {
+                        const u = parseFloat(ap.unrealized_pl || 0);
+                        const uClass = u >= 0 ? 'val-up' : 'val-down';
+                        const uSign = u >= 0 ? '+' : '';
+                        return `
+                            <div class="mobile-trade-card">
+                                <div class="mobile-trade-card-header">
+                                    <strong style="color: var(--text-main); font-size: 13px;">${ap.symbol}</strong>
+                                    <span class="${uClass}" style="font-weight: 700; font-size: 13px;">${uSign}$${u.toFixed(2)}</span>
+                                </div>
+                                <div class="mobile-trade-card-grid">
+                                    <div><span style="color: var(--text-muted);">Qty:</span> <b>${ap.qty}</b></div>
+                                    <div><span style="color: var(--text-muted);">Valore:</span> <b>$${parseFloat(ap.market_value || 0).toFixed(2)}</b></div>
+                                    <div><span style="color: var(--text-muted);">In:</span> $${parseFloat(ap.avg_entry_price || 0).toFixed(2)}</div>
+                                    <div><span style="color: var(--text-muted);">Attuale:</span> $${parseFloat(ap.current_price || 0).toFixed(2)}</div>
+                                </div>
+                            </div>
+                        `;
+                    }).join('');
+                }
             }
 
-            // 7. History Table (Ordinamento Rigoroso: Più Recente in Alto)
+            // 7. History Table & Mobile Cards (Ordinamento Rigoroso: Più Recente in Alto)
             const sortedClosed = [...bClosed].sort((a, b) => parseInt(b.updatedTime || 0) - parseInt(a.updatedTime || 0));
             document.getElementById('closed-count-label').innerText = `${sortedClosed.length} eseguiti`;
             const hBody = document.getElementById('history-tbody');
+            const hCards = document.getElementById('history-cards-list');
             if (sortedClosed.length === 0) {
-                hBody.innerHTML = `<tr><td colspan="8" style="text-align: center; padding: 20px 0; color: var(--text-dim);">Nessun trade chiuso recente.</td></tr>`;
+                const emptyHist = `Nessun trade chiuso recente.`;
+                if (hBody) hBody.innerHTML = `<tr><td colspan="8" style="text-align: center; padding: 20px 0; color: var(--text-dim);">${emptyHist}</td></tr>`;
+                if (hCards) hCards.innerHTML = `<div style="text-align: center; padding: 20px 0; color: var(--text-dim);">${emptyHist}</div>`;
             } else {
-                hBody.innerHTML = sortedClosed.slice(0, 20).map(c => {
-                    const pVal = parseFloat(c.closedPnl || 0);
-                    const pClass = pVal >= 0 ? 'val-up' : 'val-down';
-                    const pSign = pVal >= 0 ? '+' : '';
-                    const timeStr = c.updatedTime ? new Date(parseInt(c.updatedTime)).toLocaleTimeString('it-IT') : '--:--';
-                    
-                    // Quantitativo economico investito (Notionale = cumEntryValue o closedSize * avgEntryPrice)
-                    const invested = parseFloat(c.cumEntryValue || 0) || (parseFloat(c.closedSize || 0) * parseFloat(c.avgEntryPrice || 0));
-                    const investedStr = invested > 0 ? '$' + Math.round(invested).toLocaleString('en-US') : '--';
+                const rows = sortedClosed.slice(0, 30);
+                if (hBody) {
+                    hBody.innerHTML = rows.map(c => {
+                        const pVal = parseFloat(c.closedPnl || 0);
+                        const pClass = pVal >= 0 ? 'val-up' : 'val-down';
+                        const pSign = pVal >= 0 ? '+' : '';
+                        const timeStr = c.updatedTime ? new Date(parseInt(c.updatedTime)).toLocaleTimeString('it-IT') : '--:--';
 
-                    // Calcolo Resa Percentuale sul Capitale Investito
-                    let pctStr = '--';
-                    if (invested > 0) {
-                        const pct = (pVal / invested) * 100;
-                        pctStr = `${pSign}${pct.toFixed(2)}%`;
-                    }
+                        const invested = parseFloat(c.cumEntryValue || 0) || (parseFloat(c.closedSize || 0) * parseFloat(c.avgEntryPrice || 0));
+                        const investedStr = invested > 0 ? '$' + Math.round(invested).toLocaleString('en-US') : '--';
 
-                    return `
-                        <tr>
-                            <td style="color: var(--text-muted); font-weight: 500;">${timeStr}</td>
-                            <td style="font-weight: 700; color: var(--text-main);">${c.symbol}</td>
-                            <td>${c.side}</td>
-                            <td style="color: var(--text-main); font-weight: 600;">${investedStr}</td>
-                            <td>$${parseFloat(c.avgEntryPrice || 0).toFixed(3)} &rarr; $${parseFloat(c.avgExitPrice || 0).toFixed(3)}</td>
-                            <td style="color: var(--text-dim);">$${(parseFloat(c.openFee || 0) + parseFloat(c.closeFee || 0)).toFixed(2)}</td>
-                            <td class="${pClass}">${pSign}$${pVal.toFixed(2)}</td>
-                            <td class="${pClass}">${pctStr}</td>
-                        </tr>
-                    `;
-                }).join('');
+                        let pctStr = '--';
+                        if (invested > 0) {
+                            const pct = (pVal / invested) * 100;
+                            pctStr = `${pSign}${pct.toFixed(2)}%`;
+                        }
+
+                        return `
+                            <tr>
+                                <td style="color: var(--text-muted); font-weight: 500;">${timeStr}</td>
+                                <td style="font-weight: 700; color: var(--text-main);">${c.symbol}</td>
+                                <td>${c.side}</td>
+                                <td style="color: var(--text-main); font-weight: 600;">${investedStr}</td>
+                                <td>$${parseFloat(c.avgEntryPrice || 0).toFixed(3)} &rarr; $${parseFloat(c.avgExitPrice || 0).toFixed(3)}</td>
+                                <td style="color: var(--text-dim);">$${(parseFloat(c.openFee || 0) + parseFloat(c.closeFee || 0)).toFixed(2)}</td>
+                                <td class="${pClass}">${pSign}$${pVal.toFixed(2)}</td>
+                                <td class="${pClass}">${pctStr}</td>
+                            </tr>
+                        `;
+                    }).join('');
+                }
+                if (hCards) {
+                    hCards.innerHTML = rows.map(c => {
+                        const pVal = parseFloat(c.closedPnl || 0);
+                        const pClass = pVal >= 0 ? 'val-up' : 'val-down';
+                        const pSign = pVal >= 0 ? '+' : '';
+                        const timeStr = c.updatedTime ? new Date(parseInt(c.updatedTime)).toLocaleTimeString('it-IT') : '--:--';
+
+                        const invested = parseFloat(c.cumEntryValue || 0) || (parseFloat(c.closedSize || 0) * parseFloat(c.avgEntryPrice || 0));
+                        const investedStr = invested > 0 ? '$' + Math.round(invested).toLocaleString('en-US') : '--';
+
+                        let pctStr = '--';
+                        if (invested > 0) {
+                            const pct = (pVal / invested) * 100;
+                            pctStr = `${pSign}${pct.toFixed(2)}%`;
+                        }
+
+                        const fee = (parseFloat(c.openFee || 0) + parseFloat(c.closeFee || 0)).toFixed(2);
+
+                        return `
+                            <div class="mobile-trade-card">
+                                <div class="mobile-trade-card-header">
+                                    <div>
+                                        <strong style="color: var(--text-main); font-size: 13px;">${c.symbol}</strong>
+                                        <span class="badge mono" style="margin-left: 6px; font-size: 9px; padding: 1px 5px; background: ${c.side.toLowerCase() === 'buy' ? 'var(--green-bg)' : 'var(--red-bg)'}; color: ${c.side.toLowerCase() === 'buy' ? 'var(--green)' : 'var(--red)'};">${c.side.toUpperCase()}</span>
+                                        <span style="font-size: 10px; color: var(--text-dim); margin-left: 6px;">${timeStr}</span>
+                                    </div>
+                                    <div class="${pClass}" style="font-weight: 700; font-size: 13px; text-align: right;">
+                                        ${pSign}$${pVal.toFixed(2)}
+                                        <div style="font-size: 10px; font-weight: 600;">${pctStr}</div>
+                                    </div>
+                                </div>
+                                <div class="mobile-trade-card-grid">
+                                    <div><span style="color: var(--text-muted);">Investito:</span> <b>${investedStr}</b></div>
+                                    <div><span style="color: var(--text-muted);">Fee:</span> <b>$${fee}</b></div>
+                                    <div style="grid-column: 1 / -1;"><span style="color: var(--text-muted);">Esecuzione:</span> $${parseFloat(c.avgEntryPrice || 0).toFixed(3)} &rarr; $${parseFloat(c.avgExitPrice || 0).toFixed(3)}</div>
+                                </div>
+                            </div>
+                        `;
+                    }).join('');
+                }
             }
         }
 
@@ -2451,6 +2669,41 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 
         fetchData();
         setInterval(fetchData, 5000);
+    
+        // GESTORE TOOLTIP TOAST FLUIDO PER MOBILE / IPHONE TOUCH
+        let mobileToastTimer = null;
+        function showMobileToast(text) {
+            const toast = document.getElementById('mobile-tooltip-toast');
+            const toastText = document.getElementById('mobile-tooltip-text');
+            if (!toast || !toastText) return;
+            toastText.innerHTML = text;
+            toast.classList.add('show');
+            if (mobileToastTimer) clearTimeout(mobileToastTimer);
+            mobileToastTimer = setTimeout(() => {
+                hideMobileToast();
+            }, 6000);
+        }
+
+        function hideMobileToast() {
+            const toast = document.getElementById('mobile-tooltip-toast');
+            if (toast) toast.classList.remove('show');
+            if (mobileToastTimer) clearTimeout(mobileToastTimer);
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            // Intercetta il tap sugli elementi con data-tip su dispositivi touch / schermi piccoli
+            document.body.addEventListener('click', (e) => {
+                const target = e.target.closest('[data-tip]');
+                if (target && window.innerWidth <= 768) {
+                    const tipText = target.getAttribute('data-tip');
+                    if (tipText) {
+                        e.stopPropagation();
+                        showMobileToast(tipText);
+                    }
+                }
+            });
+        });
+
     </script>
 </body>
 </html>
