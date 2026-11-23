@@ -341,6 +341,27 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             box-shadow: 0 2px 8px rgba(0, 0, 0, 0.28);
             font-weight: 700;
         }
+        .apple-segment-item.active-bybit {
+            background: rgba(10, 132, 255, 0.22);
+            color: var(--apple-blue);
+            border: 0.5px solid rgba(10, 132, 255, 0.4);
+            box-shadow: 0 2px 10px rgba(10, 132, 255, 0.25);
+            font-weight: 700;
+        }
+        .apple-segment-item.active-alpaca {
+            background: rgba(255, 159, 10, 0.22);
+            color: var(--apple-amber);
+            border: 0.5px solid rgba(255, 159, 10, 0.4);
+            box-shadow: 0 2px 10px rgba(255, 159, 10, 0.25);
+            font-weight: 700;
+        }
+        .apple-segment-item.active-total {
+            background: rgba(191, 90, 242, 0.22);
+            color: #BF5AF2;
+            border: 0.5px solid rgba(191, 90, 242, 0.4);
+            box-shadow: 0 2px 10px rgba(191, 90, 242, 0.25);
+            font-weight: 700;
+        }
 
         /* ==========================================================================
            4. TIME RANGE PICKER PILLS (3S, 1M, 1H, 1D, 1W, 1M)
@@ -878,6 +899,13 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 
         <!-- 3. APPLE INTERACTIVE CHART CARD -->
         <section class="apple-chart-card">
+            <!-- Segmented Control Scelta Mercato / Istanza Grafico -->
+            <div class="apple-segmented mono" style="margin-top: 0; margin-bottom: 8px;">
+                <button class="apple-segment-item active active-bybit" id="btn-inst-bybit" onclick="setChartInstance('bybit')">BYBIT CRYPTO</button>
+                <button class="apple-segment-item" id="btn-inst-alpaca" onclick="setChartInstance('alpaca')">ALPACA WALL ST</button>
+                <button class="apple-segment-item" id="btn-inst-total" onclick="setChartInstance('total')">CONSOLIDATO</button>
+            </div>
+
             <!-- Timeframe Selector Pills -->
             <div class="tf-pills-row mono">
                 <button class="tf-pill active" id="btn-tf-3s" onclick="setTimeframe('3s')">3S</button>
@@ -897,7 +925,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                     <span id="hud-range-val" style="color: var(--text-secondary);">L: $0 &bull; H: $0</span>
                 </div>
                 <div class="chart-hud-stat">
-                    <span id="chart-instance-title" style="color: var(--text-tertiary);">BYBIT FUTURES</span>
+                    <span id="chart-instance-title" style="color: var(--apple-blue);">BYBIT FUTURES (24/7)</span>
                 </div>
             </div>
 
@@ -914,22 +942,22 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 <button class="apple-segment-item" id="btn-mode-pct" onclick="setChartMode('pct')">% Percentuale</button>
             </div>
 
-            <!-- Quick Metrics Grid -->
+            <!-- Quick Metrics Grid (Dinamico per Mercato Selezionato) -->
             <div class="chart-quick-metrics mono">
-                <div class="quick-metric-cell">
-                    <span>Volume</span>
+                <div class="quick-metric-cell" id="qcell-1" data-tip="Volume nozionale cumulato scambiato dai trade">
+                    <span id="qlabel-1">Volume</span>
                     <strong id="metric-volume">$0</strong>
                 </div>
-                <div class="quick-metric-cell">
-                    <span>PnL Chiuso</span>
+                <div class="quick-metric-cell" id="qcell-2" data-tip="Profit &amp; Loss netto consolidato delle operazioni chiuse">
+                    <span id="qlabel-2">PnL Chiuso</span>
                     <strong id="metric-realized">$0.00</strong>
                 </div>
-                <div class="quick-metric-cell">
-                    <span>Win Rate</span>
+                <div class="quick-metric-cell" id="qcell-3" data-tip="Percentuale di operazioni chiuse con profitto positivo">
+                    <span id="qlabel-3">Win Rate</span>
                     <strong id="metric-winrate">0%</strong>
                 </div>
-                <div class="quick-metric-cell" data-tip="Media matematica netta guadagnata o persa per singolo trade chiuso">
-                    <span>Trade Medio</span>
+                <div class="quick-metric-cell" id="qcell-4" data-tip="Media matematica netta guadagnata o persa per singolo trade">
+                    <span id="qlabel-4">Trade Medio</span>
                     <strong id="metric-avg-trade">$0.00</strong>
                 </div>
             </div>
@@ -1210,15 +1238,19 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 </div>
             </div>
 
-            <!-- Card 6: Timeframe e Grafico Zoomabile -->
+            <!-- Card 6: Grafici Distinti & Timeframe Zoomabile -->
             <div class="acc-cell" style="padding: 14px; text-align: left;">
                 <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
-                    <strong style="color: var(--text-main); font-size: 13px;">6. Timeframe e Zoom Interattivo</strong>
+                    <strong style="color: var(--text-main); font-size: 13px;">6. Grafici Distinti per Broker &amp; Timeframe</strong>
+                    <span class="badge mono" style="background: var(--apple-blue); color: #fff; font-size: 9px; padding: 2px 6px; border-radius: 3px;">MULTI-CHART</span>
                 </div>
                 <div style="font-size: 11px; color: var(--text-muted); line-height: 1.45;">
-                    <strong>• Timeframe (3S, 1M, 1H, 1D, 1W, 1MO):</strong> Permette di visualizzare sia il micro-tick in tempo reale che l'andamento a lungo termine fino a 30 giorni.<br>
-                    <strong>• Zoom su iPhone:</strong> Pizzica con due dita direttamente sul grafico per ingrandire o rimpicciolire qualsiasi candela. Clicca <code>RESET ZOOM</code> per tornare alla panoramica.<br>
-                    <strong>• Tooltip al Tocco:</strong> Tocca con il dito qualsiasi punto o numero per leggere la guida contestuale immediata.
+                    I mercati hanno grafici e identità visive completamente separate:<br>
+                    <strong>• Bybit Crypto (Blu Elettrico):</strong> Curva del capitale derivati crypto 24/7, linea del PnL chiuso e metriche di trading (Volume, Win Rate, Trade Medio).<br>
+                    <strong>• Alpaca Wall St (Oro / Ambra):</strong> Curva dedicata al portafoglio azionario USA ($98.6k), con focus su controvalore titoli e Buying Power cash.<br>
+                    <strong>• Consolidato (Viola / Purple):</strong> Andamento dell'equity globale combinata ($263k+).<br>
+                    <strong>• Timeframe (3S, 1M, 1H, 1D, 1W, 1MO):</strong> Dal micro-tick in tempo reale fino all'orizzonte mensile.<br>
+                    <strong>• Zoom su iPhone:</strong> Trascina per scorrere nel tempo, clicca <code>RESET ZOOM</code> per ripristinare.
                 </div>
             </div>
 
@@ -1277,9 +1309,6 @@ DASHBOARD_HTML = """<!DOCTYPE html>
              GHOST DOM BINDER FOR SCRIPT COMPATIBILITY (PRESERVES IDS AND EVENTS)
              ==================================================================== -->
         <div class="ghost-dom-binder">
-            <button id="btn-inst-bybit" onclick="setChartInstance('bybit')"></button>
-            <button id="btn-inst-alpaca" onclick="setChartInstance('alpaca')"></button>
-            <button id="btn-inst-total" onclick="setChartInstance('total')"></button>
             <div id="card-tf-3s"></div><div id="delta-3s-val"></div><div id="delta-3s-pct"></div>
             <div id="card-tf-1m"></div><div id="delta-1m-val"></div><div id="delta-1m-pct"></div>
             <div id="card-tf-1h"></div><div id="delta-1h-val"></div><div id="delta-1h-pct"></div>
@@ -1501,15 +1530,33 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             ['bybit', 'alpaca', 'total'].forEach(i => {
                 const btn = document.getElementById('btn-inst-' + i);
                 if (btn) {
-                    if (i === inst) btn.classList.add('active');
-                    else btn.classList.remove('active');
+                    btn.classList.toggle('active', i === inst);
+                    btn.classList.toggle('active-bybit', i === inst && inst === 'bybit');
+                    btn.classList.toggle('active-alpaca', i === inst && inst === 'alpaca');
+                    btn.classList.toggle('active-total', i === inst && inst === 'total');
                 }
             });
+
+            // Evidenzia visivamente anche la card corrispondente nei saldi hero
+            const subBybit = document.getElementById('sub-acc-bybit');
+            const subAlpaca = document.getElementById('sub-acc-alpaca');
+            if (subBybit && subAlpaca) {
+                subBybit.classList.toggle('active-acc', inst === 'bybit');
+                subAlpaca.classList.toggle('active-acc', inst === 'alpaca');
+            }
+
             const titleEl = document.getElementById('chart-instance-title');
             if (titleEl) {
-                if (inst === 'bybit') titleEl.innerText = 'Grafico: Bybit Futures (Crypto 24/7)';
-                else if (inst === 'alpaca') titleEl.innerText = 'Grafico: Alpaca (Wall Street USA)';
-                else titleEl.innerText = 'Grafico: Portafoglio Totale Consolidato';
+                if (inst === 'bybit') {
+                    titleEl.innerText = 'BYBIT FUTURES (CRYPTO 24/7)';
+                    titleEl.style.color = 'var(--apple-blue)';
+                } else if (inst === 'alpaca') {
+                    titleEl.innerText = 'ALPACA (WALL STREET USA)';
+                    titleEl.style.color = 'var(--apple-amber)';
+                } else {
+                    titleEl.innerText = 'PORTAFOGLIO CONSOLIDATO';
+                    titleEl.style.color = '#BF5AF2';
+                }
             }
             if (chartInstance) {
                 chartInstance.destroy();
@@ -1731,32 +1778,52 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                     return parseFloat(avg.toFixed(3));
                 });
 
-                const gradient = ctx.createLinearGradient(0, 0, 0, 240);
-                if (isDark) {
-                    gradient.addColorStop(0, 'rgba(10, 132, 255, 0.20)');
-                    gradient.addColorStop(0.8, 'rgba(10, 132, 255, 0.02)');
-                    gradient.addColorStop(1, 'rgba(10, 132, 255, 0.00)');
-                } else {
-                    gradient.addColorStop(0, 'rgba(0, 122, 255, 0.14)');
-                    gradient.addColorStop(0.8, 'rgba(0, 122, 255, 0.01)');
-                    gradient.addColorStop(1, 'rgba(0, 122, 255, 0.00)');
+                // Identità cromatica Apple HIG distinta per mercato
+                let mainRgb = '10, 132, 255'; // Bybit Electric Blue
+                let lineColor = isDark ? '#0A84FF' : '#007AFF';
+                let smaColor = isDark ? 'rgba(255, 214, 10, 0.75)' : 'rgba(255, 159, 10, 0.80)';
+                let pnlColor = isDark ? 'rgba(48, 209, 88, 0.85)' : 'rgba(52, 199, 89, 0.85)';
+
+                if (currentInstance === 'alpaca') {
+                    mainRgb = '255, 159, 10'; // Alpaca Wall Street Amber / Gold
+                    lineColor = isDark ? '#FF9F0A' : '#D48806';
+                    smaColor = isDark ? 'rgba(10, 132, 255, 0.75)' : 'rgba(0, 122, 255, 0.80)';
+                    pnlColor = isDark ? 'rgba(48, 209, 88, 0.85)' : 'rgba(52, 199, 89, 0.85)';
+                } else if (currentInstance === 'total') {
+                    mainRgb = '191, 90, 242'; // Consolidato Purple / Violet
+                    lineColor = isDark ? '#BF5AF2' : '#AF52DE';
+                    smaColor = isDark ? 'rgba(255, 214, 10, 0.75)' : 'rgba(255, 159, 10, 0.80)';
+                    pnlColor = isDark ? 'rgba(48, 209, 88, 0.85)' : 'rgba(52, 199, 89, 0.85)';
                 }
 
-                const lineColor = isDark ? '#0A84FF' : '#007AFF';
-                const smaColor = isDark ? 'rgba(255, 214, 10, 0.70)' : 'rgba(255, 159, 10, 0.75)';
-                const pnlColor = isDark ? 'rgba(48, 209, 88, 0.85)' : 'rgba(52, 199, 89, 0.85)';
+                // Aggiorna il colore del LIVE HUD in base al broker selezionato
+                const hudLiveEl = document.getElementById('hud-live-val');
+                if (hudLiveEl) hudLiveEl.style.color = lineColor;
+
+                const gradient = ctx.createLinearGradient(0, 0, 0, 240);
+                if (isDark) {
+                    gradient.addColorStop(0, `rgba(${mainRgb}, 0.22)`);
+                    gradient.addColorStop(0.8, `rgba(${mainRgb}, 0.02)`);
+                    gradient.addColorStop(1, `rgba(${mainRgb}, 0.00)`);
+                } else {
+                    gradient.addColorStop(0, `rgba(${mainRgb}, 0.16)`);
+                    gradient.addColorStop(0.8, `rgba(${mainRgb}, 0.01)`);
+                    gradient.addColorStop(1, `rgba(${mainRgb}, 0.00)`);
+                }
 
                 if (chartInstance) {
                     chartInstance.data.labels = labels;
                     chartInstance.data.datasets[0].data = equity;
                     chartInstance.data.datasets[0].label = labelName;
                     chartInstance.data.datasets[0].borderColor = lineColor;
+                    chartInstance.data.datasets[0].pointHoverBackgroundColor = lineColor;
                     chartInstance.data.datasets[0].backgroundColor = gradient;
                     chartInstance.data.datasets[1].data = smaData;
                     chartInstance.data.datasets[1].borderColor = smaColor;
                     chartInstance.data.datasets[2].data = pnl;
                     chartInstance.data.datasets[2].label = pnlName;
                     chartInstance.data.datasets[2].borderColor = pnlColor;
+                    chartInstance.options.scales.y.ticks.color = lineColor;
                     chartInstance.update('none');
                     return;
                 }
@@ -2111,7 +2178,16 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 }
             });
 
-            // 4. Metrics & Chart
+            // 4. Metrics & Chart (Dinamico e coerente con l'istanza di mercato visualizzata)
+            const ql1 = document.getElementById('qlabel-1');
+            const ql2 = document.getElementById('qlabel-2');
+            const ql3 = document.getElementById('qlabel-3');
+            const ql4 = document.getElementById('qlabel-4');
+            const mvEl = document.getElementById('metric-volume');
+            const rpEl = document.getElementById('metric-realized');
+            const wrEl = document.getElementById('metric-winrate');
+            const avgEl = document.getElementById('metric-avg-trade');
+
             let cumVol = 0;
             let cumPnl = 0;
             let wins = 0;
@@ -2121,21 +2197,67 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 cumVol += (parseFloat(c.cumExitValue || 0) + parseFloat(c.cumEntryValue || 0));
                 if (p > 0) wins++;
             });
-            document.getElementById('metric-volume').innerText = '$' + (cumVol / 1000).toFixed(0) + 'k';
-            const rpEl = document.getElementById('metric-realized');
-            rpEl.innerText = `${cumPnl >= 0 ? '+' : ''}$${cumPnl.toFixed(2)}`;
-            rpEl.className = cumPnl >= 0 ? 'val-up' : 'val-down';
-
-            const wr = bClosed.length > 0 ? (wins / bClosed.length * 100).toFixed(0) : 0;
-            document.getElementById('metric-winrate').innerText = `${wr}% (${wins}/${bClosed.length})`;
-
-            // Calcolo Trade Medio
             const avgTrade = bClosed.length > 0 ? (cumPnl / bClosed.length) : 0;
-            const avgEl = document.getElementById('metric-avg-trade');
-            if (avgEl) {
-                avgEl.innerText = `${avgTrade >= 0 ? '+' : ''}$${avgTrade.toFixed(2)}`;
-                avgEl.className = avgTrade >= 0 ? 'val-up' : 'val-down';
+
+            if (currentInstance === 'alpaca') {
+                // Metriche specifiche per Wall Street USA (Alpaca)
+                if (ql1) ql1.innerText = 'Val. Titoli';
+                if (ql2) ql2.innerText = 'Buying Power';
+                if (ql3) ql3.innerText = 'Posizioni';
+                if (ql4) ql4.innerText = 'Market Status';
+
+                let alpacaMktVal = 0;
+                aPositions.forEach(ap => { alpacaMktVal += parseFloat(ap.market_value || 0); });
+                if (mvEl) mvEl.innerText = '$' + (alpacaMktVal / 1000).toFixed(1) + 'k';
+
+                const bpVal = parseFloat(aAcc.buying_power || 0);
+                if (rpEl) {
+                    rpEl.innerText = '$' + (bpVal / 1000).toFixed(0) + 'k';
+                    rpEl.className = 'val-neutral';
+                }
+                if (wrEl) wrEl.innerText = `${aPositions.length} titoli`;
+                if (avgEl) {
+                    avgEl.innerText = 'CHIUSA (W-END)';
+                    avgEl.className = 'val-neutral';
+                }
+            } else if (currentInstance === 'total') {
+                // Metriche per Portafoglio Consolidato
+                if (ql1) ql1.innerText = 'Volume Crypto';
+                if (ql2) ql2.innerText = 'PnL Chiuso';
+                if (ql3) ql3.innerText = 'Win Rate';
+                if (ql4) ql4.innerText = 'Trade Medio';
+
+                if (mvEl) mvEl.innerText = '$' + (cumVol / 1000).toFixed(0) + 'k';
+                if (rpEl) {
+                    rpEl.innerText = `${cumPnl >= 0 ? '+' : ''}$${cumPnl.toFixed(2)}`;
+                    rpEl.className = cumPnl >= 0 ? 'val-up' : 'val-down';
+                }
+                const wr = bClosed.length > 0 ? (wins / bClosed.length * 100).toFixed(0) : 0;
+                if (wrEl) wrEl.innerText = `${wr}% (${wins}/${bClosed.length})`;
+                if (avgEl) {
+                    avgEl.innerText = `${avgTrade >= 0 ? '+' : ''}$${avgTrade.toFixed(2)}`;
+                    avgEl.className = avgTrade >= 0 ? 'val-up' : 'val-down';
+                }
+            } else {
+                // Default Bybit Crypto
+                if (ql1) ql1.innerText = 'Volume';
+                if (ql2) ql2.innerText = 'PnL Chiuso';
+                if (ql3) ql3.innerText = 'Win Rate';
+                if (ql4) ql4.innerText = 'Trade Medio';
+
+                if (mvEl) mvEl.innerText = '$' + (cumVol / 1000).toFixed(0) + 'k';
+                if (rpEl) {
+                    rpEl.innerText = `${cumPnl >= 0 ? '+' : ''}$${cumPnl.toFixed(2)}`;
+                    rpEl.className = cumPnl >= 0 ? 'val-up' : 'val-down';
+                }
+                const wr = bClosed.length > 0 ? (wins / bClosed.length * 100).toFixed(0) : 0;
+                if (wrEl) wrEl.innerText = `${wr}% (${wins}/${bClosed.length})`;
+                if (avgEl) {
+                    avgEl.innerText = `${avgTrade >= 0 ? '+' : ''}$${avgTrade.toFixed(2)}`;
+                    avgEl.className = avgTrade >= 0 ? 'val-up' : 'val-down';
+                }
             }
+
             const histAvgEl = document.getElementById('history-avg-label');
             if (histAvgEl) {
                 histAvgEl.innerText = `Trade Medio: ${avgTrade >= 0 ? '+' : ''}$${avgTrade.toFixed(2)}`;
