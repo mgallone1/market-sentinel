@@ -138,6 +138,56 @@ def get_deep_trade_forecast(symbol: str, tf: str = "1d") -> Dict[str, Any]:
         hist_labels = [f"-{recent_window-i}g" for i in range(recent_window)]
         forecast_labels = [f"+{i}g" for i in range(days_ahead + 1)]
 
+        
+        # Calcolo Segnale Azionabile Matematico (Zero Ambiguità)
+        # Combinazione: FLD Cross + Quarto Battleplan + Onda Elliott + P(Up) Monte Carlo
+        is_fld_bullish = last_price >= fld_curve[-1]
+        bars_into_cycle = int(cycle_metrics.get("bars_since_mensile_min", 2) or 2)
+        p_up_num = float(mc_summary.get("probability_positive_trend", "50%").replace("%", "").strip() or 50)
+        
+        # Livelli Chiave Operativi
+        entry_ref = last_price
+        fld_target = fld_curve[-1]
+        fib_golden = float(fib.get("fib_618_golden_pocket_eur", last_price * 1.08))
+        fib_support = float(fib.get("fib_382_eur", last_price * 0.96))
+        
+        # Verdetto Tattico
+        if is_fld_bullish and bars_into_cycle <= 12 and p_up_num >= 52:
+            action_verdict = "COMPRA / ACCUMULO RIALZISTA"
+            action_color = "green"
+            action_badge = "LONG"
+            action_reason = f"Prezzo sopra FLD (${fld_target:.2f}), ciclo al {bars_into_cycle}° tempo (spinta rialzista) e Monte Carlo favorevole ({p_up_num}%)."
+            action_strategy = f"Entrata LONG consigliata. Target primario a ${fib_golden:.2f} (+{((fib_golden/entry_ref)-1)*100:.1f}%), Stop Loss protettivo sotto ${fld_target*0.985:.2f}."
+        elif not is_fld_bullish and bars_into_cycle >= 20:
+            action_verdict = "SHORT / HEDGE PROTETTIVO"
+            action_color = "red"
+            action_badge = "SHORT"
+            action_reason = f"Prezzo sotto FLD (${fld_target:.2f}), ciclo nella seconda metà discendente (barra {bars_into_cycle}/32) verso il pavimento ciclico."
+            action_strategy = f"Fase discendente attiva. Se hai posizioni long riduci l'esposizione. Target ribasso verso ${fib_support:.2f} (-{abs(((fib_support/entry_ref)-1)*100):.1f}%)."
+        elif bars_into_cycle >= 28:
+            action_verdict = "PREPARAZIONE ACCUMULO (MINIMO IMMINENTE)"
+            action_color = "amber"
+            action_badge = "ATTENDI INVERSIONE"
+            action_reason = f"Mancano ~{max(1, 32 - bars_into_cycle)} barre alla morte del ciclo: preparare la liquidità per l'inversione sui minimi."
+            action_strategy = f"Non vendere sui minimi: attendi la rottura al rialzo della FLD (${fld_target:.2f}) per aprire posizioni long a basso rischio."
+        else:
+            action_verdict = "NEUTRALE / MONITORAGGIO ATTIVO"
+            action_color = "amber"
+            action_badge = "NEUTRALE"
+            action_reason = "Fase di transizione tra onde cicliche in attesa di breakout direzionale confermato dalla FLD."
+            action_strategy = f"Attendere un superamento deciso di ${fld_target:.2f} prima di aprire posizioni aggressive."
+
+        actionable_plan = {
+            "verdict": action_verdict,
+            "badge": action_badge,
+            "color": action_color,
+            "reason": action_reason,
+            "strategy": action_strategy,
+            "target_tp": round(fib_golden if action_badge == "LONG" else fib_support, 4),
+            "target_sl": round(fld_target * 0.985 if action_badge == "LONG" else fld_target * 1.015, 4),
+            "bars_to_reversal": max(1, 32 - bars_into_cycle) if bars_into_cycle >= 16 else max(1, 16 - bars_into_cycle)
+        }
+
         result = {
             "symbol": clean_sym,
             "current_price": last_price,
@@ -165,6 +215,7 @@ def get_deep_trade_forecast(symbol: str, tf: str = "1d") -> Dict[str, Any]:
                 "phase": wyckoff.get("phase", "Neutro"),
                 "bias": wyckoff.get("bias", "Neutro")
             },
+            "actionable": actionable_plan,
             "monte_carlo": {
                 "probability_positive": mc_summary.get("probability_positive_trend", "50%"),
                 "median_forecast": mc_summary.get("median_price_eur", last_price),

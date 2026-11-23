@@ -531,6 +531,66 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             font-weight: 700;
         }
 
+        
+        /* PREDICTION ENGINE LAYERS SELECTOR & TACTICAL CARD */
+        .layer-pills {
+            display: flex;
+            gap: 4px;
+            overflow-x: auto;
+            padding: 4px 0 8px 0;
+            -webkit-overflow-scrolling: touch;
+        }
+        .layer-btn {
+            background: var(--surface-subtle);
+            border: 0.5px solid var(--border);
+            color: var(--text-secondary);
+            font-size: 10px;
+            font-weight: 600;
+            padding: 5px 10px;
+            border-radius: 999px;
+            cursor: pointer;
+            white-space: nowrap;
+            transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+        .layer-btn.active {
+            background: var(--text-main);
+            color: var(--surface-bg);
+            border-color: var(--text-main);
+            box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+        }
+        .tactical-decision-box {
+            background: linear-gradient(135deg, rgba(48, 209, 88, 0.08) 0%, rgba(10, 132, 255, 0.06) 100%);
+            border: 0.5px solid rgba(48, 209, 88, 0.3);
+            border-radius: 12px;
+            padding: 12px 14px;
+            margin-bottom: 12px;
+        }
+        .tactical-decision-box.short {
+            background: linear-gradient(135deg, rgba(255, 69, 58, 0.08) 0%, rgba(255, 159, 10, 0.06) 100%);
+            border-color: rgba(255, 69, 58, 0.3);
+        }
+        .tactical-decision-box.neutral {
+            background: linear-gradient(135deg, rgba(255, 159, 10, 0.08) 0%, rgba(191, 90, 242, 0.06) 100%);
+            border-color: rgba(255, 159, 10, 0.3);
+        }
+        .tactical-grid-3 {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 8px;
+            margin-top: 8px;
+            padding-top: 8px;
+            border-top: 0.5px solid rgba(255,255,255,0.08);
+            text-align: center;
+        }
+        .tactical-grid-3 > div {
+            background: rgba(0,0,0,0.18);
+            border-radius: 6px;
+            padding: 6px 4px;
+        }
+
         /* ==========================================================================
            6. APPLE INSET GROUPED LIST & CARDS (IOS HIG COMPLIANT)
            ========================================================================== */
@@ -1468,21 +1528,19 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 </div>
             </div>
 
-            <!-- Card 9: Diagnostica Ciclica (Hurst/Migliorino), Onde di Elliott e Monte Carlo -->
+            <!-- Card 8: Scheda Tattica Operativa, Livelli Interattivi & Diagnostica Ciclica -->
             <div class="acc-cell" style="padding: 14px; text-align: left;">
                 <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
-                    <strong style="color: var(--text-main); font-size: 13px;">8. Analisi Ciclica, Onde di Elliott, Timeframe &amp; Previsione Monte Carlo</strong>
-                    <span class="badge mono" style="background: var(--blue); color: #fff; font-size: 9px; padding: 2px 6px; border-radius: 3px;">QUANT PRO</span>
+                    <strong style="color: var(--text-main); font-size: 13px;">8. Scheda Tattica Azionabile &amp; Proiezione Futura Ciclica</strong>
+                    <span class="badge mono" style="background: var(--apple-blue); color: #fff; font-size: 9px; padding: 2px 6px; border-radius: 3px;">ACTIONABLE QUANT</span>
                 </div>
                 <div style="font-size: 11px; color: var(--text-muted); line-height: 1.45;">
-                    Toccando qualsiasi riga di trade aperto si apre il pannello di analisi quantitativa approfondita:<br>
-                    <strong>• Selettore Timeframe Dinamico (1D / 4H / 1H):</strong> Permette di alternare all'istante l'analisi tra visione Macro (1D), Swing (4H) e Tattica Intraday (1H).<br>
-                    <strong>• Confluenza Microstruttura (OBI &amp; ATR):</strong> Gli ingressi verificano l'Order Book Imbalance (muri di liquidità Bid/Ask) e calcolano Stop Loss e Take Profit proporzionati alla volatilità reale ATR.<br>
-                    <strong>• Grafico Sovrapposto a Più Curve:</strong> Mostra in tempo reale la serie storica reale (azzurro), la curva di traslazione <strong>Hurst FLD</strong> (oro tratteggiato), la sinusoide a 4 tempi del <strong>Battleplan Migliorino</strong> (ciano) e il cono stocastico <strong>Monte Carlo P50</strong> con intervallo di confidenza al 95%.<br>
-                    <strong>• Hurst FLD (Future Line of Demarcation):</strong> Trasla il prezzo di mezzo periodo (T/2). Se il prezzo incrocia la FLD dal basso, convalida il minimo ciclico proiettando il target al rialzo; se la buca dall'alto, avverte di debolezza ciclica verso il minimo.<br>
-                    <strong>• Battleplan &amp; Vincoli di Migliorino:</strong> Mostra il tempo ciclico su 4 tempi (T, T+1, T+2, T+3) e segnala se il ciclo è libero o vincolato al ribasso (un ciclo che rompe il proprio minimo di partenza non può più superare il proprio massimo).<br>
-                    <strong>• Onde di Elliott Frattali &amp; Target Fibonacci:</strong> Riconosce la fase frattale (Onda 1-2-3-4-5 d'impulso o correzione A-B-C) e calcola in tempo reale i livelli di ritracciamento di Fibonacci (38.2%, 50.0% Mediana e 61.8% Golden Pocket).<br>
-                    <strong>• Simulazione Monte Carlo a 15 Giorni:</strong> Calcola su 10.000 iterazioni stocastiche la distribuzione di probabilità con percentili P05, P50 e P95.
+                    Toccando qualsiasi asset della watchlist o trade aperto si apre il pannello operativo tattico:<br>
+                    <strong>• Piano Tattico Azionabile (Cosa fare ADESSO):</strong> Un box evidente che sintetizza senza ambiguità l'azione da compiere (<em>COMPRA / ACCUMULO</em>, <em>SHORT / HEDGE</em>, <em>PREPARA LIQUIDITÀ</em>, <em>STAND-BY</em>) indicando il Target di Take Profit suggerito da Fibonacci, lo Stop Loss di difesa e le barre stimate prima della prossima finestra di inversione ciclica.<br>
+                    <strong>• Filtro Livelli a Pillole Interattive:</strong> Puoi isolare le curve con un tocco: <em>Tutti i Livelli</em>, <em>Prezzo + Monte Carlo</em> (intervallo di probabilità stocastico a cono P05-P95), <em>Hurst FLD</em> (linea di demarcazione T/2) oppure <em>Battleplan 4 Tempi</em> (sinusoide di Giuseppe Migliorino).<br>
+                    <strong>• Hurst FLD (Future Line of Demarcation):</strong> Traslazione a mezzo periodo T/2: il superamento al rialzo della FLD conferma la nascita del nuovo ciclo con target sul massimo; la rottura al ribasso proietta verso il pavimento ciclico.<br>
+                    <strong>• Battleplan e Vincolo di Migliorino:</strong> Mostra in quale dei 4 tempi (quarti) si trova il ciclo corrente (~32 barre per il mensile T+2). Se il minimo di partenza viene violato, scatta il vincolo ribassista obbligatorio secondo le leggi cicliche.<br>
+                    <strong>• Grafici Apple Stocks a Colore Adattivo:</strong> Il grafico principale in Home adotta una scala cromatica dinamica ad alta leggibilità: diventa verde brillante (#30D158) quando il periodo è in guadagno e rosso corallo (#FF453A) in calo, con curve continue Catmull-Rom prive di assi ingombranti.
                 </div>
             </div>
 
@@ -1520,33 +1578,63 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 <button class="modal-close-btn" onclick="closeTradeModal()">&times;</button>
             </div>
             <div class="modal-body">
-                <!-- Grafico Previsionale Stocastico Monte Carlo, Hurst FLD & Battleplan Migliorino -->
+                <!-- SCHEDA TATTICA OPERATIVA (COSA FARE ORA) -->
+                <div id="tactical-box" class="tactical-decision-box">
+                    <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 4px;">
+                        <div>
+                            <div style="font-size: 9px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-secondary); font-weight: 700;">Piano Tattico Azionabile</div>
+                            <div id="tactical-verdict" style="font-size: 14px; font-weight: 800; color: var(--apple-green); margin-top: 1px;">CALCOLO IN CORSO...</div>
+                        </div>
+                        <span id="tactical-badge" class="badge mono" style="padding: 3px 8px; font-size: 10px; border-radius: 6px; font-weight: 700; background: rgba(48,209,88,0.2); color: var(--apple-green);">ANALISI</span>
+                    </div>
+                    <div id="tactical-reason" style="font-size: 11px; line-height: 1.4; color: var(--text-main); margin-top: 3px;">
+                        Diagnostica integrata tra FLD di Hurst, Battleplan a 4 tempi e Monte Carlo.
+                    </div>
+                    <div id="tactical-strategy" style="font-size: 11px; color: var(--text-secondary); margin-top: 4px; font-weight: 500;">
+                        In attesa dei dati di mercato...
+                    </div>
+                    <div class="tactical-grid-3 mono">
+                        <div>
+                            <div style="font-size: 8px; color: var(--text-tertiary);">TARGET TAKE PROFIT</div>
+                            <strong id="tactical-tp" style="font-size: 11px; color: var(--apple-green);">$0.00</strong>
+                        </div>
+                        <div>
+                            <div style="font-size: 8px; color: var(--text-tertiary);">STOP LOSS DI DIFESA</div>
+                            <strong id="tactical-sl" style="font-size: 11px; color: var(--apple-red);">$0.00</strong>
+                        </div>
+                        <div>
+                            <div style="font-size: 8px; color: var(--text-tertiary);">FINESTRA INVERSIONE</div>
+                            <strong id="tactical-reversal" style="font-size: 11px; color: var(--apple-blue);">~0 barre</strong>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- SELETTORE LIVELLI GRAFICO & CONTROLLI TIMEFRAME -->
                 <div>
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; flex-wrap: wrap; gap: 4px;">
-                        <div style="display: flex; gap: 4px; align-items: center;">
-                            <span style="font-size: 11px; font-weight: 700; color: var(--text-main);">Traiettoria Monte Carlo, FLD &amp; Battleplan</span>
-                            <!-- Timeframe Selector nel Modal -->
-                            <div style="display: flex; gap: 3px; margin-left: 6px;">
-                                <button class="tf-btn active" id="modal-tf-1d" onclick="switchModalTimeframe('1d')" style="padding: 2px 7px; font-size: 9px;">1D</button>
-                                <button class="tf-btn" id="modal-tf-4h" onclick="switchModalTimeframe('4h')" style="padding: 2px 7px; font-size: 9px;">4H</button>
-                                <button class="tf-btn" id="modal-tf-1h" onclick="switchModalTimeframe('1h')" style="padding: 2px 7px; font-size: 9px;">1H</button>
-                            </div>
+                        <!-- Timeframe Selector nel Modal -->
+                        <div style="display: flex; gap: 3px; align-items: center;">
+                            <span style="font-size: 10px; font-weight: 700; color: var(--text-secondary); margin-right: 2px;">TIMEFRAME:</span>
+                            <button class="tf-btn active" id="modal-tf-1d" onclick="switchModalTimeframe('1d')" style="padding: 2px 7px; font-size: 9px;">1D</button>
+                            <button class="tf-btn" id="modal-tf-4h" onclick="switchModalTimeframe('4h')" style="padding: 2px 7px; font-size: 9px;">4H</button>
+                            <button class="tf-btn" id="modal-tf-1h" onclick="switchModalTimeframe('1h')" style="padding: 2px 7px; font-size: 9px;">1H</button>
                         </div>
                         <div style="display: flex; gap: 6px; align-items: center;">
                             <span id="modal-tf-badge" class="badge mono" style="background: var(--surface-elevated); color: var(--text-muted); font-size: 9px; padding: 2px 6px; border-radius: 4px; border: 1px solid var(--border);">1D • MACRO</span>
                             <span id="modal-mc-prob" class="badge mono" style="background: var(--green-bg); color: var(--green); font-size: 10px; padding: 2px 6px; border-radius: 4px;">Prob. Up: 50%</span>
                         </div>
                     </div>
-                    <div class="forecast-chart-container">
-                        <canvas id="forecastChart"></canvas>
+
+                    <!-- PILLOLE FILTRO LIVELLI (INTERATTIVE) -->
+                    <div class="layer-pills">
+                        <button class="layer-btn active" id="layer-btn-all" onclick="setForecastLayer('all')">Tutti i Livelli</button>
+                        <button class="layer-btn" id="layer-btn-mc" onclick="setForecastLayer('mc')">Prezzo + Monte Carlo</button>
+                        <button class="layer-btn" id="layer-btn-hurst" onclick="setForecastLayer('hurst')">Hurst FLD</button>
+                        <button class="layer-btn" id="layer-btn-battleplan" onclick="setForecastLayer('battleplan')">Battleplan 4 Tempi</button>
                     </div>
-                    <!-- Legenda Grafica Dettagliata -->
-                    <div style="display: flex; justify-content: space-between; flex-wrap: wrap; gap: 6px; font-size: 9px; color: var(--text-dim); margin-top: 6px; padding: 4px 6px; background: var(--surface-elevated); border-radius: 4px;">
-                        <span style="color: #38bdf8;">━ Prezzo Storico</span>
-                        <span style="color: #f59e0b;">╌╌ Hurst FLD (T/2)</span>
-                        <span style="color: #06b6d4;">··· Battleplan Migliorino</span>
-                        <span style="color: #a855f7;">╌╌ Mediana Monte Carlo P50</span>
-                        <span style="color: #10b981;">░ Fascia Confidenza 95%</span>
+
+                    <div class="forecast-chart-container" style="height: 230px;">
+                        <canvas id="forecastChart"></canvas>
                     </div>
                 </div>
 
@@ -2071,23 +2159,17 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                     return parseFloat(avg.toFixed(3));
                 });
 
-                // Identità cromatica Apple HIG distinta per mercato
-                let mainRgb = '10, 132, 255'; // Bybit Electric Blue
-                let lineColor = isDark ? '#0A84FF' : '#007AFF';
-                let smaColor = isDark ? 'rgba(255, 214, 10, 0.75)' : 'rgba(255, 159, 10, 0.80)';
-                let pnlColor = isDark ? 'rgba(48, 209, 88, 0.85)' : 'rgba(52, 199, 89, 0.85)';
+                // PURE APPLE STOCKS DYNAMIC PALETTE
+                // Calcola se il trend nel periodo visualizzato è positivo o negativo
+                const validVals = equity.filter(v => typeof v === 'number' && !isNaN(v));
+                const deltaTrend = (validVals.length >= 2) ? (validVals[validVals.length - 1] - validVals[0]) : 0;
+                const isPositivePeriod = deltaTrend >= 0;
 
-                if (currentInstance === 'alpaca') {
-                    mainRgb = '255, 159, 10'; // Alpaca Wall Street Amber / Gold
-                    lineColor = isDark ? '#FF9F0A' : '#D48806';
-                    smaColor = isDark ? 'rgba(10, 132, 255, 0.75)' : 'rgba(0, 122, 255, 0.80)';
-                    pnlColor = isDark ? 'rgba(48, 209, 88, 0.85)' : 'rgba(52, 199, 89, 0.85)';
-                } else if (currentInstance === 'total') {
-                    mainRgb = '191, 90, 242'; // Consolidato Purple / Violet
-                    lineColor = isDark ? '#BF5AF2' : '#AF52DE';
-                    smaColor = isDark ? 'rgba(255, 214, 10, 0.75)' : 'rgba(255, 159, 10, 0.80)';
-                    pnlColor = isDark ? 'rgba(48, 209, 88, 0.85)' : 'rgba(52, 199, 89, 0.85)';
-                }
+                // Verde Apple (#30D158) per periodi in utile, Rosso Apple (#FF453A) per periodi in flessione
+                let mainRgb = isPositivePeriod ? '48, 209, 88' : '255, 69, 58';
+                let lineColor = isPositivePeriod ? '#30D158' : '#FF453A';
+                let smaColor = isDark ? 'rgba(255, 255, 255, 0.35)' : 'rgba(0, 0, 0, 0.35)';
+                let pnlColor = isPositivePeriod ? 'rgba(48, 209, 88, 0.6)' : 'rgba(255, 69, 58, 0.6)';
 
                 // Aggiorna il colore del LIVE HUD in base al broker selezionato
                 const hudLiveEl = document.getElementById('hud-live-val');
@@ -2237,26 +2319,26 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                         },
                         scales: {
                             x: {
-                                grid: { color: gridColor },
-                                ticks: { color: tickColor, font: { family: '-apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif', size: 9 }, maxTicksLimit: 6 }
+                                display: true,
+                                grid: { display: false },
+                                ticks: { color: tickColor, font: { family: '-apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif', size: 9 }, maxTicksLimit: 5 }
                             },
                             y: {
-                                position: 'left',
-                                grid: { color: gridColor },
+                                position: 'right',
+                                grid: { color: isDark ? 'rgba(255, 255, 255, 0.04)' : 'rgba(0, 0, 0, 0.04)' },
                                 ticks: {
-                                    color: lineColor,
+                                    color: tickColor,
                                     font: { family: '-apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif', size: 9 },
                                     callback: function(val) {
                                         if (chartMode === 'pct') {
-                                            return (val >= 0 ? '+' : '') + val.toFixed(2) + '%';
+                                            return (val >= 0 ? '+' : '') + val.toFixed(1) + '%';
                                         }
                                         return '$' + (val / 1000).toFixed(1) + 'k';
                                     }
                                 }
                             },
                             y1: {
-                                position: 'right',
-                                grid: { drawOnChartArea: false },
+                                display: false,
                                 ticks: {
                                     color: pnlColor,
                                     font: { family: '-apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif', size: 9 },
@@ -2947,8 +3029,40 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 document.getElementById('modal-mc-val').innerText = `Mediana: $${(mc.median_forecast || 0).toFixed(4)}`;
                 document.getElementById('modal-mc-desc').innerText = `Intervallo 95% CI: ${mc.ci_95_range || ''} (Vol: ${mc.annualized_vol || 0}%)`;
 
-                // Sintesi operativa
-                document.getElementById('modal-advice-text').innerText = `${c.consiglio_pratico || ''} Setup: ${side === 'LONG' ? 'Rialzista' : 'Ribassista'} su ${symbol}.`;
+                // Sintesi tattica azionabile con verdetto chiaro
+                const act = data.actionable || {};
+                const tBox = document.getElementById('tactical-box');
+                const tVerd = document.getElementById('tactical-verdict');
+                const tBadge = document.getElementById('tactical-badge');
+                const tReason = document.getElementById('tactical-reason');
+                const tStrat = document.getElementById('tactical-strategy');
+                const tTp = document.getElementById('tactical-tp');
+                const tSl = document.getElementById('tactical-sl');
+                const tRev = document.getElementById('tactical-reversal');
+
+                if (tVerd && act.verdict) {
+                    tVerd.innerText = act.verdict;
+                    const col = act.color || 'green';
+                    tVerd.style.color = (col === 'green' ? 'var(--apple-green)' : (col === 'red' ? 'var(--apple-red)' : 'var(--apple-amber)'));
+                    if (tBox) {
+                        tBox.className = 'tactical-decision-box ' + (col === 'red' ? 'short' : (col === 'amber' ? 'neutral' : ''));
+                    }
+                }
+                if (tBadge && act.badge) {
+                    tBadge.innerText = act.badge;
+                    const col = act.color || 'green';
+                    tBadge.style.color = (col === 'green' ? 'var(--apple-green)' : (col === 'red' ? 'var(--apple-red)' : 'var(--apple-amber)'));
+                    tBadge.style.background = (col === 'green' ? 'rgba(48,209,88,0.15)' : (col === 'red' ? 'rgba(255,69,58,0.15)' : 'rgba(255,159,10,0.15)'));
+                }
+                if (tReason && act.reason) tReason.innerText = act.reason;
+                if (tStrat && act.strategy) tStrat.innerText = act.strategy;
+                if (tTp && act.target_tp) tTp.innerText = `$${Number(act.target_tp).toLocaleString('en-US', {maximumFractionDigits: 2})}`;
+                if (tSl && act.target_sl) tSl.innerText = `$${Number(act.target_sl).toLocaleString('en-US', {maximumFractionDigits: 2})}`;
+                if (tRev && act.bars_to_reversal) tRev.innerText = `~${act.bars_to_reversal} barre`;
+
+                // Sintesi operativa classica per retrocompatibilità
+                const adviceEl = document.getElementById('modal-advice-text');
+                if (adviceEl) adviceEl.innerText = `${c.consiglio_pratico || ''} Setup: ${side === 'LONG' ? 'Rialzista' : 'Ribassista'} su ${symbol}.`;
 
                 // Renderizza Grafico Multimodello (Storico + FLD + Battleplan + Monte Carlo)
                 initForecastChart(data.chart_data);
@@ -2970,7 +3084,26 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             }
         }
 
+        let currentForecastLayer = 'all';
+        let cachedChartData = null;
+
+        function setForecastLayer(layer) {
+            currentForecastLayer = layer;
+            ['all', 'mc', 'hurst', 'battleplan'].forEach(l => {
+                const b = document.getElementById(`layer-btn-${l}`);
+                if (b) b.classList.toggle('active', l === layer);
+            });
+            if (cachedChartData) {
+                renderForecastChartWithLayer(cachedChartData, layer);
+            }
+        }
+
         function initForecastChart(chartData) {
+            cachedChartData = chartData;
+            renderForecastChartWithLayer(chartData, currentForecastLayer);
+        }
+
+        function renderForecastChartWithLayer(chartData, layer) {
             if (!chartData) return;
             const canvas = document.getElementById('forecastChart');
             if (!canvas) return;
@@ -3001,70 +3134,89 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             const p05Series = pad.concat(p05);
             const p95Series = pad.concat(p95);
 
+            // Configurazione visibilità dataset in base al layer selezionato
+            const showHurst = (layer === 'all' || layer === 'hurst');
+            const showBattleplan = (layer === 'all' || layer === 'battleplan');
+            const showMc = (layer === 'all' || layer === 'mc');
+
+            const datasets = [
+                {
+                    label: 'Prezzo',
+                    data: histSeries,
+                    borderColor: '#38bdf8',
+                    borderWidth: 2.5,
+                    pointRadius: 0,
+                    pointHoverRadius: 5,
+                    cubicInterpolationMode: 'monotone',
+                    tension: 0.2
+                }
+            ];
+
+            if (showHurst) {
+                datasets.push({
+                    label: 'Hurst FLD (Spartiacque)',
+                    data: hurstSeries,
+                    borderColor: '#f59e0b',
+                    borderWidth: 2.0,
+                    borderDash: [4, 3],
+                    pointRadius: 0,
+                    pointHoverRadius: 4,
+                    tension: 0.2
+                });
+            }
+
+            if (showBattleplan) {
+                datasets.push({
+                    label: 'Battleplan 4 Tempi (Migliorino)',
+                    data: battleplanSeries,
+                    borderColor: '#06b6d4',
+                    borderWidth: 1.8,
+                    borderDash: [2, 2],
+                    pointRadius: 0,
+                    pointHoverRadius: 4,
+                    tension: 0.35
+                });
+            }
+
+            if (showMc) {
+                datasets.push(
+                    {
+                        label: 'Previsione Mediana P50',
+                        data: p50Series,
+                        borderColor: '#a855f7',
+                        borderWidth: 2.2,
+                        borderDash: [5, 4],
+                        pointRadius: 0,
+                        pointHoverRadius: 4,
+                        tension: 0.2
+                    },
+                    {
+                        label: 'Banda Alta P95',
+                        data: p95Series,
+                        borderColor: 'rgba(48, 209, 88, 0.45)',
+                        borderWidth: 1,
+                        backgroundColor: 'transparent',
+                        pointRadius: 0,
+                        tension: 0.2
+                    },
+                    {
+                        label: 'Banda Bassa P05',
+                        data: p05Series,
+                        borderColor: 'rgba(255, 69, 58, 0.45)',
+                        borderWidth: 1,
+                        backgroundColor: 'rgba(168, 85, 247, 0.08)',
+                        fill: '-1',
+                        pointRadius: 0,
+                        tension: 0.2
+                    }
+                );
+            }
+
             forecastChartInstance = new Chart(ctx, {
                 type: 'line',
                 data: {
                     labels: labels,
-                    datasets: [
-                        {
-                            label: 'Storico Prezzo',
-                            data: histSeries,
-                            borderColor: '#38bdf8',
-                            borderWidth: 2,
-                            pointRadius: 0,
-                            pointHoverRadius: 4,
-                            tension: 0.1
-                        },
-                        {
-                            label: 'Hurst FLD (T/2)',
-                            data: hurstSeries,
-                            borderColor: '#f59e0b',
-                            borderWidth: 1.8,
-                            borderDash: [4, 3],
-                            pointRadius: 0,
-                            pointHoverRadius: 3,
-                            tension: 0.2
-                        },
-                        {
-                            label: 'Battleplan Migliorino (T+2)',
-                            data: battleplanSeries,
-                            borderColor: '#06b6d4',
-                            borderWidth: 1.6,
-                            borderDash: [2, 2],
-                            pointRadius: 0,
-                            pointHoverRadius: 3,
-                            tension: 0.3
-                        },
-                        {
-                            label: 'Monte Carlo Mediana (P50)',
-                            data: p50Series,
-                            borderColor: '#a855f7',
-                            borderWidth: 2.2,
-                            borderDash: [5, 4],
-                            pointRadius: 0,
-                            pointHoverRadius: 4,
-                            tension: 0.2
-                        },
-                        {
-                            label: 'Banda Superiore (P95)',
-                            data: p95Series,
-                            borderColor: 'rgba(16, 185, 129, 0.4)',
-                            borderWidth: 1,
-                            backgroundColor: 'transparent',
-                            pointRadius: 0,
-                            tension: 0.2
-                        },
-                        {
-                            label: 'Banda Inferiore (P05)',
-                            data: p05Series,
-                            borderColor: 'rgba(239, 68, 68, 0.4)',
-                            borderWidth: 1,
-                            backgroundColor: 'rgba(168, 85, 247, 0.08)',
-                            fill: '-1',
-                            pointRadius: 0,
-                            tension: 0.2
-                        }
-                    ]
+                    datasets: datasets
                 },
                 options: {
                     responsive: true,
