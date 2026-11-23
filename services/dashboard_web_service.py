@@ -1620,17 +1620,42 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 
                 const baseEq = (currentInstance === 'bybit' ? snapshots[0].bybit_equity : (currentInstance === 'alpaca' ? snapshots[0].alpaca_equity : snapshots[0].total_equity)) || 1.0;
 
-                // Se chartMetric è 'pnl', plottiamo la curva del Net PnL (realizzato + fluttuante) per isolare l'operatività del trading
+                // Se chartMetric è 'pnl', plottiamo la curva del Net PnL specifica del broker selezionato
                 if (chartMetric === 'pnl') {
-                    if (chartMode === 'pct') {
-                        equity = snapshots.map(s => parseFloat(((s.cumulative_realized_pnl + (s.unrealized_pnl || 0)) / baseEq * 100).toFixed(3)));
-                        labelName = 'Trading Net PnL (%)';
+                    if (currentInstance === 'alpaca') {
+                        // Per Alpaca: variazione di PnL azionario rispetto alla baseline dell'orizzonte
+                        if (chartMode === 'pct') {
+                            equity = snapshots.map(s => parseFloat(((s.alpaca_equity - baseEq) / baseEq * 100).toFixed(3)));
+                            labelName = 'Rendimento Azionario USA (%)';
+                        } else {
+                            equity = snapshots.map(s => parseFloat((s.alpaca_equity - baseEq).toFixed(2)));
+                            labelName = 'PnL Operativo Wall Street ($)';
+                        }
+                        pnl = snapshots.map(s => 0);
+                        pnlName = 'Benchmark Flat ($)';
+                    } else if (currentInstance === 'bybit') {
+                        // Per Bybit: Net Trading PnL (realizzato + non realizzato derivati)
+                        if (chartMode === 'pct') {
+                            equity = snapshots.map(s => parseFloat(((s.cumulative_realized_pnl + (s.unrealized_pnl || 0)) / baseEq * 100).toFixed(3)));
+                            labelName = 'Trading PnL Bybit (%)';
+                        } else {
+                            equity = snapshots.map(s => parseFloat((s.cumulative_realized_pnl + (s.unrealized_pnl || 0)).toFixed(2)));
+                            labelName = 'Trading PnL Bybit ($)';
+                        }
+                        pnl = snapshots.map(s => parseFloat(s.cumulative_realized_pnl.toFixed(2)));
+                        pnlName = 'PnL Chiuso Bybit ($)';
                     } else {
-                        equity = snapshots.map(s => parseFloat((s.cumulative_realized_pnl + (s.unrealized_pnl || 0)).toFixed(2)));
-                        labelName = 'Trading Net PnL ($)';
+                        // Consolidato
+                        if (chartMode === 'pct') {
+                            equity = snapshots.map(s => parseFloat(((s.total_equity - baseEq) / baseEq * 100).toFixed(3)));
+                            labelName = 'Rendimento Consolidato (%)';
+                        } else {
+                            equity = snapshots.map(s => parseFloat((s.cumulative_realized_pnl + (s.unrealized_pnl || 0)).toFixed(2)));
+                            labelName = 'Trading Net PnL Totale ($)';
+                        }
+                        pnl = snapshots.map(s => parseFloat(s.cumulative_realized_pnl.toFixed(2)));
+                        pnlName = 'PnL Chiuso ($)';
                     }
-                    pnl = snapshots.map(s => parseFloat(s.cumulative_realized_pnl.toFixed(2)));
-                    pnlName = 'PnL Chiuso ($)';
                 } else if (chartMode === 'pct') {
                     // Modalità %: calcola la variazione percentuale progressiva rispetto all'inizio del grafico
                     if (currentInstance === 'bybit') {
