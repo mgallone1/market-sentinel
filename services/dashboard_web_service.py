@@ -1570,20 +1570,22 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             }
         }
 
+        window.timeframeDataCache = {};
+
         function setTimeframe(tf) {
             currentTimeframe = tf;
             ['3s', '1m', '1h', '1d', '1w', '1M'].forEach(t => {
                 const btn = document.getElementById('btn-tf-' + t);
-                if (btn) {
-                    if (t === tf) btn.classList.add('active');
-                    else btn.classList.remove('active');
-                }
+                if (btn) btn.classList.toggle('active', t === tf);
                 const card = document.getElementById('card-tf-' + t);
-                if (card) {
-                    if (t === tf) card.classList.add('active');
-                    else card.classList.remove('active');
-                }
+                if (card) card.classList.toggle('active', t === tf);
             });
+
+            // REATTIVITÀ ISTANTANEA (0ms): se abbiamo già i dati di questo timeframe in cache, renderizza all'istante
+            if (window.timeframeDataCache[tf]) {
+                renderUI(window.timeframeDataCache[tf]);
+            }
+            // Sincronizza sempre in background per mantenere i dati freschi al tick
             fetchData();
         }
 
@@ -1954,6 +1956,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 if (!res.ok) throw new Error('HTTP ' + res.status);
                 const data = await res.json();
                 window.lastDashboardData = data;
+                window.timeframeDataCache[currentTimeframe] = data;
                 renderUI(data);
                 consecutiveErrors = 0;
                 (document.querySelector('.nav-pulse-dot') || document.querySelector('.status-dot')).style.background = 'var(--green)';
@@ -2806,11 +2809,12 @@ import asyncio
 import time
 
 _CACHE_STORE = {}
-_LAST_CACHE_TIME = 0.0
-_CACHE_TTL = 3.5  # Stabilizzazione visiva numeri  # Risposte istantanee in <10ms riutilizzando la cache recente di 1.8s
+_SHARED_LIVE_STATE = None
+_SHARED_LIVE_TIME = 0.0
+_CACHE_TTL = 3.5  # Cache TTL broker: 3.5 secondi per azzerare overhead di rete e rate limits
 
-def _fetch_all_live_data_sync(tf: str):
-    """Worker sincrono eseguito in thread worker per chiamare Bybit e Alpaca senza bloccare l'event loop."""
+def _fetch_shared_live_state_sync():
+    """Interroga le API di Bybit e Alpaca memorizzando lo stato comune (wallet, posizioni, compass)."""
     global _bybit_service, _alpaca_service
     if not _bybit_service:
         _bybit_service = BybitExecutionService()
@@ -2830,7 +2834,6 @@ def _fetch_all_live_data_sync(tf: str):
     try:
         b_closed_res = _bybit_service.session.get_closed_pnl(category="linear", limit=50)
         raw_closed = b_closed_res.get("result", {}).get("list", [])
-        # Ordina esplicitamente dal più recente al più vecchio (epoch timestamp descrescente)
         b_closed = sorted(raw_closed, key=lambda c: int(c.get("updatedTime", 0) or 0), reverse=True)
     except Exception:
         b_closed = []
@@ -2860,50 +2863,76 @@ def _fetch_all_live_data_sync(tf: str):
     except Exception as e_snap:
         print(f"[!] Errore registrazione snapshot: {e_snap}")
 
-    history = perf_tracker.get_timeframe_history(tf)
     variations = perf_tracker.get_variations(tot_eq, cum_real, bybit_eq=b_eq, alpaca_eq=a_eq, current_unrealized_pnl=unreal_pnl)
     compass_metrics = trading_compass.compute_edge_metrics(b_closed, b_pos, tot_eq)
     setup_readiness = trading_compass.compute_setup_readiness(_bybit_service)
 
     return {
+        "b_wallet": b_wallet,
+        "b_pos": b_pos,
+        "b_closed": b_closed,
+        "a_summary": a_summary,
+        "tot_eq": tot_eq,
+        "b_eq": b_eq,
+        "a_eq": a_eq,
+        "cum_real": cum_real,
+        "unreal_pnl": unreal_pnl,
+        "variations": variations,
+        "compass_metrics": compass_metrics,
+        "setup_readiness": setup_readiness
+    }
+
+def _build_dashboard_payload_sync(tf: str):
+    """Costruisce istantaneamente il payload combinando lo stato live condiviso con lo storico del timeframe richiesto."""
+    global _SHARED_LIVE_STATE, _SHARED_LIVE_TIME
+    now_t = time.time()
+
+    # Se lo stato condiviso è scaduto o non esiste, rinfrescalo
+    if _SHARED_LIVE_STATE is None or (now_t - _SHARED_LIVE_TIME) >= _CACHE_TTL:
+        _SHARED_LIVE_STATE = _fetch_shared_live_state_sync()
+        _SHARED_LIVE_TIME = now_t
+
+    s = _SHARED_LIVE_STATE
+    # Interroga solo la query SQLite locale per il timeframe specifico (<2ms)
+    history = perf_tracker.get_timeframe_history(tf)
+
+    return {
         "status": "online",
         "timestamp": datetime.now(ZoneInfo("Europe/Rome")).isoformat(),
         "timeframe": tf,
-        "compass": compass_metrics,
-        "setup_readiness": setup_readiness,
+        "compass": s["compass_metrics"],
+        "setup_readiness": s["setup_readiness"],
         "bybit": {
-            "wallet": b_wallet,
-            "positions": b_pos,
-            "closed": b_closed
+            "wallet": s["b_wallet"],
+            "positions": s["b_pos"],
+            "closed": s["b_closed"]
         },
         "alpaca": {
-            "account": a_summary.get("account", {}),
-            "positions": a_summary.get("positions", [])
+            "account": s["a_summary"].get("account", {}),
+            "positions": s["a_summary"].get("positions", [])
         },
         "perf_history": history,
-        "variations": variations
+        "variations": s["variations"]
     }
 
 async def handle_dashboard_api(request):
-    """Restituisce il payload JSON iper-reattivo in <10ms via thread pool asincrono e cache intelligente."""
-    global _CACHE_STORE, _LAST_CACHE_TIME
+    """Restituisce il payload JSON iper-reattivo in <5ms via thread pool asincrono e cache intelligente multi-timeframe."""
+    global _CACHE_STORE
     tf = request.query.get("tf", "3s")
     now_t = time.time()
 
-    # Se abbiamo un payload recente in cache con lo stesso timeframe, restituiscilo ISTANTANEAMENTE
+    # Se abbiamo già in cache esattamente questo timeframe < 3.5s fa, restituiscilo SUBITO
     if tf in _CACHE_STORE and (now_t - _CACHE_STORE[tf]["cached_at"]) < _CACHE_TTL:
         return web.json_response(_CACHE_STORE[tf]["data"])
 
     try:
-        # Offload in thread separato per evitare qualsiasi lag dell'event loop
-        data = await asyncio.to_thread(_fetch_all_live_data_sync, tf)
+        data = await asyncio.to_thread(_build_dashboard_payload_sync, tf)
         _CACHE_STORE[tf] = {
             "data": data,
             "cached_at": now_t
         }
         return web.json_response(data)
     except Exception as e:
-        # Se c'è errore ma abbiamo una cache precedente, rispondi con quella (Zero Downtime / Zero Schermata Bianca)
         if tf in _CACHE_STORE:
             return web.json_response(_CACHE_STORE[tf]["data"])
         return web.json_response({"error": str(e), "status": "recovering"}, status=200)
