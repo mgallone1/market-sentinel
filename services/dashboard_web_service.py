@@ -1459,7 +1459,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 
         // GESTIONE TEMA LIGHT / DARK CON LOCALSTORAGE
         function initTheme() {
-            const savedTheme = localStorage.getItem('sentinel_theme') || 'light';
+            const savedTheme = localStorage.getItem('sentinel_theme') || 'dark';
             document.documentElement.setAttribute('data-theme', savedTheme);
             updateThemeButtonText(savedTheme);
         }
@@ -1865,6 +1865,15 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             const history = data.perf_history || [];
             const variations = data.variations || {};
             const compass = data.compass || {};
+
+            // Aggiorna Hero Delta Display (Apple Stocks style)
+            const heroDeltaEl = document.getElementById('hero-delta-display');
+            if (heroDeltaEl && variations['1d']) {
+                const d1d = variations['1d'];
+                const pSign = d1d.delta_pct >= 0 ? '+' : '';
+                heroDeltaEl.innerText = `${pSign}${d1d.delta_pct.toFixed(2)}% oggi`;
+                heroDeltaEl.className = d1d.delta_pct >= 0 ? 'val-up' : 'val-down';
+            }
 
             // 1. Trading Compass & Edge Score (RENDERIZZAZIONE IMMEDIATA E PROTETTA)
             try {
