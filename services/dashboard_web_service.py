@@ -127,17 +127,23 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         html, body {
             background: var(--bg-canvas);
             color: var(--text-primary);
-            font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Helvetica Neue", sans-serif;
+            font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Inter", -apple-system-subheadline, "Helvetica Neue", Arial, sans-serif;
             -webkit-font-smoothing: antialiased;
             -moz-osx-font-smoothing: grayscale;
             padding-bottom: calc(76px + env(safe-area-inset-bottom, 20px));
             overscroll-behavior-y: none;
             user-select: none;
             -webkit-user-select: none;
+            letter-spacing: -0.015em;
         }
 
+        /* TIPOGRAFIA APPLE HIG: TABULAR NUMBERS CON SAN FRANCISCO (ZERO FONT TERMINALE VINTAGE) */
         .mono {
-            font-family: "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
+            font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Inter", "Helvetica Neue", Arial, sans-serif !important;
+            font-variant-numeric: tabular-nums lining-nums;
+            -webkit-font-feature-settings: "tnum" 1, "lnum" 1;
+            font-feature-settings: "tnum" 1, "lnum" 1;
+            letter-spacing: -0.02em;
         }
 
         /* APP CONTAINER WITH MAX WIDTH DESKTOP CENTERED */
@@ -1895,7 +1901,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                                     boxWidth: 8,
                                     boxHeight: 8,
                                     color: tickColor,
-                                    font: { family: 'SF Mono, monospace', size: 10 }
+                                    font: { family: '-apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif', size: 10 }
                                 }
                             },
                             tooltip: {
@@ -1925,14 +1931,14 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                         scales: {
                             x: {
                                 grid: { color: gridColor },
-                                ticks: { color: tickColor, font: { family: 'SF Mono, monospace', size: 9 }, maxTicksLimit: 6 }
+                                ticks: { color: tickColor, font: { family: '-apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif', size: 9 }, maxTicksLimit: 6 }
                             },
                             y: {
                                 position: 'left',
                                 grid: { color: gridColor },
                                 ticks: {
                                     color: lineColor,
-                                    font: { family: 'SF Mono, monospace', size: 9 },
+                                    font: { family: '-apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif', size: 9 },
                                     callback: function(val) {
                                         if (chartMode === 'pct') {
                                             return (val >= 0 ? '+' : '') + val.toFixed(2) + '%';
@@ -1946,7 +1952,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                                 grid: { drawOnChartArea: false },
                                 ticks: {
                                     color: pnlColor,
-                                    font: { family: 'SF Mono, monospace', size: 9 },
+                                    font: { family: '-apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif', size: 9 },
                                     callback: function(val) {
                                         if (chartMode === 'pct') {
                                             return (val >= 0 ? '+' : '') + val.toFixed(2) + '%';
@@ -2773,11 +2779,11 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                     },
                     scales: {
                         x: {
-                            ticks: { maxTicksLimit: 7, font: { family: 'ui-monospace, monospace', size: 9 }, color: '#94a3b8' },
+                            ticks: { maxTicksLimit: 7, font: { family: '-apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif', size: 9 }, color: '#94a3b8' },
                             grid: { display: false }
                         },
                         y: {
-                            ticks: { font: { family: 'ui-monospace, monospace', size: 9 }, color: '#94a3b8' },
+                            ticks: { font: { family: '-apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif', size: 9 }, color: '#94a3b8' },
                             grid: { color: 'rgba(148, 163, 184, 0.1)' }
                         }
                     }
