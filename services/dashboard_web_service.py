@@ -968,30 +968,6 @@ DASHBOARD_HTML = """<!DOCTYPE html>
              TAB 1: BYBIT FUTURES & QUANTITATIVE COMPASS (ACTIVE DEFAULT)
              ==================================================================== -->
         <div id="view-bybit">
-            
-            <!-- Account Inset Group -->
-            <div class="section-header-apple">Saldi Bybit Unified</div>
-            <div class="apple-group-card mono">
-                <div class="apple-cell" data-tip="Capitale sul conto unificato Bybit inclusi depositi spot BTC/ETH">
-                    <div class="cell-leading">
-                        <span class="cell-title">Bybit UTA Equity</span>
-                        <span class="cell-subtitle">Futures + Margine Spot</span>
-                    </div>
-                    <div class="cell-trailing">
-                        <span class="cell-value" id="bybit-equity">$0.00</span>
-                    </div>
-                </div>
-                <div class="apple-cell" data-tip="Liquidità libera in dollari USDT immediatamente utilizzabile per nuovi ordini">
-                    <div class="cell-leading">
-                        <span class="cell-title">Disponibile (Cash)</span>
-                        <span class="cell-subtitle">Margine Libero USDT</span>
-                    </div>
-                    <div class="cell-trailing">
-                        <span class="cell-value" id="bybit-cash" style="color: var(--apple-blue);">$0.00</span>
-                    </div>
-                </div>
-            </div>
-
             <!-- Active Positions Section -->
             <div class="section-header-apple">
                 <span>Posizioni Attive (Futures 24/7)</span>
@@ -1065,49 +1041,9 @@ DASHBOARD_HTML = """<!DOCTYPE html>
              TAB 2: ALPACA EQUITIES (WALL STREET)
              ==================================================================== -->
         <div id="view-alpaca" class="hidden">
-            <div class="section-header-apple">Portafoglio Wall Street (NYSE / NASDAQ)</div>
-            <div class="apple-group-card mono">
-                <div class="apple-cell" data-tip="Valore di mercato totale dei titoli azionari e fondi detenuti su Alpaca Wall Street">
-                    <div class="cell-leading">
-                        <span class="cell-title">Alpaca Portfolio Value</span>
-                        <span class="cell-subtitle">Azioni USA (15:30 - 22:00 CET)</span>
-                    </div>
-                    <div class="cell-trailing">
-                        <span class="cell-value" id="alpaca-equity">$0.00</span>
-                    </div>
-                </div>
-                <div class="apple-cell" data-tip="Potere d'acquisto disponibile su Alpaca per nuove posizioni azionarie">
-                    <div class="cell-leading">
-                        <span class="cell-title">Buying Power</span>
-                        <span class="cell-subtitle">Liquidità &amp; Margine Alpaca</span>
-                    </div>
-                    <div class="cell-trailing">
-                        <span class="cell-value" id="alpaca-bp" style="color: var(--apple-blue);">$0.00</span>
-                    </div>
-                </div>
-            </div>
-
-            <div class="section-header-apple">Titoli e Posizioni Azionarie</div>
-            <div class="table-responsive-container mobile-hide-table">
-                <table class="clean-table mono">
-                    <thead>
-                        <tr>
-                            <th>Ticker</th>
-                            <th>Qty</th>
-                            <th>Ingresso</th>
-                            <th>Attuale</th>
-                            <th>Valore</th>
-                            <th>PnL</th>
-                        </tr>
-                    </thead>
-                    <tbody id="alpaca-tbody">
-                        <tr>
-                            <td colspan="6" style="text-align: center; padding: 20px 0; color: var(--text-dim);">
-                                Nessun titolo aperto. Wall Street chiusa nel weekend.
-                            </td>
-                        </tr>
-                    </tbody>
-                </table>
+            <div class="section-header-apple">
+                <span>Posizioni Azionarie Wall Street</span>
+                <span class="mono" style="font-size: 11px; color: var(--apple-amber);">NYSE / NASDAQ</span>
             </div>
             <div id="alpaca-cards-list" class="mobile-card-list mono"></div>
         </div>
@@ -1211,44 +1147,31 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 </div>
             </div>
 
-            <!-- Card 4: Saldo Conto Unificato Bybit (UTA) vs Credito Demo Iniziale -->
+            <!-- Card 4: Patrimonio Bybit UTA & Composizione Demo -->
             <div class="acc-cell" style="padding: 14px; text-align: left;">
                 <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
-                    <strong style="color: var(--text-main); font-size: 13px;">4. Patrimonio Bybit UTA e Composizione del Credito Demo</strong>
+                    <strong style="color: var(--text-main); font-size: 13px;">4. Patrimonio Bybit UTA &amp; Composizione Demo</strong>
                     <span class="badge mono" style="background: var(--blue); color: #fff; font-size: 9px; padding: 2px 6px; border-radius: 3px;">BYBIT UTA</span>
                 </div>
                 <div style="font-size: 11px; color: var(--text-muted); line-height: 1.45;">
-                    La card <strong>BYBIT UTA</strong> mostra il valore del conto Unificato:<br>
-                    <strong>• Cifra Principale (es. $162,260.09):</strong> È l'<strong>Equity Totale Consolidata</strong> (Total Equity), che somma a prezzi di mercato correnti tutti gli asset del conto (1 BTC spot ~ $60,700, 1 ETH spot ~ $1,710, 50,000 USDC e USDT).<br>
-                    <strong>• Disponibile (es. $49,764 USDT):</strong> È la liquidità cash in stablecoin USDT libera da vincoli di margine, utilizzabile per aprire nuovi contratti futures.<br>
-                    <strong>• Credito Demo Iniziale Assegnato da Bybit:</strong> All'attivazione del conto Demo UTA, Bybit accredita di default un pacchetto multi-asset composto da <strong>50,000 USDT</strong>, <strong>50,000 USDC</strong>, <strong>1 BTC</strong> e <strong>1 ETH</strong>. Le variazioni dell'equity totale riflettono sia le oscillazioni del valore di mercato di BTC/ETH sia i profitti e le perdite realizzati dal bot.<br>
-                    <strong>• Capitale Investito, PnL &amp; Resa % nello Storico:</strong> Nella tab <strong>Storico Trade</strong> viene indicata la colonna <strong>Investito ($)</strong> (notionale del trade aperto, circa $15,000 pari al 10% dell'equity), il <strong>PnL Netto</strong> monetario e la <strong>Resa %</strong> (percentuale netta di guadagno o perdita calcolata sul capitale investito nell'operazione). In alto è sempre visibile il <strong>Trade Medio</strong> (media matematica per singolo trade concluso).
+                    <strong>• Total Equity:</strong> Somma a prezzi di mercato correnti tutti gli asset del conto (1 BTC spot, 1 ETH spot, 50,000 USDC e USDT disponibili).<br>
+                    <strong>• Margine Libero USDT:</strong> Liquidità cash non impegnata in posizioni aperte, pronta per nuovi ordini derivati.<br>
+                    <strong>• Accreditamento Profitti:</strong> I guadagni delle posizioni chiuse incrementano direttamente il saldo USDT disponibile.<br>
+                    <strong>• Storico Trade:</strong> Riporta la colonna <strong>Investito ($)</strong> (~$15,000, 10% equity), <strong>PnL Netto</strong> e <strong>Resa %</strong> con <strong>Trade Medio</strong>.
                 </div>
             </div>
 
-            <!-- Card 5: Separazione dei Broker (Crypto vs Wall Street) -->
+            <!-- Card 5: Broker Separati & Grafici Indipendenti (Crypto vs Wall Street) -->
             <div class="acc-cell" style="padding: 14px; text-align: left;">
                 <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
-                    <strong style="color: var(--text-main); font-size: 13px;">5. Separazione dei Broker (Crypto vs Wall Street)</strong>
+                    <strong style="color: var(--text-main); font-size: 13px;">5. Broker Separati &amp; Grafici Indipendenti</strong>
+                    <span class="badge mono" style="background: var(--apple-blue); color: #fff; font-size: 9px; padding: 2px 6px; border-radius: 3px;">MULTI-ASSET</span>
                 </div>
                 <div style="font-size: 11px; color: var(--text-muted); line-height: 1.45;">
-                    <strong>• Bybit Futures (UTA):</strong> Opera 24/7 (weekend compreso) sui derivati crypto liquidi (BTC, ETH, SOL, LINK, AVAX, XRP).<br>
-                    <strong>• Alpaca Securities (USA):</strong> Opera esclusivamente sulle azioni di Wall Street (NYSE e NASDAQ) dal lunedì al venerdì (15:30 - 22:00 CET). Durante il weekend è giustamente fermo con posizioni chiuse e liquidità protetta in dollari cash.<br>
-                    <strong>• Grafici Separati:</strong> Cliccando sui pulsanti sopra il grafico puoi isolare il rendimento del solo broker crypto o delle sole azioni americane.
-                </div>
-            </div>
-
-            <!-- Card 6: Grafici Distinti & Timeframe Zoomabile -->
-            <div class="acc-cell" style="padding: 14px; text-align: left;">
-                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
-                    <strong style="color: var(--text-main); font-size: 13px;">6. Grafici Distinti per Broker &amp; Timeframe</strong>
-                    <span class="badge mono" style="background: var(--apple-blue); color: #fff; font-size: 9px; padding: 2px 6px; border-radius: 3px;">MULTI-CHART</span>
-                </div>
-                <div style="font-size: 11px; color: var(--text-muted); line-height: 1.45;">
-                    I mercati hanno grafici e identità visive completamente separate:<br>
-                    <strong>• Bybit Crypto (Blu Elettrico):</strong> Curva del capitale derivati crypto 24/7, linea del PnL chiuso e metriche di trading (Volume, Win Rate, Trade Medio).<br>
-                    <strong>• Alpaca Wall St (Oro / Ambra):</strong> Curva dedicata al portafoglio azionario USA ($98.6k), con focus su controvalore titoli e Buying Power cash.<br>
-                    <strong>• Consolidato (Viola / Purple):</strong> Andamento dell'equity globale combinata ($263k+).<br>
+                    Ogni mercato opera su orari e grafici dedicati con identità cromatiche distinte:<br>
+                    <strong>• Bybit Crypto (Blu Elettrico):</strong> Opera 24/7 (weekend compreso) sui futures liquidi (BTC, ETH, SOL, LINK, AVAX, XRP). Metriche sotto il grafico: Volume, PnL Chiuso, Win Rate e Trade Medio.<br>
+                    <strong>• Alpaca Wall St (Oro / Ambra):</strong> Opera dal lunedì al venerdì (15:30 - 22:00 CET) sulle azioni USA (NYSE/NASDAQ). Metriche dedicate: Valore Titoli, Buying Power Cash, Titoli Aperti e Stato Mercato.<br>
+                    <strong>• Consolidato (Viola):</strong> Panoramica globale combinata di entrambi i broker ($263k+).<br>
                     <strong>• Timeframe (3S, 1M, 1H, 1D, 1W, 1MO):</strong> Dal micro-tick in tempo reale fino all'orizzonte mensile.<br>
                     <strong>• Zoom su iPhone:</strong> Trascina per scorrere nel tempo, clicca <code>RESET ZOOM</code> per ripristinare.
                 </div>
@@ -1257,7 +1180,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             <!-- Card 7: Mini-Sparklines & Target R:R Progress -->
             <div class="acc-cell" style="padding: 14px; text-align: left;">
                 <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
-                    <strong style="color: var(--text-main); font-size: 13px;">7. Mini-Sparklines &amp; Barra Progresso R:R 1:3</strong>
+                    <strong style="color: var(--text-main); font-size: 13px;">6. Mini-Sparklines &amp; Barra Progresso R:R 1:3</strong>
                     <span class="badge mono" style="background: var(--blue); color: #fff; font-size: 9px; padding: 2px 6px; border-radius: 3px;">REAL-TIME</span>
                 </div>
                 <div style="font-size: 11px; color: var(--text-muted); line-height: 1.45;">
@@ -1271,7 +1194,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             <!-- Card 8: Notifiche Push Telegram Smart -->
             <div class="acc-cell" style="padding: 14px; text-align: left;">
                 <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
-                    <strong style="color: var(--text-main); font-size: 13px;">8. Notifiche Push Telegram Intelligenti (Zero Spam) &amp; Recap 22:00</strong>
+                    <strong style="color: var(--text-main); font-size: 13px;">7. Notifiche Push Telegram Intelligenti (Zero Spam) &amp; Recap 22:00</strong>
                     <span class="badge mono" style="background: var(--green); color: #fff; font-size: 9px; padding: 2px 6px; border-radius: 3px;">ALERT 24/7</span>
                 </div>
                 <div style="font-size: 11px; color: var(--text-muted); line-height: 1.45;">
@@ -1287,7 +1210,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             <!-- Card 9: Diagnostica Ciclica (Hurst/Migliorino), Onde di Elliott e Monte Carlo -->
             <div class="acc-cell" style="padding: 14px; text-align: left;">
                 <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
-                    <strong style="color: var(--text-main); font-size: 13px;">9. Analisi Ciclica, Onde di Elliott, Timeframe &amp; Previsione Monte Carlo</strong>
+                    <strong style="color: var(--text-main); font-size: 13px;">8. Analisi Ciclica, Onde di Elliott, Timeframe &amp; Previsione Monte Carlo</strong>
                     <span class="badge mono" style="background: var(--blue); color: #fff; font-size: 9px; padding: 2px 6px; border-radius: 3px;">QUANT PRO</span>
                 </div>
                 <div style="font-size: 11px; color: var(--text-muted); line-height: 1.45;">
@@ -2114,13 +2037,13 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             const totalEq = bEq + aEq;
 
             document.getElementById('total-equity').innerText = '$' + totalEq.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
-            document.getElementById('bybit-equity').innerText = '$' + bEq.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+            const beEl = document.getElementById('bybit-equity'); if (beEl) beEl.innerText = '$' + bEq.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
             
             const usdtCash = (bWallet.coins && bWallet.coins.USDT) ? bWallet.coins.USDT : (bWallet.available_balance || 0);
-            document.getElementById('bybit-cash').innerText = 'Disponibile: $' + usdtCash.toLocaleString('en-US', {maximumFractionDigits: 0}) + ' USDT';
+            const bcEl = document.getElementById('bybit-cash'); if (bcEl) bcEl.innerText = 'Disponibile: $' + usdtCash.toLocaleString('en-US', {maximumFractionDigits: 0}) + ' USDT';
 
-            document.getElementById('alpaca-equity').innerText = '$' + aEq.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
-            document.getElementById('alpaca-bp').innerText = 'BP: $' + parseFloat(aAcc.buying_power || 0).toLocaleString('en-US', {maximumFractionDigits: 0});
+            const aeEl = document.getElementById('alpaca-equity'); if (aeEl) aeEl.innerText = '$' + aEq.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+            const abEl = document.getElementById('alpaca-bp'); if (abEl) abEl.innerText = 'BP: $' + parseFloat(aAcc.buying_power || 0).toLocaleString('en-US', {maximumFractionDigits: 0});
 
             // Popola i due conti separati nell'Hero Card in cima
             const heroBVal = document.getElementById('hero-bybit-amount');
