@@ -790,7 +790,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 </div>
             </div>
             <div class="nav-trailing">
-                <button class="apple-nav-btn mono" onclick="toggleTheme()" id="theme-btn">☀️ LIGHT</button>
+                <button class="apple-nav-btn mono" onclick="toggleTheme()" id="theme-btn">LIGHT</button>
                 <button class="apple-nav-btn mono" onclick="fetchData()">
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
                     SYNC
@@ -845,8 +845,8 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 
             <!-- Segmented Control Modalità Grafico: Patrimonio vs PnL & Valuta vs Percentuale -->
             <div class="apple-segmented mono" style="margin-top: 10px; margin-bottom: 4px;">
-                <button class="apple-segment-item active" id="btn-view-wallet" onclick="setChartMetric('wallet')">💼 Patrimonio</button>
-                <button class="apple-segment-item" id="btn-view-pnl" onclick="setChartMetric('pnl')">🎯 PnL Operativo</button>
+                <button class="apple-segment-item active" id="btn-view-wallet" onclick="setChartMetric('wallet')">Patrimonio</button>
+                <button class="apple-segment-item" id="btn-view-pnl" onclick="setChartMetric('pnl')">PnL Operativo</button>
                 <button class="apple-segment-item active" id="btn-mode-usd" onclick="setChartMode('usd')">$ Dollari</button>
                 <button class="apple-segment-item" id="btn-mode-pct" onclick="setChartMode('pct')">% Percentuale</button>
             </div>
@@ -928,7 +928,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 
                 <div class="apple-cell" data-tip="Radar pre-trade: monitora l'avvicinamento al trigger d'ingresso tramite Macro Bias, Ciclica Hurst, RSI e Order Book OBI.">
                     <div class="cell-leading">
-                        <span class="cell-title">📡 Setup Readiness Radar</span>
+                        <span class="cell-title">Setup Readiness Radar</span>
                         <span class="cell-subtitle" id="readiness-desc-el">Accumulo in corso</span>
                         <div style="width: 140px; height: 4px; background: var(--surface-glass); border-radius: 2px; overflow: hidden; margin-top: 6px;">
                             <div id="readiness-bar-fill" style="width: 50%; height: 100%; background: var(--apple-blue); transition: width 0.3s ease;"></div>
@@ -1063,11 +1063,10 @@ DASHBOARD_HTML = """<!DOCTYPE html>
              TAB 4: GUIDA OPERATIVA & MANUALE DESK
              ==================================================================== -->
         <div id="view-guide" class="hidden">
-            <div class="section hidden" id="view-guide">
-        <div class="section-header">
-            <span class="section-title">📖 Guida Operativa &amp; Significato Indicatori</span>
-            <span class="mono" style="font-size: 10px; color: var(--text-dim);">MANUALE PRATICO</span>
-        </div>
+            <div class="section-header-apple">
+                <span>Guida Operativa &amp; Significato Indicatori</span>
+                <span class="mono" style="font-size: 10px; color: var(--text-tertiary);">MANUALE PRATICO</span>
+            </div>
         
         <div style="display: flex; flex-direction: column; gap: 14px;">
             
@@ -1098,7 +1097,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 </div>
                 <div style="display: flex; flex-direction: column; gap: 8px; font-size: 11px; line-height: 1.45;">
                     <div><strong>• Health &amp; Alignment Score (0-100):</strong> Misura la salute dei <em>trade già aperti a mercato</em> (convergenza di win rate, profit factor, posizioni a break-even e PnL fluttuante). A mercato flat rimane giustamente sul benchmark neutro di 50.</div>
-                    <div><strong>• 📡 Setup Readiness Radar (0-100) (Attivo a Mercato Flat):</strong> Monitora in tempo reale quanto il mercato è vicino ad attivare un nuovo ordine di trading anche se non ci sono posizioni aperte. Si compone di 4 pilastri da 25 punti: <strong>Macro Bias (4H+1H)</strong>, <strong>Ciclica Hurst/FLD</strong>, <strong>Momentum RSI</strong> e <strong>Order Book OBI</strong>. Sopra 75 = trigger imminente; 55-74 = fase di maturazione/accumulo; sotto 55 = stand-by rigido.</div>
+                    <div><strong>• Setup Readiness Radar (0-100) (Attivo a Mercato Flat):</strong> Monitora in tempo reale quanto il mercato è vicino ad attivare un nuovo ordine di trading anche se non ci sono posizioni aperte. Si compone di 4 pilastri da 25 punti: <strong>Macro Bias (4H+1H)</strong>, <strong>Ciclica Hurst/FLD</strong>, <strong>Momentum RSI</strong> e <strong>Order Book OBI</strong>. Sopra 75 = trigger imminente; 55-74 = fase di maturazione/accumulo; sotto 55 = stand-by rigido.</div>
                     <div><strong>• Expected Value (EV):</strong> Il valore matematico atteso per ogni trade. Se positivo (es. <code>+$45</code>), ogni operazione genera mediamente 45 dollari di profitto nel tempo.</div>
                     <div><strong>• R:R Reale vs Target:</strong> Rapporto tra vincita media e perdita media. Con Take Profit +3.6% e Stop Loss -1.2%, il rapporto target è <strong>1:3.0</strong> (1 euro di rischio per 3 euro di potenziale utile).</div>
                     <div><strong>• Profit Factor:</strong> Rapporto tra tutti i profitti lordi e tutte le perdite lorde. Valori sopra 1.5 indicano un sistema statistico profittevole.</div>
@@ -1155,7 +1154,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 </div>
                 <div style="font-size: 11px; color: var(--text-muted); line-height: 1.45;">
                     <strong>• Timeframe (3S, 1M, 1H, 1D, 1W, 1MO):</strong> Permette di visualizzare sia il micro-tick in tempo reale che l'andamento a lungo termine fino a 30 giorni.<br>
-                    <strong>• Zoom su iPhone:</strong> Pizzica con due dita direttamente sul grafico per ingrandire o rimpicciolire qualsiasi candela. Clicca <code>🔍 RESET ZOOM</code> per tornare alla panoramica.<br>
+                    <strong>• Zoom su iPhone:</strong> Pizzica con due dita direttamente sul grafico per ingrandire o rimpicciolire qualsiasi candela. Clicca <code>RESET ZOOM</code> per tornare alla panoramica.<br>
                     <strong>• Tooltip al Tocco:</strong> Tocca con il dito qualsiasi punto o numero per leggere la guida contestuale immediata.
                 </div>
             </div>
@@ -1209,7 +1208,6 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             </div>
 
         </div>
-    </div>
         </div>
 
         <!-- ====================================================================
@@ -1480,7 +1478,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         function updateThemeButtonText(theme) {
             const btn = document.getElementById('theme-btn');
             if (btn) {
-                btn.innerText = theme === 'light' ? '🌙 DARK' : '☀️ LIGHT';
+                btn.innerText = theme === 'light' ? 'DARK' : 'LIGHT';
             }
         }
         initTheme();
@@ -1489,14 +1487,28 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             ['bybit', 'alpaca', 'history', 'guide'].forEach(t => {
                 const view = document.getElementById('view-' + t);
                 const btn = document.getElementById('tab-btn-' + t);
-                if (t === tabName) {
-                    view.classList.remove('hidden');
-                    btn.classList.add('active');
-                } else {
-                    view.classList.add('hidden');
-                    btn.classList.remove('active');
+                if (view) {
+                    if (t === tabName) {
+                        view.classList.remove('hidden');
+                        if (btn) btn.classList.add('active');
+                    } else {
+                        view.classList.add('hidden');
+                        if (btn) btn.classList.remove('active');
+                    }
                 }
             });
+
+            // Nella tab 'history' e 'guide' lasciamo solo la vista specifica pulita senza grafico o card sovrastanti
+            const heroCard = document.querySelector('.hero-equity-card');
+            const chartCard = document.querySelector('.apple-chart-card');
+            if (tabName === 'history' || tabName === 'guide') {
+                if (heroCard) heroCard.classList.add('hidden');
+                if (chartCard) chartCard.classList.add('hidden');
+            } else {
+                if (heroCard) heroCard.classList.remove('hidden');
+                if (chartCard) chartCard.classList.remove('hidden');
+            }
+
             // Separazione istanze: quando navigo su Bybit o Alpaca sincronizza il grafico corrispondente
             if (tabName === 'bybit') {
                 setChartInstance('bybit');
@@ -1648,18 +1660,20 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                     return parseFloat(avg.toFixed(3));
                 });
 
-                const gradient = ctx.createLinearGradient(0, 0, 0, 250);
+                const gradient = ctx.createLinearGradient(0, 0, 0, 240);
                 if (isDark) {
-                    gradient.addColorStop(0, 'rgba(59, 130, 246, 0.28)');
-                    gradient.addColorStop(1, 'rgba(59, 130, 246, 0.00)');
+                    gradient.addColorStop(0, 'rgba(10, 132, 255, 0.20)');
+                    gradient.addColorStop(0.8, 'rgba(10, 132, 255, 0.02)');
+                    gradient.addColorStop(1, 'rgba(10, 132, 255, 0.00)');
                 } else {
-                    gradient.addColorStop(0, 'rgba(37, 99, 235, 0.16)');
-                    gradient.addColorStop(1, 'rgba(37, 99, 235, 0.00)');
+                    gradient.addColorStop(0, 'rgba(0, 122, 255, 0.14)');
+                    gradient.addColorStop(0.8, 'rgba(0, 122, 255, 0.01)');
+                    gradient.addColorStop(1, 'rgba(0, 122, 255, 0.00)');
                 }
 
-                const lineColor = isDark ? '#38bdf8' : '#0284c7';
-                const smaColor = isDark ? '#fbbf24' : '#d97706';
-                const pnlColor = isDark ? '#4ade80' : '#16a34a';
+                const lineColor = isDark ? '#0A84FF' : '#007AFF';
+                const smaColor = isDark ? 'rgba(255, 214, 10, 0.70)' : 'rgba(255, 159, 10, 0.75)';
+                const pnlColor = isDark ? 'rgba(48, 209, 88, 0.85)' : 'rgba(52, 199, 89, 0.85)';
 
                 if (chartInstance) {
                     chartInstance.data.labels = labels;
