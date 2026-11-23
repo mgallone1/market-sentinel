@@ -1779,11 +1779,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 chartInstance.destroy();
                 chartInstance = null;
             }
-            if (embeddedForecastChartInstance) {
-                embeddedForecastChartInstance.destroy();
-                embeddedForecastChartInstance = null;
-                loadEmbeddedForecast(currentEmbeddedSymbol, currentEmbeddedTf);
-            }
+
             fetchData();
         }
 
@@ -2729,10 +2725,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 }
             }
 
-            // Inizializza previsione embedded se non ancora caricata
-            if (!embeddedForecastChartInstance) {
-                loadEmbeddedForecast(currentEmbeddedSymbol, currentEmbeddedTf);
-            }
+            // Previsioni caricate on-demand al tocco dell'asset
 
             // 7. History Table & Mobile Cards (Ordinamento Rigoroso: Più Recente in Alto)
             const sortedClosed = [...bClosed].sort((a, b) => parseInt(b.updatedTime || 0) - parseInt(a.updatedTime || 0));
