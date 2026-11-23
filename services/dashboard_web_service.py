@@ -369,7 +369,81 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             font-weight: 700;
         }
 
-        /* ==========================================================================
+        
+        /* APPLE NATIVE SEGMENTED CONTROL (SLIDING PILL & PHYSICAL DEPTH) */
+        .tf-pills-row {
+            display: flex;
+            background: rgba(118, 118, 128, 0.18);
+            border-radius: 9px;
+            padding: 2px;
+            gap: 2px;
+            margin-bottom: 12px;
+            position: relative;
+        }
+        [data-theme="light"] .tf-pills-row {
+            background: rgba(118, 118, 128, 0.12);
+        }
+        .tf-pill {
+            flex: 1;
+            padding: 5px 0;
+            background: transparent;
+            border: none;
+            border-radius: 7px;
+            color: var(--text-secondary);
+            font-size: 11px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+            text-align: center;
+        }
+        .tf-pill.active {
+            background: #636366;
+            color: #FFFFFF;
+            font-weight: 700;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+        }
+        [data-theme="light"] .tf-pill.active {
+            background: #FFFFFF;
+            color: #000000;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.15);
+        }
+
+        .apple-segmented {
+            display: flex;
+            background: rgba(118, 118, 128, 0.18);
+            border-radius: 9px;
+            padding: 2px;
+            gap: 2px;
+        }
+        [data-theme="light"] .apple-segmented {
+            background: rgba(118, 118, 128, 0.12);
+        }
+        .apple-segment-item {
+            flex: 1;
+            padding: 6px 4px;
+            background: transparent;
+            border: none;
+            border-radius: 7px;
+            color: var(--text-secondary);
+            font-size: 11px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+            text-align: center;
+        }
+        .apple-segment-item.active {
+            background: #636366;
+            color: #FFFFFF;
+            font-weight: 700;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+        }
+        [data-theme="light"] .apple-segment-item.active {
+            background: #FFFFFF;
+            color: #000000;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.15);
+        }
+
+/* ==========================================================================
            4. TIME RANGE PICKER PILLS (3S, 1M, 1H, 1D, 1W, 1M)
            ========================================================================== */
         .tf-pills-row {
@@ -760,6 +834,172 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             font-size: 11px;
         }
 
+        
+        /* ==========================================================================
+           APPLE HIG ULTRA: INSET CARDS, ASSET AVATARS, BOTTOM SHEET, SCRUBBING
+           ========================================================================== */
+        :root {
+            --apple-card-radius: 20px;
+            --apple-subtle-border: rgba(255, 255, 255, 0.08);
+            --apple-divider: rgba(255, 255, 255, 0.06);
+            --apple-glass-bg: rgba(26, 26, 28, 0.72);
+            --apple-haptic-active: scale(0.975);
+        }
+        [data-theme="light"] {
+            --apple-subtle-border: rgba(60, 60, 67, 0.12);
+            --apple-divider: rgba(60, 60, 67, 0.08);
+            --apple-glass-bg: rgba(255, 255, 255, 0.82);
+        }
+
+        /* Asset Avatar Badge in Apple Wallet Style */
+        .asset-avatar {
+            width: 38px;
+            height: 38px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 13px;
+            font-weight: 800;
+            color: #fff;
+            flex-shrink: 0;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+            letter-spacing: -0.5px;
+        }
+        .avatar-btc { background: linear-gradient(135deg, #F7931A 0%, #D87205 100%); }
+        .avatar-eth { background: linear-gradient(135deg, #627EEA 0%, #3B55B8 100%); }
+        .avatar-sol { background: linear-gradient(135deg, #14F195 0%, #9945FF 100%); }
+        .avatar-xrp { background: linear-gradient(135deg, #23292F 0%, #008CE7 100%); }
+        .avatar-link { background: linear-gradient(135deg, #375BD2 0%, #1A3E9C 100%); }
+        .avatar-avax { background: linear-gradient(135deg, #E84142 0%, #A81B1C 100%); }
+        .avatar-stock { background: linear-gradient(135deg, #0A84FF 0%, #0056B3 100%); }
+        .avatar-generic { background: linear-gradient(135deg, #3A3A3C 0%, #1C1C1E 100%); }
+
+        /* Wallet Row Inset */
+        .wallet-item {
+            padding: 12px 14px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            border-bottom: 0.5px solid var(--apple-divider);
+            cursor: pointer;
+            transition: background 0.15s ease, transform 0.1s ease;
+        }
+        .wallet-item:last-child {
+            border-bottom: none;
+        }
+        .wallet-item:active {
+            background: rgba(255, 255, 255, 0.05);
+            transform: var(--apple-haptic-active);
+        }
+        .wallet-item-content {
+            flex: 1;
+            min-width: 0;
+        }
+        .wallet-title-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 2px;
+        }
+        .wallet-symbol {
+            font-size: 15px;
+            font-weight: 700;
+            color: var(--text-primary);
+        }
+        .wallet-val {
+            font-size: 15px;
+            font-weight: 700;
+            text-align: right;
+        }
+        .wallet-sub-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+
+        /* Apple Stocks Style Scrubbing Info Callout */
+        .scrub-overlay {
+            position: absolute;
+            top: 6px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(28, 28, 30, 0.92);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 0.5px solid rgba(255, 255, 255, 0.18);
+            border-radius: 9999px;
+            padding: 4px 12px;
+            font-size: 11px;
+            font-weight: 600;
+            color: #fff;
+            display: none;
+            z-index: 20;
+            box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+            white-space: nowrap;
+            pointer-events: none;
+        }
+
+        /* Apple Bottom Sheet Modal */
+        .modal-overlay {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0, 0, 0, 0.65);
+            backdrop-filter: blur(20px) saturate(180%);
+            -webkit-backdrop-filter: blur(20px) saturate(180%);
+            z-index: 100000;
+            display: none;
+            align-items: flex-end;
+            justify-content: center;
+            padding: 0;
+            opacity: 0;
+            transition: opacity 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+        .modal-overlay.active {
+            display: flex;
+            opacity: 1;
+        }
+        .modal-card {
+            background: rgba(24, 24, 26, 0.94);
+            backdrop-filter: blur(35px) saturate(190%);
+            -webkit-backdrop-filter: blur(35px) saturate(190%);
+            border-top: 0.5px solid rgba(255, 255, 255, 0.15);
+            border-left: 0.5px solid rgba(255, 255, 255, 0.08);
+            border-right: 0.5px solid rgba(255, 255, 255, 0.08);
+            border-bottom: none;
+            border-radius: 28px 28px 0 0;
+            max-width: 640px;
+            width: 100%;
+            max-height: 88vh;
+            overflow-y: auto;
+            -webkit-overflow-scrolling: touch;
+            box-shadow: 0 -12px 40px rgba(0, 0, 0, 0.65);
+            padding: 10px 16px calc(24px + env(safe-area-inset-bottom, 20px)) 16px;
+            transform: translateY(100%);
+            transition: transform 0.32s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+        .modal-overlay.active .modal-card {
+            transform: translateY(0);
+        }
+        [data-theme="light"] .modal-card {
+            background: rgba(246, 246, 249, 0.95);
+            border-top: 0.5px solid rgba(0, 0, 0, 0.15);
+        }
+
+        /* Apple Sheet Grabber / Drag Handle */
+        .sheet-grabber {
+            width: 36px;
+            height: 5px;
+            border-radius: 2.5px;
+            background: rgba(255, 255, 255, 0.3);
+            margin: 0 auto 12px auto;
+        }
+        [data-theme="light"] .sheet-grabber {
+            background: rgba(0, 0, 0, 0.2);
+        }
+
         /* MODAL STYLES */
         .modal-overlay {
             position: fixed;
@@ -932,6 +1172,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 
             <!-- Canvas Chart.js -->
             <div class="chart-container-inner">
+                <div class="scrub-overlay" id="chart-scrub-badge"></div>
                 <canvas id="perfChart"></canvas>
             </div>
 
@@ -1268,6 +1509,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     <!-- MODAL POPUP ANALISI TRADE AVANZATA -->
     <div class="modal-overlay" id="trade-modal" onclick="closeTradeModal(event)">
         <div class="modal-card mono" onclick="event.stopPropagation()">
+            <div class="sheet-grabber"></div>
             <div class="modal-header">
                 <div class="modal-title-row">
                     <span id="modal-trade-sym" class="modal-title">BTCUSDT</span>
@@ -1621,6 +1863,74 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         setInterval(updateClock, 1000);
         updateClock();
 
+        
+        function getAssetAvatarHtml(symbol) {
+            const sym = (symbol || '').toUpperCase().replace('USDT', '').replace('USD', '');
+            let cls = 'avatar-generic';
+            if (sym === 'BTC') cls = 'avatar-btc';
+            else if (sym === 'ETH') cls = 'avatar-eth';
+            else if (sym === 'SOL') cls = 'avatar-sol';
+            else if (sym === 'XRP') cls = 'avatar-xrp';
+            else if (sym === 'LINK') cls = 'avatar-link';
+            else if (sym === 'AVAX') cls = 'avatar-avax';
+            else if (['AAPL', 'NVDA', 'MSFT', 'TSLA', 'AMZN', 'META', 'GOOGL', 'AMD', 'SPY'].includes(sym)) cls = 'avatar-stock';
+            
+            const shortName = sym.substring(0, 3);
+            return `<div class="asset-avatar ${cls}">${shortName}</div>`;
+        }
+
+        
+        // APPLE STOCKS INTERACTIVE SCRUBBING LISTENER
+        function setupChartScrubbing() {
+            const canvas = document.getElementById('perfChart');
+            const badge = document.getElementById('chart-scrub-badge');
+            const heroAmount = document.getElementById('total-equity');
+            if (!canvas || !badge || canvas.getAttribute('data-scrub-init')) return;
+            canvas.setAttribute('data-scrub-init', 'true');
+
+            let originalHeroText = '';
+
+            function handleMove(e) {
+                if (!chartInstance || !chartInstance.data || !chartInstance.data.datasets[0]) return;
+                const rect = canvas.getBoundingClientRect();
+                const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+                const x = clientX - rect.left;
+                if (x < 0 || x > rect.width) return;
+
+                const points = chartInstance.getElementsAtEventForMode(e, 'index', { intersect: false }, true);
+                if (points && points.length > 0) {
+                    const idx = points[0].index;
+                    const val = chartInstance.data.datasets[0].data[idx];
+                    const label = chartInstance.data.labels[idx];
+                    if (val !== undefined && val !== null) {
+                        badge.style.display = 'block';
+                        const sign = val >= 0 ? '+' : '';
+                        const formatted = (chartMode === 'pct') ? `${sign}${val.toFixed(2)}%` : `$${val.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+                        badge.innerText = `${label} • ${formatted}`;
+                        
+                        if (heroAmount && chartMetric === 'wallet' && chartMode === 'usd') {
+                            if (!originalHeroText) originalHeroText = heroAmount.innerText;
+                            heroAmount.innerText = `$${val.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+                        }
+                    }
+                }
+            }
+
+            function handleEnd() {
+                badge.style.display = 'none';
+                if (heroAmount && originalHeroText) {
+                    heroAmount.innerText = originalHeroText;
+                    originalHeroText = '';
+                }
+            }
+
+            canvas.addEventListener('mousemove', handleMove);
+            canvas.addEventListener('mouseleave', handleEnd);
+            canvas.addEventListener('touchmove', handleMove, { passive: true });
+            canvas.addEventListener('touchend', handleEnd);
+            canvas.addEventListener('touchcancel', handleEnd);
+        }
+
         function initChart(snapshots) {
             try {
                 if (typeof Chart === 'undefined') return;
@@ -1629,7 +1939,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 const ctx = canvas.getContext('2d');
 
                 const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
-                const gridColor = isDark ? 'rgba(35, 49, 80, 0.4)' : 'rgba(226, 232, 240, 0.7)';
+                const gridColor = isDark ? 'rgba(255, 255, 255, 0.04)' : 'rgba(0, 0, 0, 0.04)';
                 const tickColor = isDark ? '#94a3b8' : '#64748b';
 
                 const labels = snapshots.map(s => {
@@ -1815,6 +2125,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                     return;
                 }
 
+                setTimeout(setupChartScrubbing, 50);
                 chartInstance = new Chart(ctx, {
                     type: 'line',
                     data: {
@@ -2262,7 +2573,8 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             if (bPositions.length === 0) {
                 listEl.innerHTML = `<div style="padding: 24px 0; text-align: center; color: var(--text-dim);" class="mono">Nessuna posizione aperta. Monitoraggio breakout in corso.</div>`;
             } else {
-                listEl.innerHTML = bPositions.map((p, idx) => {
+                listEl.innerHTML = '<div class="apple-group-card">' + bPositions.map((p, idx) => {
+
                     const isLong = p.side === 'BUY';
                     const sideClass = isLong ? 'trade-side-long' : 'trade-side-short';
                     const sideText = isLong ? 'LONG' : 'SHORT';
@@ -2291,52 +2603,40 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                     // Canvas ID per mini-candlestick / sparkline
                     const sparkId = `sparkline-pos-${idx}`;
 
+                    
+                    const avatar = getAssetAvatarHtml(p.symbol);
                     return `
-                        <div class="trade-row mono" onclick="openTradeModal('${p.symbol}', '${sideText}', ${entry}, ${mark})" style="cursor: pointer;" title="Tocca per visualizzare la diagnostica ciclica (Hurst/Migliorino), Elliott e Monte Carlo">
-                            <div class="trade-row-top">
-                                <div class="trade-left">
-                                    <div class="trade-symbol-row">
-                                        <span class="trade-symbol">${p.symbol}</span>
-                                        <span class="${sideClass}">${sideText}</span>
+                        <div class="wallet-item" onclick="openTradeModal('${p.symbol}', '${sideText}', ${entry}, ${mark})" title="Tocca per visualizzare la diagnostica ciclica (Hurst/Migliorino), Elliott e Monte Carlo">
+                            ${avatar}
+                            <div class="wallet-item-content">
+                                <div class="wallet-title-row">
+                                    <div style="display: flex; align-items: center; gap: 6px;">
+                                        <span class="wallet-symbol">${p.symbol}</span>
+                                        <span class="${sideClass}" style="font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 4px;">${sideText}</span>
+                                        ${guardHtml}
                                     </div>
-                                    <div class="trade-detail">
-                                        In: $${entry.toFixed(4)} &rarr; Mark: $${mark.toFixed(4)}
-                                    </div>
-                                    <div class="trade-detail" style="color: var(--text-dim);">
-                                        Size: ${p.size} ($${(p.position_value || 0).toLocaleString('en-US', {maximumFractionDigits: 0})})
+                                    <div style="text-align: right;">
+                                        <div class="trade-pnl ${pnlClass} wallet-val">${pSign}$${p.unrealized_pnl.toFixed(2)}</div>
+                                        <div style="font-size: 11px; font-weight: 600;" class="${pnlClass}">${pSign}${p.pnl_pct.toFixed(2)}%</div>
                                     </div>
                                 </div>
-                                <div class="trade-right">
-                                    <div class="trade-pnl ${pnlClass}" data-tip-pos="right" data-tip="PnL non realizzato fluttuante in dollari sulla posizione aperta">
-                                        ${pSign}$${p.unrealized_pnl.toFixed(2)}
-                                    </div>
-                                    <div style="font-size: 11px;" class="${pnlClass}" data-tip-pos="right" data-tip="Rendimento percentuale netto calcolato sul capitale investito (10% equity)">
-                                        ${pSign}${p.pnl_pct.toFixed(2)}%
-                                    </div>
-                                    ${guardHtml}
+                                <div class="wallet-sub-row" style="margin-top: 4px;">
+                                    <span>In $${entry.toFixed(4)} &rarr; Mark $${mark.toFixed(4)}</span>
+                                    <span>Size: ${p.size} ($${(p.position_value || 0).toLocaleString('en-US', {maximumFractionDigits: 0})})</span>
                                 </div>
-                            </div>
-
-                            <!-- Mini Sparkline Candlestick & Target R:R Progress -->
-                            <div class="trade-chart-box">
-                                <canvas id="${sparkId}" class="trade-sparkline-canvas" width="110" height="30"></canvas>
-                                <div class="trade-target-levels">
-                                    <div class="target-level-row">
-                                        <span style="color: var(--text-dim);">TP (+3.6%): <b style="color: var(--green);">$${tp.toFixed(4)}</b></span>
-                                        <span style="color: var(--text-dim);">SL (-1.2%): <b style="color: var(--red);">$${sl.toFixed(4)}</b></span>
-                                    </div>
-                                    <div class="target-bar-bg" data-tip-pos="bottom" data-tip="Avanzamento grafico verso il Take Profit istituzionale (R:R 1:3). Scala dinamica verde/ambra">
-                                        <div class="target-bar-fill" style="width: ${tpProgress.toFixed(0)}%; background: ${progressColor};"></div>
-                                    </div>
-                                    <div class="target-level-row" style="color: var(--text-dim); font-size: 9px;">
-                                        <span>Distanza TP: ${(3.60 - pctGain).toFixed(2)}%</span>
-                                        <span>Progresso: ${tpProgress.toFixed(0)}%</span>
-                                    </div>
+                                <!-- Barra di Progresso TP Sottile Integrata sul Fondo -->
+                                <div style="display: flex; align-items: center; justify-content: space-between; margin-top: 8px; font-size: 10px; color: var(--text-tertiary);">
+                                    <span>TP: <b style="color: var(--green);">$${tp.toFixed(4)}</b> (+3.6%)</span>
+                                    <span>SL: <b style="color: var(--red);">$${sl.toFixed(4)}</b> (-1.2%)</span>
+                                </div>
+                                <div class="trade-target-progress-bar" style="height: 3px; border-radius: 1.5px; background: rgba(255,255,255,0.08); margin-top: 4px;">
+                                    <div class="trade-target-fill" style="width: ${tpProgress.toFixed(0)}%; background: ${progressColor};"></div>
                                 </div>
                             </div>
                         </div>
                     `;
-                }).join('');
+
+}).join('') + '</div>';
 
                 // Renderizza le mini-sparkline su ciascun canvas
                 bPositions.forEach((p, idx) => {
@@ -2400,25 +2700,32 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                     }).join('');
                 }
                 if (aCards) {
-                    aCards.innerHTML = aPositions.map(ap => {
+                    aCards.innerHTML = '<div class="apple-group-card">' + aPositions.map(ap => {
                         const u = parseFloat(ap.unrealized_pl || 0);
                         const uClass = u >= 0 ? 'val-up' : 'val-down';
                         const uSign = u >= 0 ? '+' : '';
+
+                        const avatar = getAssetAvatarHtml(ap.symbol);
                         return `
-                            <div class="mobile-trade-card">
-                                <div class="mobile-trade-card-header">
-                                    <strong style="color: var(--apple-amber); font-size: 13px; cursor: pointer;" onclick="openTradeModal('${ap.symbol}', 'LONG', ${parseFloat(ap.avg_entry_price || 0)}, ${parseFloat(ap.current_price || 0)})">${ap.symbol} ↗</strong>
-                                    <span class="${uClass}" style="font-weight: 700; font-size: 13px;">${uSign}$${u.toFixed(2)}</span>
-                                </div>
-                                <div class="mobile-trade-card-grid">
-                                    <div><span style="color: var(--text-muted);">Qty:</span> <b>${ap.qty}</b></div>
-                                    <div><span style="color: var(--text-muted);">Valore:</span> <b>$${parseFloat(ap.market_value || 0).toFixed(2)}</b></div>
-                                    <div><span style="color: var(--text-muted);">In:</span> $${parseFloat(ap.avg_entry_price || 0).toFixed(2)}</div>
-                                    <div><span style="color: var(--text-muted);">Attuale:</span> $${parseFloat(ap.current_price || 0).toFixed(2)}</div>
+                            <div class="wallet-item" onclick="openTradeModal('${ap.symbol}', 'LONG', ${parseFloat(ap.avg_entry_price || 0)}, ${parseFloat(ap.current_price || 0)})">
+                                ${avatar}
+                                <div class="wallet-item-content">
+                                    <div class="wallet-title-row">
+                                        <div style="display: flex; align-items: center; gap: 6px;">
+                                            <span class="wallet-symbol">${ap.symbol}</span>
+                                            <span class="badge mono" style="background: rgba(255, 159, 10, 0.15); color: var(--apple-amber); font-size: 9px; padding: 1px 5px; border-radius: 4px;">USA</span>
+                                        </div>
+                                        <span class="${uClass} wallet-val">${uSign}$${u.toFixed(2)}</span>
+                                    </div>
+                                    <div class="wallet-sub-row">
+                                        <span>${ap.qty} azioni • In $${parseFloat(ap.avg_entry_price || 0).toFixed(2)}</span>
+                                        <span style="font-weight: 600; color: var(--text-primary);">$${parseFloat(ap.market_value || 0).toFixed(2)}</span>
+                                    </div>
                                 </div>
                             </div>
                         `;
-                    }).join('');
+
+                    }).join('') + '</div>';
                 }
             }
 
@@ -2469,7 +2776,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                     }).join('');
                 }
                 if (hCards) {
-                    hCards.innerHTML = rows.map(c => {
+                    hCards.innerHTML = '<div class="apple-group-card">' + rows.map(c => {
                         const pVal = parseFloat(c.closedPnl || 0);
                         const pClass = pVal >= 0 ? 'val-up' : 'val-down';
                         const pSign = pVal >= 0 ? '+' : '';
@@ -2485,28 +2792,35 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                         }
 
                         const fee = (parseFloat(c.openFee || 0) + parseFloat(c.closeFee || 0)).toFixed(2);
+                        const avatar = getAssetAvatarHtml(c.symbol);
+                        const sideBadge = c.side.toLowerCase() === 'buy' ? 
+                            '<span class="badge mono" style="font-size: 9px; padding: 1px 5px; background: var(--green-bg); color: var(--green); border-radius: 4px;">LONG</span>' : 
+                            '<span class="badge mono" style="font-size: 9px; padding: 1px 5px; background: var(--red-bg); color: var(--red); border-radius: 4px;">SHORT</span>';
 
                         return `
-                            <div class="mobile-trade-card">
-                                <div class="mobile-trade-card-header">
-                                    <div>
-                                        <strong style="color: var(--apple-blue); font-size: 13px; cursor: pointer;" onclick="openTradeModal('${c.symbol}', '${c.side.toUpperCase()}', ${parseFloat(c.avgEntryPrice || 0)}, ${parseFloat(c.avgExitPrice || 0)})">${c.symbol} ↗</strong>
-                                        <span class="badge mono" style="margin-left: 6px; font-size: 9px; padding: 1px 5px; background: ${c.side.toLowerCase() === 'buy' ? 'var(--green-bg)' : 'var(--red-bg)'}; color: ${c.side.toLowerCase() === 'buy' ? 'var(--green)' : 'var(--red)'};">${c.side.toUpperCase()}</span>
-                                        <span style="font-size: 10px; color: var(--text-dim); margin-left: 6px;">${timeStr}</span>
+                            <div class="wallet-item" onclick="openTradeModal('${c.symbol}', '${c.side.toUpperCase()}', ${parseFloat(c.avgEntryPrice || 0)}, ${parseFloat(c.avgExitPrice || 0)})">
+                                ${avatar}
+                                <div class="wallet-item-content">
+                                    <div class="wallet-title-row">
+                                        <div style="display: flex; align-items: center; gap: 6px;">
+                                            <span class="wallet-symbol">${c.symbol}</span>
+                                            ${sideBadge}
+                                            <span style="font-size: 11px; color: var(--text-secondary);">${timeStr}</span>
+                                        </div>
+                                        <div style="text-align: right;">
+                                            <div class="${pClass} wallet-val">${pSign}$${pVal.toFixed(2)}</div>
+                                            <div class="${pClass}" style="font-size: 11px; font-weight: 600;">${pctStr}</div>
+                                        </div>
                                     </div>
-                                    <div class="${pClass}" style="font-weight: 700; font-size: 13px; text-align: right;">
-                                        ${pSign}$${pVal.toFixed(2)}
-                                        <div style="font-size: 10px; font-weight: 600;">${pctStr}</div>
+                                    <div class="wallet-sub-row">
+                                        <span>$${parseFloat(c.avgEntryPrice || 0).toFixed(3)} &rarr; $${parseFloat(c.avgExitPrice || 0).toFixed(3)}</span>
+                                        <span>Investito: <b>${investedStr}</b> • Fee: $${fee}</span>
                                     </div>
-                                </div>
-                                <div class="mobile-trade-card-grid">
-                                    <div><span style="color: var(--text-muted);">Investito:</span> <b>${investedStr}</b></div>
-                                    <div><span style="color: var(--text-muted);">Fee:</span> <b>$${fee}</b></div>
-                                    <div style="grid-column: 1 / -1;"><span style="color: var(--text-muted);">Esecuzione:</span> $${parseFloat(c.avgEntryPrice || 0).toFixed(3)} &rarr; $${parseFloat(c.avgExitPrice || 0).toFixed(3)}</div>
                                 </div>
                             </div>
                         `;
-                    }).join('');
+
+                    }).join('') + '</div>';
                 }
             }
         }
