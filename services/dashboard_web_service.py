@@ -787,6 +787,47 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 Inizializzazione diagnostica probabilistica...
             </div>
 
+            <!-- SETUP READINESS RADAR (INDICATORE PRE-APERTURA A MERCATO FLAT) -->
+            <div style="margin-top: 10px; padding: 10px 12px; background: var(--surface-elevated); border: 1px solid var(--border); border-radius: 8px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                    <div style="display: flex; align-items: center; gap: 6px;" data-tip="Setup Readiness Radar (0-100): calcola in tempo reale la vicinanza matematica del mercato a un setup confluente A+ (Macro, Ciclica Hurst/Migliorino, Compressione RSI e Order Book OBI), attivo anche quando non ci sono trade aperti.">
+                        <span style="font-size: 10px; font-weight: 700; color: var(--text-muted); text-transform: uppercase;" class="mono">📡 Setup Readiness Radar (Pre-Trade)</span>
+                    </div>
+                    <div style="display: flex; align-items: baseline; gap: 4px;">
+                        <span class="mono" id="readiness-score-val" style="font-size: 16px; font-weight: 800; color: var(--amber);">--</span>
+                        <span class="mono" style="font-size: 10px; color: var(--text-dim);">/ 100</span>
+                        <span id="readiness-badge-el" class="badge mono" style="font-size: 9px; padding: 2px 6px; border-radius: 4px; margin-left: 6px; background: var(--amber-bg); color: var(--amber);">IN MATURAZIONE</span>
+                    </div>
+                </div>
+                <!-- Barra di Progresso Readiness -->
+                <div style="width: 100%; height: 6px; background: rgba(148, 163, 184, 0.2); border-radius: 3px; overflow: hidden; margin-bottom: 6px;">
+                    <div id="readiness-bar-fill" style="width: 50%; height: 100%; border-radius: 3px; background: var(--amber); transition: width 0.4s ease, background 0.3s ease;"></div>
+                </div>
+                <!-- Spiegazione Movimento Atteso e Dettaglio Pilastri -->
+                <div id="readiness-desc-el" style="font-size: 11px; color: var(--text-muted); line-height: 1.45; margin-bottom: 6px;">
+                    Analisi della confluenza pre-market in corso...
+                </div>
+                <!-- Grid Compatta dei 4 Pilastri -->
+                <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 4px; font-size: 10px;" class="mono">
+                    <div style="background: var(--surface); padding: 4px 6px; border-radius: 4px; border: 1px solid var(--border-subtle); display: flex; justify-content: space-between;">
+                        <span style="color: var(--text-dim);">Macro (4H+1H):</span>
+                        <strong id="readiness-p-macro" style="color: var(--text-main);">--/25</strong>
+                    </div>
+                    <div style="background: var(--surface); padding: 4px 6px; border-radius: 4px; border: 1px solid var(--border-subtle); display: flex; justify-content: space-between;">
+                        <span style="color: var(--text-dim);">Ciclica Hurst:</span>
+                        <strong id="readiness-p-cycle" style="color: var(--text-main);">--/25</strong>
+                    </div>
+                    <div style="background: var(--surface); padding: 4px 6px; border-radius: 4px; border: 1px solid var(--border-subtle); display: flex; justify-content: space-between;">
+                        <span style="color: var(--text-dim);">RSI Momentum:</span>
+                        <strong id="readiness-p-rsi" style="color: var(--text-main);">--/25</strong>
+                    </div>
+                    <div style="background: var(--surface); padding: 4px 6px; border-radius: 4px; border: 1px solid var(--border-subtle); display: flex; justify-content: space-between;">
+                        <span style="color: var(--text-dim);">Book OBI:</span>
+                        <strong id="readiness-p-book" style="color: var(--text-main);">--/25</strong>
+                    </div>
+                </div>
+            </div>
+
             <!-- 4 Metric Cards: Expected Value, Realized R:R, In-The-Money Ratio, Profit Factor -->
             <div class="diag-grid mono">
                 <div class="diag-cell">
@@ -1043,11 +1084,12 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             <!-- Card 2: Trading Compass & Metriche Quant -->
             <div class="acc-cell" style="padding: 14px; text-align: left;">
                 <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
-                    <strong style="color: var(--text-main); font-size: 13px;">2. Trading Compass (Diagnostica del Vantaggio)</strong>
-                    <span class="badge mono" style="background: var(--green); color: #fff; font-size: 9px; padding: 2px 6px; border-radius: 3px;">STATISTICA</span>
+                    <strong style="color: var(--text-main); font-size: 13px;">2. Trading Compass &amp; Setup Readiness Radar (Pre-Trade)</strong>
+                    <span class="badge mono" style="background: var(--green); color: #fff; font-size: 9px; padding: 2px 6px; border-radius: 3px;">STATISTICA &amp; RADAR</span>
                 </div>
                 <div style="display: flex; flex-direction: column; gap: 8px; font-size: 11px; line-height: 1.45;">
-                    <div><strong>• Health &amp; Alignment Score (0-100):</strong> Indice sintetico dello stato di salute del trading. Sopra 60 indica forte allineamento col trend; sotto 40 scatta la protezione conservativa.</div>
+                    <div><strong>• Health &amp; Alignment Score (0-100):</strong> Misura la salute dei <em>trade già aperti a mercato</em> (convergenza di win rate, profit factor, posizioni a break-even e PnL fluttuante). A mercato flat rimane giustamente sul benchmark neutro di 50.</div>
+                    <div><strong>• 📡 Setup Readiness Radar (0-100) (Attivo a Mercato Flat):</strong> Monitora in tempo reale quanto il mercato è vicino ad attivare un nuovo ordine di trading anche se non ci sono posizioni aperte. Si compone di 4 pilastri da 25 punti: <strong>Macro Bias (4H+1H)</strong>, <strong>Ciclica Hurst/FLD</strong>, <strong>Momentum RSI</strong> e <strong>Order Book OBI</strong>. Sopra 75 = trigger imminente; 55-74 = fase di maturazione/accumulo; sotto 55 = stand-by rigido.</div>
                     <div><strong>• Expected Value (EV):</strong> Il valore matematico atteso per ogni trade. Se positivo (es. <code>+$45</code>), ogni operazione genera mediamente 45 dollari di profitto nel tempo.</div>
                     <div><strong>• R:R Reale vs Target:</strong> Rapporto tra vincita media e perdita media. Con Take Profit +3.6% e Stop Loss -1.2%, il rapporto target è <strong>1:3.0</strong> (1 euro di rischio per 3 euro di potenziale utile).</div>
                     <div><strong>• Profit Factor:</strong> Rapporto tra tutti i profitti lordi e tutte le perdite lorde. Valori sopra 1.5 indicano un sistema statistico profittevole.</div>
@@ -1818,6 +1860,43 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 
                 const pfEl = document.getElementById('diag-pf-val');
                 if (pfEl) pfEl.innerText = (compass.profit_factor || 0).toFixed(2);
+
+                // Setup Readiness Radar UI
+                const readiness = data.setup_readiness || {};
+                const rScore = readiness.readiness_score || 50;
+                const rScoreEl = document.getElementById('readiness-score-val');
+                const rBadgeEl = document.getElementById('readiness-badge-el');
+                const rBarEl = document.getElementById('readiness-bar-fill');
+                const rDescEl = document.getElementById('readiness-desc-el');
+
+                if (rScoreEl) rScoreEl.innerText = rScore;
+                if (rBarEl) {
+                    rBarEl.style.width = rScore + '%';
+                    const barColor = rScore >= 75 ? 'var(--green)' : (rScore >= 55 ? 'var(--amber)' : 'var(--red)');
+                    rBarEl.style.background = barColor;
+                    if (rScoreEl) rScoreEl.style.color = barColor;
+                }
+
+                if (rBadgeEl) {
+                    rBadgeEl.innerText = readiness.readiness_verdict || 'STAND-BY';
+                    const cTheme = readiness.readiness_color || 'amber';
+                    rBadgeEl.className = `badge mono badge-${cTheme}`;
+                }
+
+                if (rDescEl) {
+                    rDescEl.innerHTML = `<strong>Movimento Atteso:</strong> ${readiness.expected_movement || 'Monitoraggio in corso.'}`;
+                }
+
+                const bk = readiness.breakdown || {};
+                const pMacro = document.getElementById('readiness-p-macro');
+                if (pMacro && bk.macro) pMacro.innerText = `${bk.macro.score}/25`;
+                const pCycle = document.getElementById('readiness-p-cycle');
+                if (pCycle && bk.cycle) pCycle.innerText = `${bk.cycle.score}/25`;
+                const pRsi = document.getElementById('readiness-p-rsi');
+                if (pRsi && bk.rsi) pRsi.innerText = `${bk.rsi.score}/25`;
+                const pBook = document.getElementById('readiness-p-book');
+                if (pBook && bk.book) pBook.innerText = `${bk.book.score}/25`;
+
             } catch (errCompass) {
                 console.error("Compass render error:", errCompass);
             }
@@ -2442,12 +2521,14 @@ def _fetch_all_live_data_sync(tf: str):
     history = perf_tracker.get_timeframe_history(tf)
     variations = perf_tracker.get_variations(tot_eq, cum_real, bybit_eq=b_eq, alpaca_eq=a_eq, current_unrealized_pnl=unreal_pnl)
     compass_metrics = trading_compass.compute_edge_metrics(b_closed, b_pos, tot_eq)
+    setup_readiness = trading_compass.compute_setup_readiness(_bybit_service)
 
     return {
         "status": "online",
         "timestamp": datetime.now(ZoneInfo("Europe/Rome")).isoformat(),
         "timeframe": tf,
         "compass": compass_metrics,
+        "setup_readiness": setup_readiness,
         "bybit": {
             "wallet": b_wallet,
             "positions": b_pos,
