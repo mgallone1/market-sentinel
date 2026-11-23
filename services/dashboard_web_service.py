@@ -1426,7 +1426,11 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 chartInstance.destroy();
                 chartInstance = null;
             }
-            fetchData();
+            if (window.lastDashboardData) {
+                renderUI(window.lastDashboardData);
+            } else {
+                fetchData();
+            }
         }
 
         function setChartMode(mode) {
@@ -1437,7 +1441,11 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 chartInstance.destroy();
                 chartInstance = null;
             }
-            fetchData();
+            if (window.lastDashboardData) {
+                renderUI(window.lastDashboardData);
+            } else {
+                fetchData();
+            }
         }
 
         function resetChartZoom() {
@@ -1485,7 +1493,11 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 chartInstance.destroy();
                 chartInstance = null;
             }
-            fetchData();
+            if (window.lastDashboardData) {
+                renderUI(window.lastDashboardData);
+            } else {
+                fetchData();
+            }
         }
 
         // GESTIONE TEMA LIGHT / DARK CON LOCALSTORAGE
@@ -1916,6 +1928,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 
                 if (!res.ok) throw new Error('HTTP ' + res.status);
                 const data = await res.json();
+                window.lastDashboardData = data;
                 renderUI(data);
                 consecutiveErrors = 0;
                 (document.querySelector('.nav-pulse-dot') || document.querySelector('.status-dot')).style.background = 'var(--green)';
