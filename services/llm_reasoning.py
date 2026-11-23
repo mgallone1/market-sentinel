@@ -1569,6 +1569,7 @@ DETTAGLI DELL'EVENTO:
 COMPITO DI REDAZIONE (SARTORIALE, AUTOREVOLE E IMMEDIATO):
 - INIZIA SUBITO CON UN TITOLO IMPATTANTE CON EMOJI ADEGUATA:
   • Se movimento portafoglio: '⚡ ALERT SENTINELLA PORTAFOGLIO: [NOME ASSET]'
+  • Se dichiarazione Trump o Flash Corporate/Squawk (es. Huang/Nvidia, Elon, CEO, dazi): '⚡ RADAR SENTINELLA: FLASH SQUAWK [TICKER/TRUMP]'
   • Se grande asset mondiale: '🌍 RADAR SENTINELLA MACRO: [NOME ASSET]'
   • Se shock geopolitico: '🚨 RADAR SENTINELLA: SHOCK GEOPOLITICO & MACRO'
 - CORPO DEL MESSAGGIO (2 o 3 paragrafi concisi, densi di dati e fatti, zero convenevoli):

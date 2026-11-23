@@ -3736,12 +3736,12 @@ async def post_init(application):
             id="daily_evening_recap_2200",
             replace_existing=True
         )
-        # Watchdog proattivo della Sentinella ogni 10 minuti (per massima reattività)
+        # Watchdog proattivo della Sentinella ad alta frequenza ogni 2 minuti (Flash Squawk sub-minuto & Fact-Checking)
         scheduler.add_job(
             sentinel_watchdog_job,
-            CronTrigger(minute="*/10", timezone="Europe/Rome"),
+            CronTrigger(minute="*/2", timezone="Europe/Rome"),
             args=[application],
-            id="sentinel_watchdog_10min",
+            id="sentinel_watchdog_2min",
             replace_existing=True
         )
         # Monitor Scalping e Risk Management Crypto 24/7 continuo (ogni 2 minuti)

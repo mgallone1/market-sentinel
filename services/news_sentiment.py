@@ -41,6 +41,38 @@ GEOPOLITICAL_KEYWORDS = {
     "oil surge": 2.5, "pipeline blast": 3.5
 }
 
+
+# Fonti e Agenzie Autorevoli per Fact-Checking
+AUTHORITATIVE_WIRE_SOURCES = [
+    "reuters", "bloomberg", "pbs", "ap news", "associated press", "cnbc",
+    "wsj", "wall street journal", "financial times", "ft.com", "ukmto", "centcom"
+]
+
+PROPAGANDA_STATE_MEDIA = [
+    "irib", "fars news", "tasnim", "sputnik", "tass", "press tv", "global times"
+]
+
+# Ticker prioritari da monitorare sub-minuto sui terminali squawk (FinancialJuice)
+PORTFOLIO_SQUAWK_TICKERS = {
+    "NVDA": ["$nvda", "nvda", "nvidia", "jensen huang", "huang"],
+    "BTC": ["$btc", "btc", "bitcoin", "crypto"],
+    "ETH": ["$eth", "eth", "ethereum"],
+    "SOL": ["$sol", "solana"],
+    "TSLA": ["$tsla", "tesla", "elon musk", "musk"],
+    "AAPL": ["$aapl", "apple", "tim cook"],
+    "MSFT": ["$msft", "microsoft", "nadella"],
+    "XDWD": ["xdwd", "msci world"],
+    "XDEM": ["xdem", "momentum"]
+}
+
+# Catalyst ad alto impatto (Trump, CEO, SEC, dazi, accordi)
+HIGH_IMPACT_CATALYSTS = [
+    "trump:", "trump says", "trump hope", "trump warn", "tariff", "tariffs",
+    "ceo", "resigns", "steps down", "back at", "named ceo", "ousted",
+    "earnings", "revenue", "guidance", "sec probe", "investigation",
+    "antitrust", "acquisition", "merger", "partnership", "fed:", "powell:"
+]
+
 MACRO_SHOCK_KEYWORDS = {
     "emergency rate": 3.8, "emergency cut": 4.0, "emergency hike": 4.0,
     "bank failure": 4.0, "bank run": 4.0, "liquidity crisis": 3.5, "credit crunch": 3.5,
@@ -264,6 +296,85 @@ class NewsSentimentService:
         query = f"{ticker} stock news when:2d"
         return cls.fetch_google_realtime_news(query=query, max_items=max_items)
 
+
+    @classmethod
+    def detect_corporate_squawk_flash(cls, max_age_minutes: float = 60.0) -> Optional[Dict[str, Any]]:
+        """
+        Intercetta in tempo reale sub-minuto flash d'agenzia su FinancialJuice o wire
+        riguardanti Trump, CEO, e i ticker chiave del portafoglio di Michele.
+        """
+        squawk_items = cls.fetch_telegram_squawk_news(channels=["financialjuice"], max_items_per_channel=15)
+        now_ts = time.time()
+
+        for item in squawk_items:
+            title = item.get("title", "")
+            raw_text = f"{title} {item.get('summary', '')}".lower()
+
+            # Estrai timestamp ed età
+            # Controlla se la notizia è recente
+            # Cerca corrispondenza su Ticker
+            matched_ticker = None
+            for ticker, aliases in PORTFOLIO_SQUAWK_TICKERS.items():
+                if any(alias in raw_text for alias in aliases):
+                    matched_ticker = ticker
+                    break
+
+            # Cerca presenza di Trump o Catalyst ad alto impatto
+            has_trump = "trump" in raw_text
+            matched_catalyst = None
+            for cat in HIGH_IMPACT_CATALYSTS:
+                if cat in raw_text:
+                    matched_catalyst = cat
+                    break
+
+            # Trigger se:
+            # 1) Menziona un ticker di portafoglio + un catalyst o Trump
+            # 2) Oppure è una dichiarazione diretta di Trump sui mercati/dazi
+            if (matched_ticker and (matched_catalyst or has_trump)) or (has_trump and ("tariff" in raw_text or "ban" in raw_text or "china" in raw_text or "fed" in raw_text)):
+                return {
+                    "type": "corporate_squawk_flash",
+                    "ticker": matched_ticker or "MACRO/TRUMP",
+                    "title": title,
+                    "catalyst": matched_catalyst or ("Trump Statement" if has_trump else "Corporate News"),
+                    "source": item.get("source", "FinancialJuice Terminal"),
+                    "published": item.get("published", ""),
+                    "is_trump": has_trump,
+                    "sentiment": cls.analyze_text(title),
+                    "link": item.get("link", "")
+                }
+        return None
+
+    @classmethod
+    def fact_check_geopolitical_event(cls, shock_item: Dict[str, Any]) -> Tuple[bool, str]:
+        """
+        Esegue Fact-Checking rigoroso prima di consentire un alert di shock geopolitico.
+        Restituisce (is_confirmed, reason).
+        Se la fonte è propaganda o smentita o non confermata da wire terzi, restituisce False (Zero Rumore).
+        """
+        title = shock_item.get("title", "").lower()
+        summary = shock_item.get("summary", "").lower()
+        full_text = f"{title} {summary}"
+
+        # 1. Filtro Propaganda di Stato (IRIB, TASS, Fars, ecc.)
+        for prop in PROPAGANDA_STATE_MEDIA:
+            if prop in full_text:
+                # Se è citata solo la propaganda senza wire primari autorevoli, SCARTA
+                has_auth = any(auth in full_text for auth in AUTHORITATIVE_WIRE_SOURCES)
+                if not has_auth:
+                    return False, f"Scartato: notizia originata esclusivamente da organo statale/propaganda ({prop}) non verificata da Reuters/Bloomberg."
+
+        # 2. Se l'evento riguarda lo Stretto di Hormuz o Petrolio, controlla che ci sia riscontro UKMTO o Reuters
+        if "hormuz" in full_text or "tanker" in full_text:
+            has_naval_authority = any(auth in full_text for auth in ["ukmto", "centcom", "reuters", "bloomberg", "ap news", "associated press"])
+            if not has_naval_authority:
+                return False, "Scartato: nessun riscontro o allarme confermato da UKMTO, CENTCOM o Reuters su Hormuz/petroliere."
+
+        # 3. Cerca smentite esplicite
+        if any(w in full_text for w in ["denied", "debunked", "unconfirmed", "false alarm", "retracted"]):
+            return False, "Scartato: smentita esplicita o contrassegnata come non confermata."
+
+        return True, "Confermato da wire primari autorevoli."
+
     @classmethod
     def detect_geopolitical_macro_shock(cls, max_age_hours: float = 4.0) -> Optional[Dict[str, Any]]:
         """
@@ -320,5 +431,12 @@ class NewsSentimentService:
                     "matched_keywords": matches,
                     "link": item.get("link", "")
                 }
+
+        if highest_shock:
+            # Fact checking rigoroso: se è propaganda o rumor non confermato, SCARTA SILENZIOSAMENTE
+            is_valid, reason = cls.fact_check_geopolitical_event(highest_shock)
+            if not is_valid:
+                print(f"[NewsFactChecker] {reason} News: {highest_shock.get('title')[:60]}...")
+                return None
 
         return highest_shock

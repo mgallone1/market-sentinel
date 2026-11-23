@@ -42,6 +42,7 @@ class ProactiveSentinelService:
 
         # Tracciamento alert geopolitici e macro shock
         self.last_geopolitical_title: Optional[str] = None
+        self.last_squawk_flash_title: Optional[str] = None
         self.last_geopolitical_ts: float = 0.0
         self.geopolitical_cooldown_seconds = 10800  # 3 ore
 
@@ -173,7 +174,38 @@ class ProactiveSentinelService:
             logger.warning(f"[Sentinel] Errore verifica Trump disclosures: {e_tr}")
 
         # ---------------------------------------------------------
-        # 2. VERIFICA SHOCK GEOPOLITICI & MACRO-SISTEMICI
+        # 1.5. FLASH SQUAWK AD ALTA FREQUENZA: TRUMP & TITOLI PRIORITARI (NVDA, TSLA, BTC)
+        # ---------------------------------------------------------
+        try:
+            squawk_flash = NewsSentimentService.detect_corporate_squawk_flash(max_age_minutes=60.0)
+            if squawk_flash and squawk_flash.get("title") != self.last_squawk_flash_title:
+                self.last_squawk_flash_title = squawk_flash.get("title")
+                
+                alert_text = self.llm_svc.generate_sentinel_alert(
+                    alert_type="corporate_squawk_flash",
+                    payload=squawk_flash,
+                    user_portfolio=user_portfolio,
+                    user_profile=user_profile,
+                    memory_context=memory_context
+                )
+                if not alert_text:
+                    ticker = squawk_flash.get("ticker", "MARKET")
+                    alert_text = (
+                        f"⚡ *RADAR SENTINELLA: FLASH SQUAWK ({ticker})*\n\n"
+                        f"• *Dichiarazione / Notizia:* {squawk_flash.get('title')}\n"
+                        f"• *Catalyst:* {squawk_flash.get('catalyst')} | Fonte: {squawk_flash.get('source')}\n"
+                        f"• *Impatto Portafoglio:* Rilevamento istantaneo su asset di riferimento."
+                    )
+                
+                await self._broadcast_alert(app, chat_ids, alert_text)
+                self.alerts_sent_today += 1
+                logger.info(f"[Sentinel] Flash squawk notificato: {squawk_flash.get('title')}")
+                return "squawk_flash_alert_dispatched"
+        except Exception as e_squawk:
+            logger.warning(f"[Sentinel] Errore verifica flash squawk: {e_squawk}")
+
+        # ---------------------------------------------------------
+        # 2. VERIFICA SHOCK GEOPOLITICI & MACRO-SISTEMICI (CON FACT-CHECKING)
         # ---------------------------------------------------------
         if (now_ts - self.last_geopolitical_ts) > self.geopolitical_cooldown_seconds:
             try:
