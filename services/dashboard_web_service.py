@@ -1058,16 +1058,15 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             <!-- Card 3: Regola Aurea Macro BTC Shield, Squeeze Funding & Alpha vs BTC -->
             <div class="acc-cell" style="padding: 14px; text-align: left;">
                 <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
-                    <strong style="color: var(--text-main); font-size: 13px;">3. Lo Scudo Macro (4H+1H), Funding Squeeze Shield &amp; Alpha BTC</strong>
+                    <strong style="color: var(--text-main); font-size: 13px;">3. Lo Scudo Macro Multi-Asset (Crypto Bybit &amp; Wall Street Alpaca)</strong>
                     <span class="badge mono" style="background: var(--amber); color: #fff; font-size: 9px; padding: 2px 6px; border-radius: 3px;">QUANT SUITE PRO</span>
                 </div>
                 <div style="font-size: 11px; color: var(--text-muted); line-height: 1.45;">
-                    Il sistema combina il trend strutturale a 4 Ore, la reattività a 1 Ora, i cicli di Hurst/Migliorino, il posizionamento dei derivati e la forza relativa:<br>
-                    <strong>• Trend Ribassista Pieno (4H &lt; EMA 50 E 1H &lt; EMA 50):</strong> Apertura esclusiva di posizioni <strong>SHORT</strong> sui breakout di debolezza.<br>
-                    <strong>• Trend Rialzista Pieno (4H &gt; EMA 50 E EMA 20 &gt;= EMA 50):</strong> Apertura esclusiva di posizioni <strong>LONG</strong> sui breakout di forza.<br>
-                    <strong>• Fase di Transizione / Rimbalzo (NEUTRAL):</strong> Quando il 4H è ancora sotto la media lenta ma il 1H ha recuperato forza, il mercato entra in regime <strong>NEUTRALE</strong>. L'operatività viene sbloccata subordinata alla <strong>Ciclica a 1H</strong> dell'asset (LONG in 1°/2° Tempo e Prezzo &gt; FLD; SHORT in 3°/4° Tempo).<br>
-                    <strong>• Squeeze Funding Shield (Derivati Bybit):</strong> Protezione anti-liquidazione. Vietati i LONG se il Funding Rate è surriscaldato (&gt; +0.035%, troppi rialzisti a leva); vietati gli SHORT se il Funding è iper-negativo (&lt; -0.030%, rischio short squeeze esplosivo).<br>
-                    <strong>• Ranking Alpha vs Bitcoin:</strong> In fase rialzista o neutra, il bot classifica e scansiona prioritariamente le altcoin che stanno sovraperformando Bitcoin (maggior forza relativa a 24h), evitando coin stagnanti.
+                    Il sistema combina il trend strutturale a 4 Ore/Daily, la reattività a 1 Ora, i cicli di Hurst/Migliorino, il posizionamento dei derivati e la forza relativa sia sulle Crypto che sull'Azionario:<br>
+                    <strong>• Crypto Macro Shield (BTC 4H + 1H):</strong> In regime Bearish (4H &lt; EMA 50 e 1H &lt; EMA 50) sono ammessi solo SHORT; in regime Bullish solo LONG. In regime NEUTRAL l'operatività viene sbloccata subordinata alla Ciclica a 1H (LONG in 1°/2° Tempo e Prezzo &gt; FLD; SHORT in 3°/4° Tempo).<br>
+                    <strong>• Wall Street Macro Shield (SPY Daily + 1H &amp; VIX):</strong> Sull'azionario USA (Alpaca) il bot monitora l'S&amp;P 500 (SPY ETF) e l'indice di volatilità VIX. Se SPY Daily e 1H sono ribassisti, i LONG azionari vengono bloccati preventivamente. Se il VIX supera quota 32, scatta il VIX Shield con sospensione prudenziale dei breakout per evitare false rotture in alta turbolenza.<br>
+                    <strong>• Alpha vs Benchmark (Alpha vs BTC &amp; Alpha vs SPY):</strong> Priorità assoluta agli asset che sovraperformano il mercato. Per le crypto si analizza l'Alpha a 24h rispetto a BTC; per l'azionario USA rispetto all'indice SPY.<br>
+                    <strong>• Squeeze &amp; Risk Shields:</strong> Sulle crypto monitora il Funding Rate Bybit (anti Long/Short Squeeze) e l'Order Book Imbalance (OBI). Su Wall Street opera con bracket ordini rigidi a R:R 1:3 calibrati su 1.4x ATR, Break-Even Safe a +0.80% e Trailing Profit Lock a +1.60%.
                 </div>
             </div>
 

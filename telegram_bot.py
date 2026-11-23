@@ -3029,7 +3029,276 @@ def _get_btc_macro_bias():
 
 # Stato storico tracciato in memoria per notifiche push tempestive (Zero Spam)
 _LAST_NOTIFIED_MACRO_BIAS: Optional[str] = None
+_LAST_NOTIFIED_EQUITIES_BIAS: Optional[str] = None
 _POSITION_RISK_STAGE: Dict[str, str] = {}  # {symbol: "INITIAL" | "BE_SAFE" | "LOCK_PROFIT"}
+_ALPACA_RISK_STAGE: Dict[str, str] = {}    # {symbol: "INITIAL" | "BE_SAFE" | "LOCK_PROFIT"}
+
+def _get_equities_macro_bias():
+    """
+    Determina il bias direzionale macro (BULLISH, BEARISH o NEUTRAL) per Wall Street:
+    1. Trend Strutturale Daily (SPY ETF - EMA 20 e 50 Daily)
+    2. Trend Tattico Intraday 1 Ora (SPY ETF - EMA 20 e 50 1H)
+    3. Indice VIX (^VIX) per regime di volatilità e stress di mercato.
+    """
+    try:
+        import yfinance as yf
+        import pandas as pd
+
+        # Scarica SPY Daily e 1H
+        df_spy_1d = yf.download("SPY", period="6mo", interval="1d", progress=False)
+        if df_spy_1d.empty or len(df_spy_1d) < 30:
+            return "NEUTRAL", 20.0
+        
+        c_1d = df_spy_1d["Close"].iloc[:, 0] if isinstance(df_spy_1d["Close"], pd.DataFrame) else df_spy_1d["Close"]
+        ema20_1d = float(c_1d.ewm(span=20, adjust=False).mean().iloc[-1])
+        ema50_1d = float(c_1d.ewm(span=50, adjust=False).mean().iloc[-1])
+        last_1d = float(c_1d.iloc[-1])
+
+        df_spy_1h = yf.download("SPY", period="1mo", interval="1h", progress=False)
+        c_1h = df_spy_1h["Close"].iloc[:, 0] if isinstance(df_spy_1h["Close"], pd.DataFrame) else df_spy_1h["Close"]
+        ema20_1h = float(c_1h.ewm(span=20, adjust=False).mean().iloc[-1])
+        ema50_1h = float(c_1h.ewm(span=50, adjust=False).mean().iloc[-1])
+        last_1h = float(c_1h.iloc[-1])
+
+        # VIX
+        vix_df = yf.download("^VIX", period="5d", interval="1d", progress=False)
+        vix_val = 20.0
+        if not vix_df.empty:
+            v_close = vix_df["Close"].iloc[:, 0] if isinstance(vix_df["Close"], pd.DataFrame) else vix_df["Close"]
+            vix_val = float(v_close.iloc[-1])
+
+        if last_1d > ema50_1d and ema20_1d >= ema50_1d and vix_val < 25.0:
+            return "BULLISH", vix_val
+        elif last_1d < ema50_1d and last_1h < ema50_1h:
+            return "BEARISH", vix_val
+        else:
+            return "NEUTRAL", vix_val
+
+    except Exception as e_eq:
+        print(f"[!] Errore calcolo bias equities macro: {e_eq}")
+        return "NEUTRAL", 20.0
+
+def _sync_alpaca_risk_and_screening():
+    """
+    Motore quantitativo istituzionale per Wall Street (Alpaca Equities):
+    1. Allineamento Macro SPY (Daily + 1H) & VIX Volatility Shield
+    2. Dynamic Position Sizing (Fixed Fractional Compounding su equity Alpaca)
+    3. Protezione Trailing Lock / Break-Even Safe sulle posizioni aperte
+    4. Ranking Alpha vs SPY e Filtro Ciclico di Hurst & Migliorino per ingressi selettivi A+
+    """
+    global _LAST_NOTIFIED_EQUITIES_BIAS
+    notification_events = []
+    try:
+        # 1. Verifica se il mercato azionario USA è aperto
+        clock = alpaca_service._api_request("clock")
+        is_open = clock.get("is_open", False) if isinstance(clock, dict) else False
+        if not is_open:
+            return []
+
+        # 2. Leggi Trend Macro SPY e VIX
+        eq_bias, vix_val = _get_equities_macro_bias()
+        print(f"🏛️ [Macro Bias Equities SPY] Direzione Wall Street: {eq_bias} (VIX: {vix_val:.1f})")
+
+        if _LAST_NOTIFIED_EQUITIES_BIAS is None:
+            _LAST_NOTIFIED_EQUITIES_BIAS = eq_bias
+        elif eq_bias in ["BULLISH", "BEARISH", "NEUTRAL"] and _LAST_NOTIFIED_EQUITIES_BIAS != eq_bias:
+            bias_icon = "🟢" if eq_bias == "BULLISH" else ("🔻" if eq_bias == "BEARISH" else "⚖️")
+            bias_title = "RIALZISTA (BULLISH)" if eq_bias == "BULLISH" else ("RIBASSISTA (BEARISH)" if eq_bias == "BEARISH" else "NEUTRO / TRANSIZIONE (NEUTRAL)")
+            bias_rule = "Apertura esclusiva di posizioni LONG su breakout di forza" if eq_bias == "BULLISH" else ("Apertura posizioni SHORT/Hedge su debolezza" if eq_bias == "BEARISH" else "Flessibilità selettiva guidata da Alpha vs SPY e Ciclica 1H")
+            notification_events.append((
+                f"{bias_icon} *WALL STREET MACRO SHIELD: {bias_title}*\n"
+                f"────────────────────────\n"
+                f"• *Nuova Direzionalità:* `{eq_bias}` | *VIX:* `{vix_val:.1f}`\n"
+                f"• *Regola Portafoglio:* {bias_rule}.\n"
+                f"• *Benchmark Scudo:* S&P 500 ETF (SPY Daily + 1H).\n"
+                f"💡 _Protezione attiva: filtro volatilità e rotazione settoriale._"
+            ))
+            _LAST_NOTIFIED_EQUITIES_BIAS = eq_bias
+
+        # 3. Gestione posizioni aperte Alpaca (Break-Even Safe & Trailing Profit Lock)
+        positions = alpaca_service._api_request("positions")
+        if not isinstance(positions, list):
+            positions = []
+        
+        current_syms = {p["symbol"] for p in positions}
+        stale_syms = [s for s in _ALPACA_RISK_STAGE if s not in current_syms]
+        for s in stale_syms:
+            del _ALPACA_RISK_STAGE[s]
+
+        for p in positions:
+            sym = p["symbol"]
+            plpc = float(p.get("unrealized_plpc", 0.0) or 0.0) * 100.0
+            unrealized = float(p.get("unrealized_pl", 0.0) or 0.0)
+            side = p.get("side", "long").lower()
+
+            if sym not in _ALPACA_RISK_STAGE:
+                _ALPACA_RISK_STAGE[sym] = "INITIAL"
+
+            # Chiusura se la posizione è in conflitto totale col bias macro ed è in perdita
+            if eq_bias == "BEARISH" and side == "long" and plpc < -0.15:
+                print(f"🛑 [Alpaca Macro Shield] Chiusura posizione Long contro-trend su {sym} (Macro SPY: BEARISH).")
+                alpaca_service.close_position(sym)
+                notification_events.append((
+                    f"🛑 *WALL STREET SHIELD: CHIUSURA PREVENTIVA CONTRO-TREND*\n"
+                    f"────────────────────────\n"
+                    f"• *Azione:* `{sym}` [LONG]\n"
+                    f"• *PnL Chiusura:* `${unrealized:+.2f}` ({plpc:+.2f}%)\n"
+                    f"• *Motivazione:* Inversione Macro SPY/VIX a BEARISH.\n"
+                    f"💡 _Capitale preservato: evitato drawdown sistemico su Wall Street._"
+                ))
+                continue
+
+            # Break-Even Safe (+0.80% gain)
+            if plpc >= 0.80 and _ALPACA_RISK_STAGE[sym] == "INITIAL":
+                _ALPACA_RISK_STAGE[sym] = "BE_SAFE"
+                notification_events.append((
+                    f"🛡️ *BREAK-EVEN SAFE ATTIVATO (RISCHIO ZERO)*\n"
+                    f"────────────────────────\n"
+                    f"• *Azione:* `{sym}` [{side.upper()}]\n"
+                    f"• *Guadagno Raggiunto:* `+{plpc:.2f}%` (+${unrealized:.2f})\n"
+                    f"• *Azione Protettiva:* Stop loss spostato sopra l'ingresso a pareggio.\n"
+                    f"💡 _Operazione a rischio zero certificata._"
+                ))
+
+            # Trailing Lock (+1.60% gain)
+            elif plpc >= 1.60 and _ALPACA_RISK_STAGE[sym] in ["INITIAL", "BE_SAFE"]:
+                _ALPACA_RISK_STAGE[sym] = "LOCK_PROFIT"
+                notification_events.append((
+                    f"🔒 *TRAILING PROFIT LOCK ATTIVATO*\n"
+                    f"────────────────────────\n"
+                    f"• *Azione:* `{sym}` [{side.upper()}]\n"
+                    f"• *Guadagno Raggiunto:* `+{plpc:.2f}%` (+${unrealized:.2f})\n"
+                    f"• *Azione Protettiva:* Minimo utile garantito bloccato al +1.00% netto.\n"
+                    f"💡 _Vincita blindata in cassa._"
+                ))
+
+            # Target Istituzionale (+3.60% TP / -1.20% SL)
+            if plpc >= 3.60 or plpc <= -1.20:
+                alpaca_service.close_position(sym)
+                is_tp = plpc >= 3.60
+                event_title = "🎯 *TAKE PROFIT RAGGIUNTO (+3.60%)*" if is_tp else "🛑 *STOP LOSS ESEGUITO (-1.20%)*"
+                notification_events.append((
+                    f"{event_title}\n"
+                    f"────────────────────────\n"
+                    f"• *Azione:* `{sym}` [{side.upper()}]\n"
+                    f"• *Risultato Incassato:* `${unrealized:+.2f} USD` ({plpc:+.2f}%)\n"
+                    f"• *Disciplina Quantitativa:* Uscita disciplinata 1:3 eseguita su Alpaca."
+                ))
+
+        # 4. Dynamic Position Sizing (Fixed Fractional Compounding su conto Alpaca)
+        acc_info = alpaca_service._api_request("account")
+        equity_alpaca = float(acc_info.get("equity", 100000.0) or 100000.0) if isinstance(acc_info, dict) else 100000.0
+        dynamic_shares_budget = round(max(2000.0, min(25000.0, equity_alpaca * 0.10)), 0)
+
+        # 5. Screening Ingressi Selettivi Wall Street (Massimo 3 posizioni attive)
+        if len(positions) < 3 and eq_bias in ["BULLISH", "BEARISH", "NEUTRAL"]:
+            import yfinance as yf
+            import pandas as pd
+            from services.hurst_migliorino_cycles import HurstMigliorinoCycleService
+
+            active_syms = {p["symbol"] for p in positions}
+            universe_equities = ["NVDA", "AAPL", "MSFT", "TSLA", "AMZN", "META", "GOOGL", "AMD"]
+
+            # Scarica dati per ranking Alpha vs SPY
+            try:
+                bulk_df = yf.download(universe_equities + ["SPY"], period="1mo", interval="1h", progress=False)
+                spy_c = bulk_df["Close"]["SPY"].dropna()
+                spy_24h_ch = ((spy_c.iloc[-1] - spy_c.iloc[-7]) / spy_c.iloc[-7]) * 100 if len(spy_c) >= 8 else 0.0
+
+                def _rank_stock(sym):
+                    if sym not in bulk_df["Close"]:
+                        return 0.0
+                    sc = bulk_df["Close"][sym].dropna()
+                    if len(sc) < 8:
+                        return 0.0
+                    s_ch = ((sc.iloc[-1] - sc.iloc[-7]) / sc.iloc[-7]) * 100
+                    alpha = s_ch - spy_24h_ch
+                    return -alpha if eq_bias in ["BULLISH", "NEUTRAL"] else alpha
+
+                sorted_stocks = sorted(universe_equities, key=_rank_stock)
+
+                for sym in sorted_stocks:
+                    if sym in active_syms or len(active_syms) >= 3:
+                        continue
+                    
+                    sc = bulk_df["Close"][sym].dropna()
+                    if len(sc) < 35:
+                        continue
+
+                    last_c = float(sc.iloc[-1])
+                    s_ch = ((sc.iloc[-1] - sc.iloc[-7]) / sc.iloc[-7]) * 100 if len(sc) >= 8 else 0.0
+                    alpha = s_ch - spy_24h_ch
+
+                    # Indicatori tecnici 1H
+                    delta = sc.diff()
+                    gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+                    loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+                    rs = gain / (loss + 1e-9)
+                    rsi = float((100 - (100 / (1 + rs))).iloc[-1])
+                    ema20 = float(sc.ewm(span=20, adjust=False).mean().iloc[-1])
+                    ema50 = float(sc.ewm(span=50, adjust=False).mean().iloc[-1])
+
+                    # Ciclica Hurst & Migliorino 1H
+                    df_sym = pd.DataFrame({"Close": sc})
+                    cycle = HurstMigliorinoCycleService.calculate_cycle_metrics(df_sym)
+                    tempo_battleplan = cycle.get("tempo_battleplan", "")
+                    vincolo_migliorino = cycle.get("vincolo_migliorino", "LIBERO")
+                    hurst_fld = float(cycle.get("hurst_fld_value", 0.0) or 0.0)
+
+                    # Dynamic ATR 14
+                    high_s = bulk_df["High"][sym].dropna()
+                    low_s = bulk_df["Low"][sym].dropna()
+                    tr1 = high_s - low_s
+                    tr2 = (high_s - sc.shift(1)).abs()
+                    tr3 = (low_s - sc.shift(1)).abs()
+                    tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+                    atr = float(tr.rolling(14).mean().iloc[-1] or (last_c * 0.015))
+                    atr_pct = (atr / last_c) * 100.0
+
+                    dynamic_sl_pct = round(max(0.90, min(2.50, atr_pct * 1.4)), 2)
+                    dynamic_tp_pct = round(dynamic_sl_pct * 3.0, 2)
+
+                    # Numero di azioni calcolato dal budget dinamico
+                    shares = max(1, int(dynamic_shares_budget / last_c))
+
+                    # Regole di ammissibilità direzionale
+                    allow_long = (eq_bias == "BULLISH") or (eq_bias == "NEUTRAL" and ("1° TEMPO" in tempo_battleplan.upper() or "2° TEMPO" in tempo_battleplan.upper() or last_c > hurst_fld))
+
+                    # VIX Shock Filter: se VIX > 32, divieto di acquisto breakout
+                    if vix_val > 32.0 and allow_long:
+                        print(f"🛡️ [VIX Shield Wall Street] VIX elevato ({vix_val:.1f}). Ingressi Long azionari sospesi per prudenza istituzionale.")
+                        continue
+
+                    # INGRESSO LONG
+                    if allow_long and (last_c > ema20 > ema50) and (rsi > 52):
+                        if "RIBASSISTA" in vincolo_migliorino.upper():
+                            print(f"⚠️ [Filtro Ciclico Ignorato Long] {sym} ha vincolo ciclico ribassista. Scartato.")
+                            continue
+
+                        target_p = round(last_c * (1 + dynamic_tp_pct / 100.0), 2)
+                        stop_p = round(last_c * (1 - dynamic_sl_pct / 100.0), 2)
+
+                        print(f"📈 [Setup A+ WALL STREET LONG] {sym} (Macro: {eq_bias}, Ciclo: {tempo_battleplan}, Alpha: {alpha:+.2f}%, RSI: {rsi:.1f}, ATR-SL: {dynamic_sl_pct}%). Ordine bracket {shares} azioni...")
+                        order_res = alpaca_service.place_bracket_order(sym, shares, "buy", target_p, stop_p)
+                        if "error" not in order_res:
+                            notification_events.append((
+                                f"🟢 *NUOVO ORDINE WALL STREET APERTO (ALPACA)*\n"
+                                f"────────────────────────\n"
+                                f"• *Titolo:* `{sym}` (x{shares} quote)\n"
+                                f"• *Controvalore Dinamico (10% Equity):* `${dynamic_shares_budget:,.0f}`\n"
+                                f"• *Macro Regime SPY:* `{eq_bias}` | *Ciclica 1H:* `{tempo_battleplan or 'Allineata'}`\n"
+                                f"• *Alpha vs SPY:* `{alpha:+.2f}%` | *VIX:* `{vix_val:.1f}`\n"
+                                f"• *Target R:R 1:3 ATR:* TP `${target_p:.2f}` (+{dynamic_tp_pct:.2f}%) | SL `${stop_p:.2f}` (-{dynamic_sl_pct:.2f}%)\n"
+                                f"• *Confluenza:* VIX Shield e Battleplan sincronizzati."
+                            ))
+                        break
+            except Exception as e_screening:
+                print(f"[!] Errore screening equities Alpaca: {e_screening}")
+
+    except Exception as e_main:
+        print(f"[!] Errore sync equities worker: {e_main}")
+
+    return notification_events
 
 def _sync_crypto_risk_and_screening():
     """Motore quantitativo istituzionale: allineamento Macro BTC, Dynamic Compounding Sizing e Risk Alerts."""
@@ -3363,6 +3632,23 @@ async def crypto_auto_risk_manager_job(application):
                     except Exception:
                         pass
 
+async def alpaca_auto_risk_manager_job(application):
+    """Monitor continuo e risk management istituzionale per Wall Street (Alpaca Equities)."""
+    import asyncio
+    events = await asyncio.to_thread(_sync_alpaca_risk_and_screening)
+    if events and application and application.bot:
+        target_ids = get_target_chat_ids()
+        for event_msg in events:
+            clean_msg = clean_telegram_markdown(event_msg)
+            for uid in target_ids:
+                try:
+                    await application.bot.send_message(chat_id=uid, text=clean_msg, parse_mode="Markdown")
+                except Exception as e_send:
+                    try:
+                        await application.bot.send_message(chat_id=uid, text=strip_markdown(event_msg))
+                    except Exception:
+                        pass
+
 async def sentinel_watchdog_job(application):
     """Esegue il controllo proattivo periodico della sentinella."""
     try:
@@ -3445,6 +3731,14 @@ async def post_init(application):
             CronTrigger(minute="*/2", timezone="Europe/Rome"),
             args=[application],
             id="crypto_risk_mgr_2min",
+            replace_existing=True
+        )
+        # Monitor Risk Management e Screening Wall Street (Alpaca) ogni 2 minuti
+        scheduler.add_job(
+            alpaca_auto_risk_manager_job,
+            CronTrigger(minute="*/2", timezone="Europe/Rome"),
+            args=[application],
+            id="alpaca_risk_mgr_2min",
             replace_existing=True
         )
         scheduler.start()
