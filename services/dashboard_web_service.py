@@ -1055,18 +1055,19 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 </div>
             </div>
 
-            <!-- Card 3: Regola Aurea Macro BTC Shield & Filtro Ciclico Hurst/Migliorino -->
+            <!-- Card 3: Regola Aurea Macro BTC Shield, Squeeze Funding & Alpha vs BTC -->
             <div class="acc-cell" style="padding: 14px; text-align: left;">
                 <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
-                    <strong style="color: var(--text-main); font-size: 13px;">3. Lo Scudo Macro Multi-Timeframe (4H + 1H) &amp; Filtro Ciclico</strong>
-                    <span class="badge mono" style="background: var(--amber); color: #fff; font-size: 9px; padding: 2px 6px; border-radius: 3px;">CICLICA + TREND</span>
+                    <strong style="color: var(--text-main); font-size: 13px;">3. Lo Scudo Macro (4H+1H), Funding Squeeze Shield &amp; Alpha BTC</strong>
+                    <span class="badge mono" style="background: var(--amber); color: #fff; font-size: 9px; padding: 2px 6px; border-radius: 3px;">QUANT SUITE PRO</span>
                 </div>
                 <div style="font-size: 11px; color: var(--text-muted); line-height: 1.45;">
-                    Il sistema combina il trend strutturale a 4 Ore, la reattività a 1 Ora e i cicli di Hurst e Migliorino per evitare sia perdite contro-trend che occasioni mancate:<br>
+                    Il sistema combina il trend strutturale a 4 Ore, la reattività a 1 Ora, i cicli di Hurst/Migliorino, il posizionamento dei derivati e la forza relativa:<br>
                     <strong>• Trend Ribassista Pieno (4H &lt; EMA 50 E 1H &lt; EMA 50):</strong> Apertura esclusiva di posizioni <strong>SHORT</strong> sui breakout di debolezza.<br>
                     <strong>• Trend Rialzista Pieno (4H &gt; EMA 50 E EMA 20 &gt;= EMA 50):</strong> Apertura esclusiva di posizioni <strong>LONG</strong> sui breakout di forza.<br>
-                    <strong>• Fase di Transizione / Rimbalzo (NEUTRAL):</strong> Quando il 4H è ancora sotto la media lenta ma il 1H ha recuperato forza (es. rimbalzo intraday di BTC ed altcoin), il mercato entra in regime <strong>NEUTRALE</strong>. In questo stato, il bot sblocca l'operatività flessibile subordinata alla <strong>Ciclica a 1H</strong> dell'asset specifico: ammette il LONG se il ciclo è all'inizio o in espansione (1° o 2° Tempo del Battleplan e Prezzo &gt; FLD di Hurst); ammette lo SHORT solo se il ciclo è in chiusura (3° o 4° Tempo).<br>
-                    <strong>• Risultato:</strong> Protezione assoluta dai crolli macro unita alla capacità di cogliere le ripartenze veloci delle altcoin senza attendere giorni che il 4H inverta.
+                    <strong>• Fase di Transizione / Rimbalzo (NEUTRAL):</strong> Quando il 4H è ancora sotto la media lenta ma il 1H ha recuperato forza, il mercato entra in regime <strong>NEUTRALE</strong>. L'operatività viene sbloccata subordinata alla <strong>Ciclica a 1H</strong> dell'asset (LONG in 1°/2° Tempo e Prezzo &gt; FLD; SHORT in 3°/4° Tempo).<br>
+                    <strong>• Squeeze Funding Shield (Derivati Bybit):</strong> Protezione anti-liquidazione. Vietati i LONG se il Funding Rate è surriscaldato (&gt; +0.035%, troppi rialzisti a leva); vietati gli SHORT se il Funding è iper-negativo (&lt; -0.030%, rischio short squeeze esplosivo).<br>
+                    <strong>• Ranking Alpha vs Bitcoin:</strong> In fase rialzista o neutra, il bot classifica e scansiona prioritariamente le altcoin che stanno sovraperformando Bitcoin (maggior forza relativa a 24h), evitando coin stagnanti.
                 </div>
             </div>
 

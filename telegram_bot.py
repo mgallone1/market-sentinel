@@ -3166,7 +3166,7 @@ def _sync_crypto_risk_and_screening():
         bybit_equity = float(wallet.get("total_equity", 160000.0) or 160000.0)
         dynamic_notional = round(max(3000.0, min(30000.0, bybit_equity * 0.10)), 0)
 
-        # Screening ingressi selettivi A+ (Massimo 3 posizioni, guidate dal Macro Bias e Filtro Ciclico)
+        # Screening ingressi selettivi A+ (Massimo 3 posizioni, guidate dal Macro Bias, Filtro Ciclico, Squeeze Funding e Alpha vs BTC)
         bybit_positions = bybit_service.get_open_positions()
         if len(bybit_positions) < 3 and macro_bias in ["BULLISH", "BEARISH", "NEUTRAL"]:
             active_bybit_syms = {bp["symbol"] for bp in bybit_positions}
@@ -3178,7 +3178,33 @@ def _sync_crypto_risk_and_screening():
                 ("AVAXUSDT", "AVAX-USD", "Avalanche"),
                 ("XRPUSDT", "XRP-USD", "Ripple")
             ]
-            for b_sym, b_yf, b_name in bybit_candidates:
+
+            # 1. Recupera Tickers Bybit per estrarre Funding Rate e Variazione 24h (Alpha vs BTC)
+            ticker_data_map = {}
+            btc_24h_change = 0.0
+            try:
+                t_res = bybit_service.session.get_tickers(category="linear")
+                t_list = t_res.get("result", {}).get("list", [])
+                for t_item in t_list:
+                    sym = t_item.get("symbol")
+                    ticker_data_map[sym] = {
+                        "funding_rate_pct": float(t_item.get("fundingRate", 0.0) or 0.0) * 100.0,
+                        "change_24h_pct": float(t_item.get("price24hPcnt", 0.0) or 0.0) * 100.0
+                    }
+                btc_24h_change = ticker_data_map.get("BTCUSDT", {}).get("change_24h_pct", 0.0)
+            except Exception as e_t:
+                print(f"[!] Warning recupero tickers funding/alpha: {e_t}")
+
+            # 2. Ordina i candidati in base alla Forza Relativa (Alpha vs BTC):
+            # Se siamo in ottica Long/Neutral, privilegia le coin con maggior Alpha (più forti di BTC); se Bearish, quelle più deboli
+            def _rank_candidate(cand):
+                c_sym = cand[0]
+                c_alpha = ticker_data_map.get(c_sym, {}).get("change_24h_pct", 0.0) - btc_24h_change
+                return -c_alpha if macro_bias in ["BULLISH", "NEUTRAL"] else c_alpha
+
+            sorted_candidates = sorted(bybit_candidates, key=_rank_candidate)
+
+            for b_sym, b_yf, b_name in sorted_candidates:
                 if b_sym in active_bybit_syms or len(active_bybit_syms) >= 3:
                     continue
                 try:
@@ -3206,6 +3232,11 @@ def _sync_crypto_risk_and_screening():
                     low = df['Low'].iloc[:, 0] if isinstance(df['Low'], pd.DataFrame) else df['Low']
                     or_high = float(high.iloc[-5:-1].max())
                     or_low = float(low.iloc[-5:-1].min())
+
+                    # Dati di Funding Rate & Alpha vs BTC
+                    c_info = ticker_data_map.get(b_sym, {})
+                    c_funding = c_info.get("funding_rate_pct", 0.0)
+                    c_alpha = c_info.get("change_24h_pct", 0.0) - btc_24h_change
 
                     # Calcolo ATR Dinamico (Average True Range a 14 periodi) per tarare Stop Loss e Take Profit
                     tr1 = high - low
@@ -3239,6 +3270,11 @@ def _sync_crypto_risk_and_screening():
 
                     # INGRESSO SHORT (Ammesso se consentito dal Macro Bias e dalla Ciclica)
                     if allow_short and (last_c < or_low) and (last_c < ema20 < ema50) and (rsi < 48) and (vol_ratio >= 1.10):
+                        # Filtro Squeeze Funding Rate: Evita di shortare asset con funding iper-negativo (rischio short squeeze violento)
+                        if c_funding < -0.030:
+                            print(f"🛡️ [Funding Shield Short] {b_sym} presenta Funding iper-negativo ({c_funding:+.4f}%). Rischio Short Squeeze, trade scartato.")
+                            continue
+
                         # Convalida Microstruttura del Book (Order Book Imbalance)
                         try:
                             obi = bybit_service.get_orderbook_imbalance(b_sym)
@@ -3253,7 +3289,7 @@ def _sync_crypto_risk_and_screening():
                             print(f"⚠️ [Filtro Ciclico Ignorato Short] {b_sym} in inizio ciclo/spinta rialzista ({tempo_battleplan}). Short evitato.")
                             continue
 
-                        print(f"📉 [Setup A+ SHORT Confluente] {b_sym} (Macro: {macro_bias}, Ciclo: {tempo_battleplan}, RSI: {rsi:.1f}, VolRatio: {vol_ratio:.2f}x, ATR-SL: {dynamic_sl_pct}%). Ordine dinamico ${dynamic_notional:,.0f}...")
+                        print(f"📉 [Setup A+ SHORT Confluente] {b_sym} (Macro: {macro_bias}, Ciclo: {tempo_battleplan}, Funding: {c_funding:+.4f}%, Alpha: {c_alpha:+.2f}%, RSI: {rsi:.1f}, VolRatio: {vol_ratio:.2f}x, ATR-SL: {dynamic_sl_pct}%). Ordine dinamico ${dynamic_notional:,.0f}...")
                         order_res = bybit_service.place_order(b_sym, side="Sell", notional_usd=dynamic_notional, take_profit_pct=dynamic_tp_pct, stop_loss_pct=dynamic_sl_pct)
                         if "error" not in order_res:
                             notification_events.append((
@@ -3262,13 +3298,19 @@ def _sync_crypto_risk_and_screening():
                                 f"• *Asset:* `{b_sym}` ({b_name})\n"
                                 f"• *Notionale Dinamico (10% Equity):* `${dynamic_notional:,.0f}`\n"
                                 f"• *Macro Regime:* `{macro_bias}` | *Ciclica 1H:* `{tempo_battleplan or 'Allineata'}`\n"
+                                f"• *Derivati & Alpha:* Funding `{c_funding:+.4f}%` | Alpha BTC `{c_alpha:+.2f}%`\n"
                                 f"• *Target R:R 1:3 ATR:* Take Profit +{dynamic_tp_pct:.2f}% | Stop Loss -{dynamic_sl_pct:.2f}%\n"
-                                f"• *Confluenza:* OBI Confermato, FLD Hurst e Battleplan sincronizzati."
+                                f"• *Confluenza:* OBI Confermato, FLD Hurst e Squeeze Shield attivi."
                             ))
                         break
 
                     # INGRESSO LONG (Ammesso se consentito dal Macro Bias e dalla Ciclica)
                     elif allow_long and (last_c > or_high) and (last_c > ema20 > ema50) and (rsi > 52) and (vol_ratio >= 1.10):
+                        # Filtro Squeeze Funding Rate: Evita di comprare asset con funding iper-positivo (rischio long squeeze/flush)
+                        if c_funding > 0.035:
+                            print(f"🛡️ [Funding Shield Long] {b_sym} presenta Funding iper-positivo ({c_funding:+.4f}%). Rischio Long Squeeze, trade scartato.")
+                            continue
+
                         # Convalida Microstruttura del Book (Order Book Imbalance)
                         try:
                             obi = bybit_service.get_orderbook_imbalance(b_sym)
@@ -3283,7 +3325,7 @@ def _sync_crypto_risk_and_screening():
                             print(f"⚠️ [Filtro Ciclico Ignorato Long] {b_sym} ha vincolo ciclico ribassista in corso. Trade scartato.")
                             continue
 
-                        print(f"📈 [Setup A+ LONG Confluente] {b_sym} (Macro: {macro_bias}, Ciclo: {tempo_battleplan}, RSI: {rsi:.1f}, VolRatio: {vol_ratio:.2f}x, ATR-SL: {dynamic_sl_pct}%). Ordine dinamico ${dynamic_notional:,.0f}...")
+                        print(f"📈 [Setup A+ LONG Confluente] {b_sym} (Macro: {macro_bias}, Ciclo: {tempo_battleplan}, Funding: {c_funding:+.4f}%, Alpha: {c_alpha:+.2f}%, RSI: {rsi:.1f}, VolRatio: {vol_ratio:.2f}x, ATR-SL: {dynamic_sl_pct}%). Ordine dinamico ${dynamic_notional:,.0f}...")
                         order_res = bybit_service.place_order(b_sym, side="Buy", notional_usd=dynamic_notional, take_profit_pct=dynamic_tp_pct, stop_loss_pct=dynamic_sl_pct)
                         if "error" not in order_res:
                             notification_events.append((
@@ -3292,8 +3334,9 @@ def _sync_crypto_risk_and_screening():
                                 f"• *Asset:* `{b_sym}` ({b_name})\n"
                                 f"• *Notionale Dinamico (10% Equity):* `${dynamic_notional:,.0f}`\n"
                                 f"• *Macro Regime:* `{macro_bias}` | *Ciclica 1H:* `{tempo_battleplan or 'Allineata'}`\n"
+                                f"• *Derivati & Alpha:* Funding `{c_funding:+.4f}%` | Alpha BTC `{c_alpha:+.2f}%`\n"
                                 f"• *Target R:R 1:3 ATR:* Take Profit +{dynamic_tp_pct:.2f}% | Stop Loss -{dynamic_sl_pct:.2f}%\n"
-                                f"• *Confluenza:* OBI Confermato, FLD Hurst e Battleplan sincronizzati."
+                                f"• *Confluenza:* OBI Confermato, FLD Hurst e Squeeze Shield attivi."
                             ))
                         break
                 except Exception as ex:
