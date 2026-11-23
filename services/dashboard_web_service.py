@@ -23,57 +23,98 @@ _bybit_service: BybitExecutionService = None
 _alpaca_service: AlpacaExecutionService = None
 
 DASHBOARD_HTML = """<!DOCTYPE html>
-<html lang="it" data-theme="light">
+<html lang="it" data-theme="dark">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>Sentinel &bull; Institutional Terminal</title>
     <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-status-bar-style" content="default">
-    <title>SENTINEL // DESK TRADING</title>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js" defer></script>
-    <script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8/hammer.min.js" defer></script>
-    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js" defer></script>
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="theme-color" content="#000000">
+
+    <!-- SF Pro System Fonts via CDN & Lucide Icons -->
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=SF+Pro+Display:wght@400;500;600;700;800&family=SF+Pro+Text:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap">
+
+    <!-- Chart.js + Zoom plugin -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
+
     <style>
-        /* TEMA LIGHT (PREDEFINITO, LUMINOSO E AD ALTA LEGGIBILITÀ) */
+        /* ==========================================================================
+           APPLE HUMAN INTERFACE GUIDELINES & GOLDEN RATIO (φ = 1.618) DESIGN SYSTEM
+           ========================================================================== */
         :root {
-            --bg: #f8fafc;
-            --surface: #ffffff;
-            --surface-elevated: #f1f5f9;
-            --border: #e2e8f0;
-            --border-subtle: #edf2f7;
-            --text-main: #0f172a;
-            --text-muted: #64748b;
-            --text-dim: #94a3b8;
-            --green: #15803d;
-            --green-bg: #dcfce7;
-            --red: #b91c1c;
-            --red-bg: #fee2e2;
-            --amber: #b45309;
-            --amber-bg: #fef3c7;
-            --blue: #2563eb;
-            --chart-grid: rgba(226, 232, 240, 0.8);
-            --chart-tick: #64748b;
+            --bg-canvas: #000000;
+            --bg-secondary: #0c0c0e;
+            --surface: rgba(28, 28, 30, 0.75);
+            --surface-elevated: rgba(44, 44, 46, 0.85);
+            --surface-card: rgba(30, 30, 32, 0.65);
+            --surface-glass: rgba(255, 255, 255, 0.05);
+            --border: rgba(255, 255, 255, 0.10);
+            --border-subtle: rgba(255, 255, 255, 0.06);
+            --border-focus: rgba(10, 132, 255, 0.5);
+
+            /* Apple System Color Palette */
+            --apple-blue: #0A84FF;
+            --apple-blue-rgb: 10, 132, 255;
+            --apple-green: #30D158;
+            --apple-green-bg: rgba(48, 209, 88, 0.15);
+            --apple-red: #FF453A;
+            --apple-red-bg: rgba(255, 69, 58, 0.15);
+            --apple-amber: #FF9F0A;
+            --apple-amber-bg: rgba(255, 159, 10, 0.15);
+            --apple-purple: #BF5AF2;
+
+            /* Standard variables for script compatibility */
+            --blue: var(--apple-blue);
+            --green: var(--apple-green);
+            --green-bg: var(--apple-green-bg);
+            --red: var(--apple-red);
+            --red-bg: var(--apple-red-bg);
+            --amber: var(--apple-amber);
+
+            /* Typography */
+            --text-primary: #FFFFFF;
+            --text-secondary: rgba(235, 235, 245, 0.68);
+            --text-tertiary: rgba(235, 235, 245, 0.40);
+            --text-main: var(--text-primary);
+            --text-muted: var(--text-secondary);
+            --text-dim: var(--text-tertiary);
+
+            /* Golden Ratio Radius & Spacing */
+            --radius-card: 16px;
+            --radius-pill: 9999px;
+            --radius-sm: 8px;
+            --radius-md: 12px;
+
+            /* Shadows & Blurs */
+            --apple-blur: blur(25px) saturate(190%);
+            --shadow-subtle: 0 4px 20px rgba(0, 0, 0, 0.25);
+            --shadow-float: 0 12px 36px rgba(0, 0, 0, 0.45);
         }
 
-        /* TEMA DARK (SLATE ISTITUZIONALE, NON NERO CIECO) */
-        [data-theme="dark"] {
-            --bg: #0b0f19;
-            --surface: #131b2e;
-            --surface-elevated: #1a243d;
-            --border: #233150;
-            --border-subtle: #19243c;
-            --text-main: #f8fafc;
-            --text-muted: #94a3b8;
-            --text-dim: #64748b;
-            --green: #22c55e;
-            --green-bg: rgba(34, 197, 94, 0.15);
-            --red: #ef4444;
-            --red-bg: rgba(239, 68, 68, 0.15);
-            --amber: #f59e0b;
-            --amber-bg: rgba(245, 158, 11, 0.15);
-            --blue: #3b82f6;
-            --chart-grid: rgba(35, 49, 80, 0.5);
-            --chart-tick: #94a3b8;
+        [data-theme="light"] {
+            --bg-canvas: #F2F2F7;
+            --bg-secondary: #E5E5EA;
+            --surface: rgba(255, 255, 255, 0.85);
+            --surface-elevated: rgba(255, 255, 255, 0.95);
+            --surface-card: rgba(255, 255, 255, 0.75);
+            --surface-glass: rgba(0, 0, 0, 0.03);
+            --border: rgba(60, 60, 67, 0.14);
+            --border-subtle: rgba(60, 60, 67, 0.08);
+            --border-focus: rgba(0, 122, 255, 0.4);
+
+            --apple-blue: #007AFF;
+            --apple-green: #34C759;
+            --apple-green-bg: rgba(52, 199, 89, 0.12);
+            --apple-red: #FF3B30;
+            --apple-red-bg: rgba(255, 59, 48, 0.12);
+            --apple-amber: #FF9500;
+            --apple-amber-bg: rgba(255, 149, 0, 0.12);
+
+            --text-primary: #000000;
+            --text-secondary: rgba(60, 60, 67, 0.65);
+            --text-tertiary: rgba(60, 60, 67, 0.35);
         }
 
         * {
@@ -82,690 +123,417 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             padding: 0;
             -webkit-tap-highlight-color: transparent;
         }
-        body {
-            background-color: var(--bg);
-            color: var(--text-main);
-            font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", Roboto, sans-serif;
-            font-size: 13px;
-            line-height: 1.4;
-            padding-top: env(safe-area-inset-top, 0px);
-            padding-bottom: calc(env(safe-area-inset-bottom, 20px) + 60px);
-            overflow-x: hidden;
-            transition: background-color 0.2s ease, color 0.2s ease;
-        }
-        .mono {
-            font-family: "SF Mono", Menlo, Monaco, Consolas, monospace;
-            font-feature-settings: "tnum" 1;
+
+        html, body {
+            background: var(--bg-canvas);
+            color: var(--text-primary);
+            font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Helvetica Neue", sans-serif;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+            padding-bottom: calc(76px + env(safe-area-inset-bottom, 20px));
+            overscroll-behavior-y: none;
+            user-select: none;
+            -webkit-user-select: none;
         }
 
-        /* Top Bar */
-        .topbar {
-            background: var(--surface);
-            border-bottom: 1px solid var(--border);
-            padding: 10px 16px;
+        .mono {
+            font-family: "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
+        }
+
+        /* APP CONTAINER WITH MAX WIDTH DESKTOP CENTERED */
+        .app-container {
+            max-width: 680px;
+            margin: 0 auto;
+            padding: 0 16px;
+        }
+
+        /* ==========================================================================
+           1. APPLE NAVIGATION BAR & HEADER
+           ========================================================================== */
+        .apple-nav {
+            position: sticky;
+            top: 0;
+            z-index: 1000;
+            background: rgba(0, 0, 0, 0.72);
+            backdrop-filter: var(--apple-blur);
+            -webkit-backdrop-filter: var(--apple-blur);
+            border-bottom: 0.5px solid var(--border);
+            padding: calc(env(safe-area-inset-top, 12px) + 6px) 16px 10px 16px;
+            transition: all 0.25s ease;
+        }
+        [data-theme="light"] .apple-nav {
+            background: rgba(242, 242, 247, 0.82);
+        }
+        .apple-nav-inner {
+            max-width: 680px;
+            margin: 0 auto;
             display: flex;
             align-items: center;
             justify-content: space-between;
-            position: sticky;
-            top: 0;
-            z-index: 50;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.03);
         }
-        .topbar-title {
-            font-weight: 700;
-            font-size: 14px;
-            color: var(--text-main);
+        .nav-leading {
             display: flex;
             align-items: center;
             gap: 8px;
         }
-        .status-dot {
+        .nav-pulse-dot {
             width: 8px;
             height: 8px;
             border-radius: 50%;
-            background: var(--green);
-            display: inline-block;
+            background: var(--apple-green);
+            box-shadow: 0 0 10px var(--apple-green);
+            animation: pulse-apple 2s infinite ease-in-out;
         }
-        .topbar-actions {
+        @keyframes pulse-apple {
+            0%, 100% { transform: scale(1); opacity: 1; }
+            50% { transform: scale(1.2); opacity: 0.7; }
+        }
+        .nav-title-group {
+            display: flex;
+            flex-direction: column;
+        }
+        .nav-title {
+            font-size: 17px;
+            font-weight: 700;
+            letter-spacing: -0.4px;
+        }
+        .nav-subtitle {
+            font-size: 11px;
+            color: var(--text-secondary);
+            font-weight: 500;
+        }
+        .nav-trailing {
             display: flex;
             align-items: center;
             gap: 8px;
         }
-        .theme-toggle-btn, .refresh-btn {
-            background: var(--surface-elevated);
-            border: 1px solid var(--border);
-            color: var(--text-main);
-            font-size: 11px;
+        .apple-nav-btn {
+            background: var(--surface-glass);
+            border: 0.5px solid var(--border);
+            border-radius: var(--radius-pill);
+            padding: 6px 12px;
+            font-size: 12px;
             font-weight: 600;
-            padding: 6px 10px;
-            border-radius: 6px;
+            color: var(--text-primary);
             cursor: pointer;
-            font-family: inherit;
             display: flex;
             align-items: center;
+            gap: 5px;
+            transition: background 0.15s ease, transform 0.1s ease;
+        }
+        .apple-nav-btn:active {
+            transform: scale(0.95);
+            background: rgba(255, 255, 255, 0.15);
+        }
+
+        /* ==========================================================================
+           2. TOTAL HERO PORTFOLIO VALUE (APPLE STOCKS STYLE)
+           ========================================================================== */
+        .hero-equity-card {
+            padding: 20px 4px 14px 4px;
+            display: flex;
+            flex-direction: column;
             gap: 4px;
-            touch-action: manipulation;
         }
-        .theme-toggle-btn:active, .refresh-btn:active {
-            opacity: 0.8;
-            transform: scale(0.97);
-        }
-
-        /* Section Container */
-        .section {
-            padding: 12px 16px;
-            border-bottom: 1px solid var(--border);
-        }
-        .section-header {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            margin-bottom: 8px;
-        }
-        .section-title {
-            font-size: 11px;
-            font-weight: 700;
-            color: var(--text-muted);
-            letter-spacing: 0.8px;
-            text-transform: uppercase;
-        }
-
-        /* DIRECTIONAL COMPASS BOX */
-        .compass-box {
-            background: var(--surface);
-            border: 1px solid var(--border);
-            border-radius: 8px;
-            padding: 12px 14px;
-            box-shadow: 0 1px 2px rgba(0,0,0,0.02);
-        }
-        .compass-top {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            border-bottom: 1px solid var(--border-subtle);
-            padding-bottom: 8px;
-        }
-        .compass-score-wrap {
-            display: flex;
-            align-items: baseline;
-            gap: 6px;
-        }
-        .compass-score {
-            font-size: 26px;
-            font-weight: 800;
-        }
-        .compass-badge {
-            font-size: 10px;
-            font-weight: 800;
-            padding: 4px 8px;
-            border-radius: 4px;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-        }
-        .badge-green { background: var(--green-bg); color: var(--green); border: 1px solid var(--green); }
-        .badge-amber { background: var(--amber-bg); color: var(--amber); border: 1px solid var(--amber); }
-        .badge-red { background: var(--red-bg); color: var(--red); border: 1px solid var(--red); }
-
-        .compass-desc {
-            font-size: 11px;
-            color: var(--text-muted);
-            margin-top: 8px;
-            line-height: 1.4;
-        }
-
-        /* 4-Cell Diagnostic Edge Grid */
-        .diag-grid {
-            display: grid;
-            grid-template-columns: repeat(2, 1fr);
-            gap: 6px;
-            margin-top: 10px;
-        }
-        @media (min-width: 640px) {
-            .diag-grid { grid-template-columns: repeat(4, 1fr); }
-        }
-        .diag-cell {
-            background: var(--surface-elevated);
-            border: 1px solid var(--border);
-            padding: 8px 10px;
-            border-radius: 6px;
-        }
-        .diag-label {
-            font-size: 9px;
-            color: var(--text-muted);
-            text-transform: uppercase;
+        .hero-equity-label {
+            font-size: 13px;
             font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.6px;
+            color: var(--text-secondary);
         }
-        .diag-val {
-            font-size: 14px;
-            font-weight: 700;
-            color: var(--text-main);
-            margin-top: 2px;
+        .hero-equity-amount {
+            font-size: 38px;
+            font-weight: 800;
+            letter-spacing: -0.8px;
+            line-height: 1.1;
         }
-        .diag-sub {
-            font-size: 9px;
-            color: var(--text-dim);
-            margin-top: 1px;
-        }
-
-        /* Account Summary Row */
-        .acc-grid {
-            display: grid;
-            grid-template-columns: repeat(2, 1fr);
+        .hero-delta-strip {
+            display: flex;
+            align-items: center;
             gap: 8px;
-        }
-        @media (min-width: 640px) {
-            .acc-grid { grid-template-columns: repeat(4, 1fr); }
-        }
-        .acc-cell {
-            background: var(--surface);
-            border: 1px solid var(--border);
-            padding: 10px 12px;
-            border-radius: 8px;
-            box-shadow: 0 1px 2px rgba(0,0,0,0.02);
-        }
-        .acc-label {
-            font-size: 10px;
-            color: var(--text-muted);
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            margin-bottom: 4px;
+            margin-top: 4px;
+            font-size: 14px;
             font-weight: 600;
         }
-        .acc-val {
-            font-size: 16px;
+        .hero-delta-badge {
+            padding: 3px 8px;
+            border-radius: 6px;
+            font-size: 12px;
             font-weight: 700;
-            color: var(--text-main);
-        }
-        .acc-sub {
-            font-size: 10px;
-            color: var(--text-dim);
-            margin-top: 2px;
         }
 
-        /* MULTI-TIMEFRAME VARIATION STRIP */
-        .tf-grid {
-            display: grid;
-            grid-template-columns: repeat(3, 1fr);
-            gap: 6px;
-            margin-top: 4px;
-        }
-        @media (min-width: 640px) {
-            .tf-grid { grid-template-columns: repeat(6, 1fr); }
-        }
-        .tf-card {
+        /* ==========================================================================
+           3. APPLE SEGMENTED CONTROL (TIMEFRAME & SUB-VIEWS)
+           ========================================================================== */
+        .apple-segmented {
             background: var(--surface);
-            border: 1px solid var(--border);
-            padding: 8px;
-            border-radius: 6px;
+            border: 0.5px solid var(--border);
+            border-radius: var(--radius-pill);
+            padding: 3px;
+            display: flex;
+            gap: 2px;
+            position: relative;
+            margin: 8px 0 16px 0;
+            backdrop-filter: var(--apple-blur);
+            -webkit-backdrop-filter: var(--apple-blur);
+        }
+        .apple-segment-item {
+            flex: 1;
+            padding: 7px 4px;
             text-align: center;
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            border: none;
+            background: none;
+            border-radius: var(--radius-pill);
+            cursor: pointer;
+            transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+            font-family: inherit;
+        }
+        .apple-segment-item.active {
+            background: var(--surface-elevated);
+            color: var(--text-primary);
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.28);
+            font-weight: 700;
+        }
+
+        /* ==========================================================================
+           4. TIME RANGE PICKER PILLS (3S, 1M, 1H, 1D, 1W, 1M)
+           ========================================================================== */
+        .tf-pills-row {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 12px;
+            gap: 6px;
+        }
+        .tf-pill {
+            flex: 1;
+            padding: 6px 0;
+            background: var(--surface-glass);
+            border: 0.5px solid var(--border);
+            border-radius: 8px;
+            color: var(--text-secondary);
+            font-size: 11px;
+            font-weight: 600;
             cursor: pointer;
             transition: all 0.15s ease;
         }
-        .tf-card.active {
-            border-color: var(--blue);
-            background: var(--surface-elevated);
-        }
-        .tf-header {
-            font-size: 10px;
+        .tf-pill.active {
+            background: var(--apple-blue);
+            color: #ffffff;
+            border-color: var(--apple-blue);
             font-weight: 700;
-            color: var(--text-muted);
-            text-transform: uppercase;
-        }
-        .tf-delta {
-            font-size: 13px;
-            font-weight: 700;
-            margin-top: 2px;
-        }
-        .tf-pct {
-            font-size: 10px;
-            font-weight: 600;
         }
 
-        /* Chart Controls & Container */
-        .chart-controls {
-            display: flex;
-            align-items: center;
-            gap: 4px;
-        }
-        .tf-btn {
-            background: var(--surface-elevated);
-            border: 1px solid var(--border);
-            color: var(--text-muted);
-            font-size: 10px;
-            font-weight: 700;
-            padding: 3px 8px;
-            border-radius: 4px;
-            cursor: pointer;
-            font-family: inherit;
-        }
-        .tf-btn.active {
-            background: var(--blue);
-            color: #fff;
-            border-color: var(--blue);
-        }
-        .chart-wrap {
-            height: 260px;
-            position: relative;
-            margin-top: 8px;
+        /* ==========================================================================
+           5. APPLE INTERACTIVE CHART CONTAINER
+           ========================================================================== */
+        .apple-chart-card {
             background: var(--surface);
-            border: 1px solid var(--border);
-            border-radius: 8px;
-            padding: 10px 12px;
-            box-shadow: inset 0 1px 2px rgba(0,0,0,0.02);
+            backdrop-filter: var(--apple-blur);
+            -webkit-backdrop-filter: var(--apple-blur);
+            border: 0.5px solid var(--border);
+            border-radius: var(--radius-card);
+            padding: 14px 12px 10px 12px;
+            margin-bottom: 18px;
+            box-shadow: var(--shadow-subtle);
         }
-        .chart-hud {
+        .chart-hud-apple {
             display: flex;
-            align-items: center;
             justify-content: space-between;
-            padding: 6px 12px;
-            background: var(--surface-elevated);
-            border: 1px solid var(--border);
-            border-radius: 6px;
-            margin-bottom: 8px;
-            font-size: 11px;
-        }
-        .chart-hud-stat {
-            display: flex;
             align-items: center;
-            gap: 6px;
-        }
-        .metrics-bar {
-            display: flex;
-            gap: 16px;
-            margin-top: 8px;
-            padding-top: 8px;
-            border-top: 1px solid var(--border-subtle);
-            font-size: 11px;
-        }
-        .metric-item span { color: var(--text-muted); margin-right: 4px; }
-        .metric-item strong { color: var(--text-main); }
-
-        /* Watchlist Row */
-        .trade-row {
-            background: var(--surface);
-            border: 1px solid var(--border);
-            border-radius: 8px;
-            padding: 12px 14px;
             margin-bottom: 10px;
+            font-size: 11px;
+            font-weight: 600;
+            color: var(--text-secondary);
+        }
+        .chart-hud-stat strong {
+            color: var(--text-primary);
+            font-size: 12px;
+        }
+        .chart-container-inner {
+            position: relative;
+            height: 220px;
+            width: 100%;
+            touch-action: pan-y !important;
+        }
+        #perfChart {
+            touch-action: pan-y !important;
+        }
+        .chart-quick-metrics {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 6px;
+            margin-top: 10px;
+            border-top: 0.5px solid var(--border-subtle);
+            padding-top: 10px;
+            text-align: center;
+        }
+        .quick-metric-cell {
             display: flex;
             flex-direction: column;
-            gap: 10px;
-            box-shadow: 0 1px 2px rgba(0,0,0,0.02);
+            gap: 2px;
         }
-        .trade-row-top {
+        .quick-metric-cell span {
+            font-size: 9px;
+            color: var(--text-tertiary);
+            text-transform: uppercase;
+            font-weight: 600;
+        }
+        .quick-metric-cell strong {
+            font-size: 11px;
+            font-weight: 700;
+        }
+
+        /* ==========================================================================
+           6. APPLE INSET GROUPED LIST & CARDS (IOS HIG COMPLIANT)
+           ========================================================================== */
+        .section-header-apple {
+            font-size: 13px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: var(--text-secondary);
+            margin: 20px 4px 8px 4px;
             display: flex;
             justify-content: space-between;
             align-items: center;
         }
-        .trade-row:active { background: var(--surface-elevated); }
-        .trade-left { display: flex; flex-direction: column; gap: 2px; }
-        .trade-symbol-row { display: flex; align-items: center; gap: 6px; }
-        .trade-symbol { font-size: 14px; font-weight: 700; color: var(--text-main); }
-        .trade-side-long {
-            font-size: 9px;
-            font-weight: 800;
-            color: var(--green);
-            background: var(--green-bg);
-            padding: 2px 5px;
-            border-radius: 4px;
+        .apple-group-card {
+            background: var(--surface);
+            backdrop-filter: var(--apple-blur);
+            -webkit-backdrop-filter: var(--apple-blur);
+            border: 0.5px solid var(--border);
+            border-radius: var(--radius-card);
+            overflow: hidden;
+            box-shadow: var(--shadow-subtle);
+            margin-bottom: 16px;
         }
-        .trade-side-short {
-            font-size: 9px;
-            font-weight: 800;
-            color: var(--red);
-            background: var(--red-bg);
-            padding: 2px 5px;
-            border-radius: 4px;
+        .apple-cell {
+            padding: 12px 14px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            border-bottom: 0.5px solid var(--border-subtle);
+            transition: background 0.15s ease;
         }
-        .trade-detail { font-size: 11px; color: var(--text-muted); }
-        .trade-right {
+        .apple-cell:last-child {
+            border-bottom: none;
+        }
+        .apple-cell:active {
+            background: rgba(255, 255, 255, 0.05);
+        }
+        .cell-leading {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+        .cell-title {
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+        .cell-subtitle {
+            font-size: 11px;
+            color: var(--text-secondary);
+        }
+        .cell-trailing {
             text-align: right;
             display: flex;
             flex-direction: column;
             align-items: flex-end;
             gap: 2px;
         }
-        .trade-pnl { font-size: 14px; font-weight: 700; }
-        .trade-guard {
-            font-size: 10px;
-            padding: 2px 6px;
-            border-radius: 4px;
-            background: var(--surface-elevated);
-            color: var(--text-muted);
-            border: 1px solid var(--border);
-        }
-        .guard-be {
-            color: var(--green);
-            background: var(--green-bg);
-            border-color: var(--green);
+        .cell-value {
+            font-size: 14px;
             font-weight: 700;
         }
-        .guard-lock {
-            color: var(--amber);
-            background: var(--amber-bg);
-            border-color: var(--amber);
-            font-weight: 700;
+
+        /* ==========================================================================
+           7. POSITION CARDS (TRADE LIVE NATIVE)
+           ========================================================================== */
+        .trade-card-apple {
+            background: var(--surface);
+            backdrop-filter: var(--apple-blur);
+            -webkit-backdrop-filter: var(--apple-blur);
+            border: 0.5px solid var(--border);
+            border-radius: var(--radius-card);
+            padding: 14px;
+            margin-bottom: 10px;
+            box-shadow: var(--shadow-subtle);
+            cursor: pointer;
+            transition: transform 0.1s ease, border-color 0.15s ease;
         }
-        /* Trade Sparkline & Target Progress */
-        .trade-chart-box {
+        .trade-card-apple:active {
+            transform: scale(0.985);
+            border-color: var(--apple-blue);
+        }
+        .trade-card-top {
             display: flex;
-            align-items: center;
             justify-content: space-between;
-            background: var(--surface-elevated);
-            border: 1px solid var(--border);
-            border-radius: 6px;
-            padding: 6px 10px;
-            gap: 12px;
+            align-items: flex-start;
+            margin-bottom: 8px;
         }
-        .trade-sparkline-canvas {
-            width: 110px;
-            height: 30px;
-            flex-shrink: 0;
-        }
-        .trade-target-levels {
-            display: flex;
-            flex-direction: column;
-            gap: 3px;
-            flex-grow: 1;
+        .trade-badge-side {
             font-size: 10px;
+            font-weight: 700;
+            padding: 2px 7px;
+            border-radius: 5px;
+            letter-spacing: 0.3px;
         }
-        .target-level-row {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
+        .side-long { background: var(--apple-green-bg); color: var(--apple-green); }
+        .side-short { background: var(--apple-red-bg); color: var(--apple-red); }
+
+        .trade-guard-pill {
+            font-size: 10px;
+            font-weight: 700;
+            padding: 2px 7px;
+            border-radius: var(--radius-pill);
+            display: inline-block;
         }
-        .target-bar-bg {
-            width: 100%;
+        .guard-sl { background: var(--apple-red-bg); color: var(--apple-red); }
+        .guard-be { background: rgba(10, 132, 255, 0.15); color: var(--apple-blue); }
+        .guard-lock { background: var(--apple-amber-bg); color: var(--apple-amber); }
+
+        .trade-target-progress-bar {
             height: 4px;
-            background: rgba(148, 163, 184, 0.2);
             border-radius: 2px;
+            background: var(--surface-glass);
             overflow: hidden;
+            margin: 6px 0;
             position: relative;
         }
-        .target-bar-fill {
+        .trade-target-fill {
             height: 100%;
             border-radius: 2px;
             transition: width 0.3s ease;
         }
 
-        /* MODAL FORECAST QUANTITATIVO (HURST, MIGLIORINO, ELLIOTT, MONTE CARLO) */
-        .modal-overlay {
-            position: fixed;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background: rgba(15, 23, 42, 0.75);
-            backdrop-filter: blur(4px);
-            -webkit-backdrop-filter: blur(4px);
-            z-index: 1000;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            padding: 14px;
-            opacity: 0;
-            pointer-events: none;
-            transition: opacity 0.25s ease;
-        }
-        .modal-overlay.active {
-            opacity: 1;
-            pointer-events: auto;
-        }
-        .modal-card {
-            background: var(--surface);
-            border: 1px solid var(--border);
-            border-radius: 14px;
-            width: 100%;
-            max-width: 580px;
-            max-height: 90vh;
-            overflow-y: auto;
-            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.3);
-            display: flex;
-            flex-direction: column;
-            animation: modalSlideUp 0.25s cubic-bezier(0.16, 1, 0.3, 1);
-        }
-        @keyframes modalSlideUp {
-            from { transform: translateY(20px) scale(0.97); }
-            to { transform: translateY(0) scale(1); }
-        }
-        .modal-header {
-            padding: 16px 18px;
-            border-bottom: 1px solid var(--border);
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            position: sticky;
-            top: 0;
-            background: var(--surface);
-            z-index: 2;
-        }
-        .modal-title-row {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-        .modal-title {
-            font-size: 15px;
-            font-weight: 800;
-            color: var(--text-main);
-        }
-        .modal-close-btn {
-            background: var(--surface-elevated);
-            border: 1px solid var(--border);
-            border-radius: 50%;
-            width: 32px;
-            height: 32px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: var(--text-muted);
-            cursor: pointer;
-            font-size: 16px;
-            transition: all 0.2s;
-        }
-        .modal-close-btn:hover {
-            color: var(--text-main);
-            background: var(--border);
-        }
-        .modal-body {
-            padding: 16px 18px;
-            display: flex;
-            flex-direction: column;
-            gap: 14px;
-        }
-        .forecast-chart-container {
-            position: relative;
-            height: 220px;
-            width: 100%;
-            background: var(--surface-elevated);
-            border: 1px solid var(--border);
-            border-radius: 8px;
-            padding: 8px;
-        }
-        .diag-grid {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 10px;
-        }
-        @media (max-width: 480px) {
-            .diag-grid { grid-template-columns: 1fr; }
-        }
-        .diag-card {
-            background: var(--surface-elevated);
-            border: 1px solid var(--border);
-            border-radius: 8px;
-            padding: 10px 12px;
-            display: flex;
-            flex-direction: column;
-            gap: 4px;
-        }
-        .diag-card-title {
-            font-size: 10px;
-            font-weight: 700;
-            color: var(--text-dim);
-            letter-spacing: 0.5px;
-            text-transform: uppercase;
-        }
-        .diag-card-val {
-            font-size: 12px;
-            font-weight: 700;
-            color: var(--text-main);
-        }
-        .diag-card-desc {
-            font-size: 11px;
-            color: var(--text-muted);
-            line-height: 1.4;
-        }
-
-        
-        /* TOOLTIPS INTERATTIVI ELEVATI (HOVER E TAP) */
-        [data-tip] {
-            position: relative;
-            cursor: help;
-        }
-        [data-tip]:hover::after,
-        [data-tip]:focus::after {
-            content: attr(data-tip);
-            position: absolute;
-            bottom: calc(100% + 8px);
-            left: 50%;
-            transform: translateX(-50%);
-            padding: 7px 11px;
-            border-radius: 7px;
-            background: #0f172a;
-            color: #f8fafc;
-            font-size: 11px;
-            line-height: 1.4;
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-            font-weight: 500;
-            white-space: normal;
-            width: max-content;
-            max-width: 250px;
-            text-align: center;
-            z-index: 99999;
-            box-shadow: 0 6px 16px rgba(0,0,0,0.35);
-            pointer-events: none;
-            border: 1px solid rgba(255,255,255,0.18);
-        }
-        [data-tip]:hover::before,
-        [data-tip]:focus::before {
-            content: '';
-            position: absolute;
-            bottom: calc(100% + 2px);
-            left: 50%;
-            transform: translateX(-50%);
-            border: 6px solid transparent;
-            border-top-color: #0f172a;
-            z-index: 99999;
-            pointer-events: none;
-        }
-
-        /* Tooltip con posizionamento in basso (per elementi in alto a rischio clipping) */
-        [data-tip-pos="bottom"]:hover::after,
-        [data-tip-pos="bottom"]:focus::after {
-            bottom: auto;
-            top: calc(100% + 8px);
-        }
-        [data-tip-pos="bottom"]:hover::before,
-        [data-tip-pos="bottom"]:focus::before {
-            bottom: auto;
-            top: calc(100% + 2px);
-            border-top-color: transparent;
-            border-bottom-color: #0f172a;
-        }
-
-        /* Tooltip allineati a destra (evitano overflow a destra su schermi stretti) */
-        [data-tip-pos="right"]:hover::after,
-        [data-tip-pos="right"]:focus::after {
-            left: auto;
-            right: 0;
-            transform: none;
-        }
-        [data-tip-pos="right"]:hover::before,
-        [data-tip-pos="right"]:focus::before {
-            left: auto;
-            right: 14px;
-            transform: none;
-        }
-
-        /* Mobile & iPhone Native Architecture Enhancements */
-        body {
-            padding-bottom: calc(70px + env(safe-area-inset-bottom, 15px));
-            -webkit-overflow-scrolling: touch;
-            overscroll-behavior-y: none;
-        }
-
-        .chart-wrap {
-            touch-action: pan-y !important;
-        }
-
-        #perfChart {
-            touch-action: pan-y !important;
-        }
-
-        /* Mobile Responsive Card Layout for Tables */
-        .table-responsive-container {
-            width: 100%;
-            overflow-x: auto;
-            -webkit-overflow-scrolling: touch;
-        }
-
-        @media (max-width: 640px) {
-            .mobile-hide-table {
-                display: none !important;
-            }
-            .mobile-card-list {
-                display: flex !important;
-                flex-direction: column;
-                gap: 8px;
-                padding-top: 6px;
-            }
-            .mobile-trade-card {
-                background: var(--surface-elevated);
-                border: 1px solid var(--border);
-                border-radius: 8px;
-                padding: 10px 12px;
-                display: flex;
-                flex-direction: column;
-                gap: 6px;
-                box-shadow: 0 1px 3px rgba(0,0,0,0.02);
-            }
-            .mobile-trade-card-header {
-                display: flex;
-                justify-content: space-between;
-                align-items: center;
-                border-bottom: 1px solid var(--border-subtle);
-                padding-bottom: 6px;
-            }
-            .mobile-trade-card-grid {
-                display: grid;
-                grid-template-columns: 1fr 1fr;
-                gap: 4px 10px;
-                font-size: 11px;
-            }
-        }
-
-        @media (min-width: 641px) {
-            .mobile-card-list {
-                display: none !important;
-            }
-        }
-
-        /* Bottom Tab Bar with Ergonomic Touch Targets */
+        /* ==========================================================================
+           8. APPLE BOTTOM TABBAR (BLURRED FROSTED GLASS & HAPTIC TOUCH TARGET)
+           ========================================================================== */
         .tabbar {
             position: fixed;
             bottom: 0;
             left: 0;
             right: 0;
-            height: calc(56px + env(safe-area-inset-bottom, 12px));
-            background: var(--surface);
-            backdrop-filter: blur(20px);
-            -webkit-backdrop-filter: blur(20px);
-            border-top: 1px solid var(--border);
+            height: calc(54px + env(safe-area-inset-bottom, 20px));
+            background: rgba(18, 18, 20, 0.78);
+            backdrop-filter: blur(28px) saturate(210%);
+            -webkit-backdrop-filter: blur(28px) saturate(210%);
+            border-top: 0.5px solid var(--border);
             display: flex;
-            z-index: 1000;
-            padding-bottom: env(safe-area-inset-bottom, 12px);
-            box-shadow: 0 -2px 10px rgba(0,0,0,0.05);
+            justify-content: space-around;
+            align-items: flex-start;
+            padding-top: 6px;
+            padding-bottom: env(safe-area-inset-bottom, 20px);
+            z-index: 9999;
+        }
+        [data-theme="light"] .tabbar {
+            background: rgba(249, 249, 249, 0.88);
+            border-top: 0.5px solid rgba(0, 0, 0, 0.15);
         }
         .tab-item {
             flex: 1;
@@ -773,91 +541,103 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             flex-direction: column;
             align-items: center;
             justify-content: center;
-            gap: 2px;
-            font-size: 10px;
-            font-weight: 600;
-            color: var(--text-muted);
-            cursor: pointer;
-            border: none;
+            gap: 3px;
             background: none;
-            font-family: inherit;
-            min-height: 44px;
-            -webkit-tap-highlight-color: transparent;
-            transition: all 0.15s ease;
+            border: none;
+            color: var(--text-secondary);
+            font-size: 10px;
+            font-weight: 500;
+            cursor: pointer;
+            padding: 2px 0;
+            transition: color 0.15s ease;
             position: relative;
         }
         .tab-item svg {
-            width: 19px;
-            height: 19px;
+            width: 21px;
+            height: 21px;
             stroke-width: 2.1;
-            transition: transform 0.15s ease, stroke 0.15s ease;
+            transition: stroke 0.15s ease, transform 0.15s ease;
         }
-        .tab-item.active { 
-            color: var(--blue); 
-            font-weight: 700; 
+        .tab-item.active {
+            color: var(--apple-blue);
+            font-weight: 700;
         }
         .tab-item.active svg {
-            stroke: var(--blue);
+            stroke: var(--apple-blue);
             transform: scale(1.08);
         }
         .tab-item span.dot {
-            width: 14px;
-            height: 3px;
-            border-radius: 2px;
-            background: transparent;
             position: absolute;
-            top: 2px;
+            top: -6px;
+            width: 16px;
+            height: 2.5px;
+            border-radius: 1.5px;
+            background: transparent;
             transition: background 0.2s ease;
         }
-        .tab-item.active span.dot { 
-            background: var(--blue); 
+        .tab-item.active span.dot {
+            background: var(--apple-blue);
         }
 
-        /* Touch-Friendly Toast Notification for Explanations */
+        /* ==========================================================================
+           9. TOAST NOTIFICATION (APPLE DYNAMIC ISLAND / SYSTEM TOAST STYLE)
+           ========================================================================== */
         .toast-tooltip-mobile {
             position: fixed;
-            bottom: calc(72px + env(safe-area-inset-bottom, 15px));
-            left: 12px;
-            right: 12px;
-            background: rgba(15, 23, 42, 0.94);
-            color: #ffffff;
-            backdrop-filter: blur(12px);
-            -webkit-backdrop-filter: blur(12px);
+            bottom: calc(70px + env(safe-area-inset-bottom, 20px));
+            left: 14px;
+            right: 14px;
+            background: rgba(28, 28, 30, 0.94);
+            color: #FFFFFF;
+            backdrop-filter: blur(25px);
+            -webkit-backdrop-filter: blur(25px);
+            border: 0.5px solid rgba(255, 255, 255, 0.15);
+            border-radius: 14px;
             padding: 12px 14px;
-            border-radius: 10px;
             font-size: 12px;
             line-height: 1.45;
-            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(255, 255, 255, 0.1);
-            z-index: 10000;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
             display: flex;
-            align-items: flex-start;
+            align-items: center;
             gap: 10px;
+            z-index: 10001;
             opacity: 0;
             pointer-events: none;
-            transform: translateY(12px);
-            transition: opacity 0.25s ease, transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+            transform: translateY(12px) scale(0.98);
+            transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
         }
         .toast-tooltip-mobile.show {
             opacity: 1;
             pointer-events: auto;
-            transform: translateY(0);
+            transform: translateY(0) scale(1);
         }
         .toast-tooltip-close {
-            background: rgba(255,255,255,0.15);
+            background: rgba(255, 255, 255, 0.15);
             border: none;
-            color: #ffffff;
-            border-radius: 50%;
+            color: #fff;
             width: 22px;
             height: 22px;
+            border-radius: 50%;
+            cursor: pointer;
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 11px;
-            cursor: pointer;
+            font-size: 12px;
             flex-shrink: 0;
-            margin-top: -1px;
         }
 
+        /* UTILITY & VALUE CLASSES */
+        .val-up { color: var(--apple-green) !important; font-weight: 600; }
+        .val-down { color: var(--apple-red) !important; font-weight: 600; }
+        .val-neutral { color: var(--text-secondary) !important; }
+        .hidden { display: none !important; }
+
+        /* DESKTOP TABLE & MODAL SYSTEM RETAINED */
+        .table-responsive-container {
+            width: 100%;
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
+        }
         .clean-table {
             width: 100%;
             border-collapse: collapse;
@@ -877,322 +657,413 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             border-bottom: 1px solid var(--border-subtle);
             color: var(--text-main);
         }
-        .val-up { color: var(--green) !important; font-weight: 600; }
-        .val-down { color: var(--red) !important; font-weight: 600; }
-        .val-neutral { color: var(--text-muted) !important; }
-        .hidden { display: none !important; }
+
+        @media (max-width: 640px) {
+            .mobile-hide-table { display: none !important; }
+            .mobile-card-list { display: flex !important; flex-direction: column; gap: 8px; }
+        }
+        @media (min-width: 641px) {
+            .mobile-card-list { display: none !important; }
+        }
+
+        .mobile-trade-card {
+            background: var(--surface);
+            border: 0.5px solid var(--border);
+            border-radius: var(--radius-card);
+            padding: 12px 14px;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            box-shadow: var(--shadow-subtle);
+        }
+        .mobile-trade-card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 0.5px solid var(--border-subtle);
+            padding-bottom: 6px;
+        }
+        .mobile-trade-card-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 4px 10px;
+            font-size: 11px;
+        }
+
+        /* MODAL STYLES */
+        .modal-overlay {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0, 0, 0, 0.75);
+            backdrop-filter: blur(15px);
+            -webkit-backdrop-filter: blur(15px);
+            z-index: 100000;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            padding: 16px;
+        }
+        .modal-overlay.show { display: flex; }
+        .modal-card {
+            background: var(--surface-elevated);
+            border: 0.5px solid var(--border);
+            border-radius: 20px;
+            max-width: 540px;
+            width: 100%;
+            max-height: 90vh;
+            overflow-y: auto;
+            box-shadow: var(--shadow-float);
+            padding: 16px;
+        }
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 0.5px solid var(--border-subtle);
+            padding-bottom: 10px;
+            margin-bottom: 12px;
+        }
+        .modal-close-btn {
+            background: var(--surface-glass);
+            border: none;
+            color: var(--text-secondary);
+            font-size: 20px;
+            border-radius: 50%;
+            width: 28px;
+            height: 28px;
+            cursor: pointer;
+        }
+        .forecast-chart-container {
+            position: relative;
+            height: 200px;
+            width: 100%;
+            background: var(--bg-canvas);
+            border-radius: 12px;
+            border: 0.5px solid var(--border);
+            padding: 6px;
+            margin-bottom: 12px;
+        }
+        .diag-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+        }
+        .diag-card {
+            background: var(--surface);
+            border: 0.5px solid var(--border);
+            border-radius: 10px;
+            padding: 8px 10px;
+        }
+        .diag-card-title {
+            font-size: 10px;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+        }
+        .diag-card-val {
+            font-size: 12px;
+            font-weight: 700;
+            margin-top: 2px;
+        }
+        .diag-card-desc {
+            font-size: 10px;
+            color: var(--text-tertiary);
+            margin-top: 2px;
+            line-height: 1.3;
+        }
+
+        /* HIDDEN SKELETON CONTAINERS PRESERVING SCRIPT BINDING */
+        .ghost-dom-binder {
+            display: none !important;
+        }
     </style>
 </head>
 <body>
 
-    <!-- TOPBAR CON CONTROLLI REFRESH E THEME SWITCH -->
-    <div class="topbar">
-        <div class="topbar-title">
-            <span class="status-dot"></span>
-            <span>SENTINEL TRADING</span>
-            <span class="mono" style="font-size: 10px; color: var(--text-muted);" id="top-clock">--:--:--</span>
+    <!-- 1. APPLE NAVIGATION BAR -->
+    <header class="apple-nav">
+        <div class="apple-nav-inner">
+            <div class="nav-leading">
+                <span class="nav-pulse-dot"></span>
+                <div class="nav-title-group">
+                    <span class="nav-title">Sentinel Trading</span>
+                    <span class="nav-subtitle mono" id="top-clock">--:--:--</span>
+                </div>
+            </div>
+            <div class="nav-trailing">
+                <button class="apple-nav-btn mono" onclick="toggleTheme()" id="theme-btn">☀️ LIGHT</button>
+                <button class="apple-nav-btn mono" onclick="fetchData()">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+                    SYNC
+                </button>
+            </div>
         </div>
-        <div class="topbar-actions">
-            <button class="theme-toggle-btn mono" onclick="toggleTheme()" id="theme-btn">🌙 DARK</button>
-            <button class="refresh-btn mono" onclick="fetchData()">SYNC</button>
-        </div>
-    </div>
+    </header>
 
-    <!-- 1. TRADING COMPASS: DIREZIONE STRATEGICA & HEALTH SCORE -->
-    <div class="section">
-        <div class="section-header">
-            <span class="section-title">Trading Compass (Verifica Vantaggio Quant)</span>
-            <span class="mono" style="font-size: 10px; color: var(--text-dim);">EDGE DIAGNOSTICS</span>
-        </div>
-        <div class="compass-box">
-            <div class="compass-top">
-                <div data-tip="Health &amp; Alignment Score (0-100): indice sintetico dello stato di salute del trading quantitativo. Misura la convergenza di Win Rate, Profit Factor, Expected Value e allineamento con lo Scudo Macro BTC 4H. Sopra 60 = assetto solido ed efficiente; sotto 40 = scatta la protezione conservativa.">
-                    <div style="font-size: 9px; color: var(--text-muted); text-transform: uppercase;" class="mono">Health &amp; Alignment Score</div>
-                    <div class="compass-score-wrap mono">
-                        <span class="compass-score" id="compass-score-val">--</span>
-                        <span style="font-size: 12px; color: var(--text-dim);">/ 100</span>
+    <main class="app-container">
+
+        <!-- 2. TOTAL HERO PORTFOLIO STATS (APPLE STOCKS STYLE) -->
+        <section class="hero-equity-card">
+            <div class="hero-equity-label" data-tip="Patrimonio complessivo convertito in USD sommando il conto Bybit Futures e il broker Alpaca Wall Street">Patrimonio Totale</div>
+            <div class="hero-equity-amount mono" id="total-equity">$0.00</div>
+            <div class="hero-delta-strip mono">
+                <span id="hero-delta-display" class="val-up">+0.00%</span>
+                <span style="color: var(--text-tertiary);">&bull;</span>
+                <span id="total-unrealized" style="color: var(--text-secondary); font-size: 12px;">+$0.00 fluttuante</span>
+                <span class="hero-delta-badge" id="hud-trend-badge" style="background: var(--apple-green-bg); color: var(--apple-green);">STABILE</span>
+            </div>
+        </section>
+
+        <!-- 3. APPLE INTERACTIVE CHART CARD -->
+        <section class="apple-chart-card">
+            <!-- Timeframe Selector Pills -->
+            <div class="tf-pills-row mono">
+                <button class="tf-pill active" id="btn-tf-3s" onclick="setTimeframe('3s')">3S</button>
+                <button class="tf-pill" id="btn-tf-1m" onclick="setTimeframe('1m')">1M</button>
+                <button class="tf-pill" id="btn-tf-1h" onclick="setTimeframe('1h')">1H</button>
+                <button class="tf-pill" id="btn-tf-1d" onclick="setTimeframe('1d')">1D</button>
+                <button class="tf-pill" id="btn-tf-1w" onclick="setTimeframe('1w')">1W</button>
+                <button class="tf-pill" id="btn-tf-1M" onclick="setTimeframe('1M')">1MO</button>
+            </div>
+
+            <!-- HUD Informazioni Live Chart -->
+            <div class="chart-hud-apple mono">
+                <div class="chart-hud-stat">
+                    <span>LIVE: </span><strong id="hud-live-val" style="color: var(--apple-blue);">$0.00</strong>
+                </div>
+                <div class="chart-hud-stat">
+                    <span id="hud-range-val" style="color: var(--text-secondary);">L: $0 &bull; H: $0</span>
+                </div>
+                <div class="chart-hud-stat">
+                    <span id="chart-instance-title" style="color: var(--text-tertiary);">BYBIT FUTURES</span>
+                </div>
+            </div>
+
+            <!-- Canvas Chart.js -->
+            <div class="chart-container-inner">
+                <canvas id="perfChart"></canvas>
+            </div>
+
+            <!-- Segmented Control Modalità Grafico: Patrimonio vs PnL & Valuta vs Percentuale -->
+            <div class="apple-segmented mono" style="margin-top: 10px; margin-bottom: 4px;">
+                <button class="apple-segment-item active" id="btn-view-wallet" onclick="setChartMetric('wallet')">💼 Patrimonio</button>
+                <button class="apple-segment-item" id="btn-view-pnl" onclick="setChartMetric('pnl')">🎯 PnL Operativo</button>
+                <button class="apple-segment-item active" id="btn-mode-usd" onclick="setChartMode('usd')">$ Dollari</button>
+                <button class="apple-segment-item" id="btn-mode-pct" onclick="setChartMode('pct')">% Percentuale</button>
+            </div>
+
+            <!-- Quick Metrics Grid -->
+            <div class="chart-quick-metrics mono">
+                <div class="quick-metric-cell">
+                    <span>Volume</span>
+                    <strong id="metric-volume">$0</strong>
+                </div>
+                <div class="quick-metric-cell">
+                    <span>PnL Chiuso</span>
+                    <strong id="metric-realized">$0.00</strong>
+                </div>
+                <div class="quick-metric-cell">
+                    <span>Win Rate</span>
+                    <strong id="metric-winrate">0%</strong>
+                </div>
+                <div class="quick-metric-cell" data-tip="Media matematica netta guadagnata o persa per singolo trade chiuso">
+                    <span>Trade Medio</span>
+                    <strong id="metric-avg-trade">$0.00</strong>
+                </div>
+            </div>
+            <button id="btn-reset-zoom" onclick="resetChartZoom()" style="display: none;"></button>
+        </section>
+
+        <!-- ====================================================================
+             TAB 1: BYBIT FUTURES & QUANTITATIVE COMPASS (ACTIVE DEFAULT)
+             ==================================================================== -->
+        <div id="view-bybit">
+            
+            <!-- Account Inset Group -->
+            <div class="section-header-apple">Saldi Bybit Unified</div>
+            <div class="apple-group-card mono">
+                <div class="apple-cell" data-tip="Capitale sul conto unificato Bybit inclusi depositi spot BTC/ETH">
+                    <div class="cell-leading">
+                        <span class="cell-title">Bybit UTA Equity</span>
+                        <span class="cell-subtitle">Futures + Margine Spot</span>
+                    </div>
+                    <div class="cell-trailing">
+                        <span class="cell-value" id="bybit-equity">$0.00</span>
                     </div>
                 </div>
-                <div id="compass-badge-el" class="compass-badge badge-amber mono" data-tip="Verdetto sintetico del Trading Compass sullo stato complessivo dell'operatività in corso">CALCOLO</div>
-            </div>
-            <div class="compass-desc" id="compass-desc-el">
-                Inizializzazione diagnostica probabilistica...
-            </div>
-
-            <!-- SETUP READINESS RADAR (INDICATORE PRE-APERTURA A MERCATO FLAT) -->
-            <div style="margin-top: 10px; padding: 10px 12px; background: var(--surface-elevated); border: 1px solid var(--border); border-radius: 8px;">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
-                    <div style="display: flex; align-items: center; gap: 6px;" data-tip="Setup Readiness Radar (0-100): calcola in tempo reale la vicinanza matematica del mercato a un setup confluente A+ (Macro, Ciclica Hurst/Migliorino, Compressione RSI e Order Book OBI), attivo anche quando non ci sono trade aperti.">
-                        <span style="font-size: 10px; font-weight: 700; color: var(--text-muted); text-transform: uppercase;" class="mono">📡 Setup Readiness Radar (Pre-Trade)</span>
+                <div class="apple-cell" data-tip="Liquidità libera in dollari USDT immediatamente utilizzabile per nuovi ordini">
+                    <div class="cell-leading">
+                        <span class="cell-title">Disponibile (Cash)</span>
+                        <span class="cell-subtitle">Margine Libero USDT</span>
                     </div>
-                    <div style="display: flex; align-items: baseline; gap: 4px;">
-                        <span class="mono" id="readiness-score-val" style="font-size: 16px; font-weight: 800; color: var(--amber);">--</span>
-                        <span class="mono" style="font-size: 10px; color: var(--text-dim);">/ 100</span>
-                        <span id="readiness-badge-el" class="badge mono" style="font-size: 9px; padding: 2px 6px; border-radius: 4px; margin-left: 6px; background: var(--amber-bg); color: var(--amber);">IN MATURAZIONE</span>
-                    </div>
-                </div>
-                <!-- Barra di Progresso Readiness -->
-                <div style="width: 100%; height: 6px; background: rgba(148, 163, 184, 0.2); border-radius: 3px; overflow: hidden; margin-bottom: 6px;">
-                    <div id="readiness-bar-fill" style="width: 50%; height: 100%; border-radius: 3px; background: var(--amber); transition: width 0.4s ease, background 0.3s ease;"></div>
-                </div>
-                <!-- Spiegazione Movimento Atteso e Dettaglio Pilastri -->
-                <div id="readiness-desc-el" style="font-size: 11px; color: var(--text-muted); line-height: 1.45; margin-bottom: 6px;">
-                    Analisi della confluenza pre-market in corso...
-                </div>
-                <!-- Grid Compatta dei 4 Pilastri -->
-                <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 4px; font-size: 10px;" class="mono">
-                    <div style="background: var(--surface); padding: 4px 6px; border-radius: 4px; border: 1px solid var(--border-subtle); display: flex; justify-content: space-between;">
-                        <span style="color: var(--text-dim);">Macro (4H+1H):</span>
-                        <strong id="readiness-p-macro" style="color: var(--text-main);">--/25</strong>
-                    </div>
-                    <div style="background: var(--surface); padding: 4px 6px; border-radius: 4px; border: 1px solid var(--border-subtle); display: flex; justify-content: space-between;">
-                        <span style="color: var(--text-dim);">Ciclica Hurst:</span>
-                        <strong id="readiness-p-cycle" style="color: var(--text-main);">--/25</strong>
-                    </div>
-                    <div style="background: var(--surface); padding: 4px 6px; border-radius: 4px; border: 1px solid var(--border-subtle); display: flex; justify-content: space-between;">
-                        <span style="color: var(--text-dim);">RSI Momentum:</span>
-                        <strong id="readiness-p-rsi" style="color: var(--text-main);">--/25</strong>
-                    </div>
-                    <div style="background: var(--surface); padding: 4px 6px; border-radius: 4px; border: 1px solid var(--border-subtle); display: flex; justify-content: space-between;">
-                        <span style="color: var(--text-dim);">Book OBI:</span>
-                        <strong id="readiness-p-book" style="color: var(--text-main);">--/25</strong>
+                    <div class="cell-trailing">
+                        <span class="cell-value" id="bybit-cash" style="color: var(--apple-blue);">$0.00</span>
                     </div>
                 </div>
             </div>
 
-            <!-- 4 Metric Cards: Expected Value, Realized R:R, In-The-Money Ratio, Profit Factor -->
-            <div class="diag-grid mono">
-                <div class="diag-cell">
-                    <div class="diag-label" data-tip-pos="bottom" data-tip="Valore monetario medio atteso per singola operazione (Expected Value). Se positivo certifica un reale vantaggio matematico cumulativo nel lungo periodo.">Expected Value (EV)</div>
-                    <div class="diag-val" id="diag-ev-val">$0.00</div>
-                    <div class="diag-sub">Utile atteso per trade</div>
-                </div>
-                <div class="diag-cell">
-                    <div class="diag-label" data-tip-pos="bottom" data-tip="Rapporto Rischio/Rendimento reale calcolato a mercato vs target teorico (1:3.0). Indica quanti dollari incassi in media per ogni dollaro rischiato sullo Stop Loss.">R:R Reale vs Target</div>
-                    <div class="diag-val" id="diag-rr-val">1:0.0</div>
-                    <div class="diag-sub">Target min: 1:2.5</div>
-                </div>
-                <div class="diag-cell">
-                    <div class="diag-label" data-tip-pos="bottom" data-tip="Percentuale e conteggio dei contratti aperti attualmente in profitto, con dettaglio delle posizioni già protette a rischio zero (Break-Even Safe).">Posizioni in Gain</div>
-                    <div class="diag-val" id="diag-itm-val">0%</div>
-                    <div class="diag-sub" id="diag-prot-sub">0 protette Break-Even</div>
-                </div>
-                <div class="diag-cell">
-                    <div class="diag-label" data-tip-pos="bottom" data-tip="Rapporto tra profitti lordi totali e perdite lorde totali. Valori superiori a 1.50 confermano una strategia quantitativa ad alta efficienza statistica.">Profit Factor</div>
-                    <div class="diag-val" id="diag-pf-val">0.00</div>
-                    <div class="diag-sub">Gross Win / Gross Loss</div>
+            <!-- Active Positions Section -->
+            <div class="section-header-apple">
+                <span>Posizioni Attive (Futures 24/7)</span>
+                <span id="active-positions-count" class="mono" style="font-size: 11px; color: var(--apple-blue);">0 attive</span>
+            </div>
+            <div id="bybit-positions-list">
+                <div style="padding: 24px 0; text-align: center; color: var(--text-tertiary);" class="mono">
+                    Caricamento posizioni...
                 </div>
             </div>
-        </div>
-    </div>
 
-    <!-- 2. ACCOUNTS SUMMARY STRIP -->
-    <div class="section">
-        <div class="acc-grid mono">
-            <div class="acc-cell">
-                <div class="acc-label" data-tip="Patrimonio complessivo convertito in USD sommando il conto Bybit Futures e il broker Alpaca Wall Street">Equity Totale</div>
-                <div class="acc-val" id="total-equity">$0.00</div>
-                <div class="acc-sub">Bybit + Alpaca</div>
-            </div>
-            <div class="acc-cell">
-                <div class="acc-label" data-tip="Capitale su Bybit Unified Trading Account dedicato al trading algoritmico 24/7 sui derivati Crypto">Bybit UTA</div>
-                <div class="acc-val" id="bybit-equity">$0.00</div>
-                <div class="acc-sub" id="bybit-cash">Disponibile: $0</div>
-            </div>
-            <div class="acc-cell">
-                <div class="acc-label" data-tip="Valore del conto azionario su Alpaca Securities (NYSE & NASDAQ), separato dalle Crypto">Alpaca Equities</div>
-                <div class="acc-val" id="alpaca-equity">$0.00</div>
-                <div class="acc-sub" id="alpaca-bp">BP: $0</div>
-            </div>
-            <div class="acc-cell">
-                <div class="acc-label" data-tip="Guadagno o perdita fluttuante delle posizioni attualmente aperte a mercato">PnL Non Realizzato</div>
-                <div class="acc-val" id="total-unrealized">$0.00</div>
-                <div class="acc-sub" id="active-positions-count">0 posizioni</div>
-            </div>
-        </div>
-    </div>
+            <!-- Quantitative Trading Compass & Setup Readiness Radar -->
+            <div class="section-header-apple">Trading Compass &amp; Setup Radar</div>
+            <div class="apple-group-card">
+                <div class="apple-cell" data-tip="Misura la convergenza statistica e salute dei trade aperti. A mercato flat rimane giustamente sul benchmark neutro di 50.">
+                    <div class="cell-leading">
+                        <span class="cell-title">Health &amp; Alignment Score</span>
+                        <span class="cell-subtitle" id="compass-desc-el">Fase di consolidamento del mercato</span>
+                    </div>
+                    <div class="cell-trailing">
+                        <span class="cell-value mono" id="compass-score-val" style="font-size: 18px; color: var(--apple-amber);">50</span>
+                        <span class="badge mono" id="compass-badge-el" style="font-size: 9px; padding: 2px 6px; border-radius: 4px; background: var(--apple-amber-bg); color: var(--apple-amber);">HOLD</span>
+                    </div>
+                </div>
+                
+                <div class="apple-cell" data-tip="Radar pre-trade: monitora l'avvicinamento al trigger d'ingresso tramite Macro Bias, Ciclica Hurst, RSI e Order Book OBI.">
+                    <div class="cell-leading">
+                        <span class="cell-title">📡 Setup Readiness Radar</span>
+                        <span class="cell-subtitle" id="readiness-desc-el">Accumulo in corso</span>
+                        <div style="width: 140px; height: 4px; background: var(--surface-glass); border-radius: 2px; overflow: hidden; margin-top: 6px;">
+                            <div id="readiness-bar-fill" style="width: 50%; height: 100%; background: var(--apple-blue); transition: width 0.3s ease;"></div>
+                        </div>
+                    </div>
+                    <div class="cell-trailing">
+                        <span class="cell-value mono" id="readiness-score-val" style="font-size: 18px; color: var(--apple-blue);">50</span>
+                        <span class="badge mono" id="readiness-badge-el" style="font-size: 9px; padding: 2px 6px; border-radius: 4px; background: rgba(10, 132, 255, 0.15); color: var(--apple-blue);">WAIT</span>
+                    </div>
+                </div>
 
-    <!-- 3. MULTI-TIMEFRAME VARIATIONS STRIP (3s, 1m, 1h, 1d, 1w, 1M) -->
-    <div class="section">
-        <div class="section-header">
-            <span class="section-title">Variazione Rendimento Portfolio</span>
-            <span class="mono" style="font-size: 10px; color: var(--text-dim);">LIVE DELTA</span>
-        </div>
-        <div class="tf-grid mono">
-            <div class="tf-card active" id="card-tf-3s" onclick="setTimeframe('3s')">
-                <div class="tf-header" data-tip-pos="bottom" data-tip="Variazione netta del capitale/PnL negli ultimi 3 secondi (tick ad altissima frequenza in tempo reale)">Ogni 3s</div>
-                <div class="tf-delta" id="delta-3s-val">$0.00</div>
-                <div class="tf-pct" id="delta-3s-pct">0.00%</div>
-            </div>
-            <div class="tf-card" id="card-tf-1m" onclick="setTimeframe('1m')">
-                <div class="tf-header" data-tip-pos="bottom" data-tip="Variazione netta registrata nell'ultimo minuto di contrattazione">1 Minuto</div>
-                <div class="tf-delta" id="delta-1m-val">$0.00</div>
-                <div class="tf-pct" id="delta-1m-pct">0.00%</div>
-            </div>
-            <div class="tf-card" id="card-tf-1h" onclick="setTimeframe('1h')">
-                <div class="tf-header" data-tip-pos="bottom" data-tip="Variazione cumulativa netta registrata negli ultimi 60 minuti">1 Ora</div>
-                <div class="tf-delta" id="delta-1h-val">$0.00</div>
-                <div class="tf-pct" id="delta-1h-pct">0.00%</div>
-            </div>
-            <div class="tf-card" id="card-tf-1d" onclick="setTimeframe('1d')">
-                <div class="tf-header" data-tip-pos="bottom" data-tip="Rendimento cumulativo delle ultime 24 ore rispetto al saldo della sessione precedente">1 Giorno</div>
-                <div class="tf-delta" id="delta-1d-val">$0.00</div>
-                <div class="tf-pct" id="delta-1d-pct">0.00%</div>
-            </div>
-            <div class="tf-card" id="card-tf-1w" onclick="setTimeframe('1w')">
-                <div class="tf-header" data-tip-pos="bottom" data-tip="Performance progressiva cumulativa negli ultimi 7 giorni di trading">1 Settimana</div>
-                <div class="tf-delta" id="delta-1w-val">$0.00</div>
-                <div class="tf-pct" id="delta-1w-pct">0.00%</div>
-            </div>
-            <div class="tf-card" id="card-tf-1M" onclick="setTimeframe('1M')">
-                <div class="tf-header" data-tip-pos="bottom" data-tip="Rendimento netto consolidato a 30 giorni">1 Mese</div>
-                <div class="tf-delta" id="delta-1M-val">$0.00</div>
-                <div class="tf-pct" id="delta-1M-pct">0.00%</div>
-            </div>
-        </div>
-    </div>
+                <div class="apple-cell" style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 10px 14px;">
+                    <div class="mono" style="font-size: 11px;"><span style="color: var(--text-tertiary);">Macro:</span> <b id="readiness-p-macro">0/25</b></div>
+                    <div class="mono" style="font-size: 11px;"><span style="color: var(--text-tertiary);">Ciclica:</span> <b id="readiness-p-cycle">0/25</b></div>
+                    <div class="mono" style="font-size: 11px;"><span style="color: var(--text-tertiary);">RSI:</span> <b id="readiness-p-rsi">0/25</b></div>
+                    <div class="mono" style="font-size: 11px;"><span style="color: var(--text-tertiary);">OrderBook:</span> <b id="readiness-p-book">0/25</b></div>
+                </div>
 
-    <!-- 4. INTERACTIVE CHART CON CONTROLLO TIMEFRAME E SEPARAZIONE ISTANZE -->
-    <div class="section">
-        <div class="section-header" style="flex-wrap: wrap; gap: 8px;">
-            <div style="display: flex; align-items: center; gap: 6px;">
-                <span class="section-title" id="chart-instance-title">Grafico: Bybit Futures (Crypto)</span>
-            </div>
-            <!-- Selettore Istanza Grafico Separato al 100% -->
-            <div class="chart-controls mono">
-                <button class="tf-btn active" id="btn-inst-bybit" onclick="setChartInstance('bybit')">🪙 BYBIT FUTURES</button>
-                <button class="tf-btn" id="btn-inst-alpaca" onclick="setChartInstance('alpaca')">🏛️ ALPACA WALL ST</button>
-                <button class="tf-btn" id="btn-inst-total" onclick="setChartInstance('total')">🌐 TOTALE</button>
-            </div>
-        </div>
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; flex-wrap: wrap; gap: 6px;">
-            <!-- Toggle Modalità: Patrimonio Wallet vs PnL Operativo Bot & Scala ($ vs %) -->
-            <div class="chart-controls mono">
-                <button class="tf-btn active" id="btn-view-wallet" onclick="setChartMetric('wallet')" data-tip="Mostra la traiettoria del capitale totale comprensivo dei depositi spot in wallet">💼 PATRIMONIO</button>
-                <button class="tf-btn" id="btn-view-pnl" onclick="setChartMetric('pnl')" data-tip="Isola e mostra esclusivamente la curva dei profitti e perdite generati dalle operazioni dei bot">🎯 PnL OPERATIVO</button>
-                <span style="border-left: 1px solid var(--border); margin: 0 4px; height: 16px;"></span>
-                <button class="tf-btn active" id="btn-mode-usd" onclick="setChartMode('usd')" data-tip="Mostra il grafico in valori monetari assoluti ($ Dollari)">$ DOLLARI</button>
-                <button class="tf-btn" id="btn-mode-pct" onclick="setChartMode('pct')" data-tip="Mostra il grafico in rendimento percentuale progressivo (% Yield)">% PERCENTUALE</button>
-            </div>
-
-            <!-- Controlli Timeframe e Reset Zoom -->
-            <div class="chart-controls mono">
-                <button class="tf-btn" id="btn-reset-zoom" onclick="resetChartZoom()" style="display: none; background: var(--amber); color: #fff; border-color: var(--amber);" data-tip="Ripristina la vista panoramica del grafico originale">🔍 RESET ZOOM</button>
-                <button class="tf-btn active" id="btn-tf-3s" onclick="setTimeframe('3s')">3S</button>
-                <button class="tf-btn" id="btn-tf-1m" onclick="setTimeframe('1m')">1M</button>
-                <button class="tf-btn" id="btn-tf-1h" onclick="setTimeframe('1h')">1H</button>
-                <button class="tf-btn" id="btn-tf-1d" onclick="setTimeframe('1d')">1D</button>
-                <button class="tf-btn" id="btn-tf-1w" onclick="setTimeframe('1w')">1W</button>
-                <button class="tf-btn" id="btn-tf-1M" onclick="setTimeframe('1M')">1MO</button>
-            </div>
-        </div>
-        <!-- HUD Tecnico Istituzionale (Valore Live, Massimo, Minimo) -->
-        <div class="chart-hud mono">
-            <div class="chart-hud-stat">
-                <span style="color: var(--text-muted);">LIVE:</span>
-                <strong id="hud-live-val" style="color: var(--blue); font-size: 12px;">$0.00</strong>
-            </div>
-            <div class="chart-hud-stat">
-                <span style="color: var(--text-muted);">RANGE:</span>
-                <span id="hud-range-val" style="color: var(--text-main); font-size: 10px;">L: $0 &bull; H: $0</span>
-            </div>
-            <div class="chart-hud-stat">
-                <span style="color: var(--text-muted);">TREND:</span>
-                <strong id="hud-trend-badge" class="badge mono" style="font-size: 9px; padding: 2px 5px; border-radius: 3px; background: var(--green-bg); color: var(--green);">STABILE</strong>
+                <!-- 4 Diagnostic Metrics -->
+                <div class="apple-cell" style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 12px 14px;">
+                    <div data-tip="Valore monetario medio atteso per singola operazione calcolato su base storica.">
+                        <div style="font-size: 10px; color: var(--text-secondary); text-transform: uppercase;">Expected Value</div>
+                        <div class="mono" id="diag-ev-val" style="font-size: 14px; font-weight: 700; color: var(--apple-green);">+$0.00</div>
+                    </div>
+                    <div data-tip="Rapporto tra vincita media e perdita media reale a mercato confrontato con il target istituzionale 1:3.0.">
+                        <div style="font-size: 10px; color: var(--text-secondary); text-transform: uppercase;">R:R Reale vs Target</div>
+                        <div class="mono" id="diag-rr-val" style="font-size: 14px; font-weight: 700;">1:3.0</div>
+                    </div>
+                    <div data-tip="Percentuale e conteggio dei contratti aperti che si trovano attualmente in utile non realizzato.">
+                        <div style="font-size: 10px; color: var(--text-secondary); text-transform: uppercase;">Posizioni in Gain</div>
+                        <div class="mono" id="diag-itm-val" style="font-size: 14px; font-weight: 700;">0%</div>
+                        <span id="diag-prot-sub" style="font-size: 9px; color: var(--text-tertiary);">0 a Break-Even</span>
+                    </div>
+                    <div data-tip="Rapporto tra tutti i profitti lordi e le perdite lorde chiuse. Valori sopra 1.50 confermano robustezza statistica.">
+                        <div style="font-size: 10px; color: var(--text-secondary); text-transform: uppercase;">Profit Factor</div>
+                        <div class="mono" id="diag-pf-val" style="font-size: 14px; font-weight: 700;">0.00</div>
+                    </div>
+                </div>
             </div>
         </div>
 
-        <div class="chart-wrap">
-            <canvas id="perfChart"></canvas>
-        </div>
-        <div class="metrics-bar mono">
-            <div class="metric-item"><span>Vol:</span><strong id="metric-volume">$0</strong></div>
-            <div class="metric-item"><span>PnL Chiuso:</span><strong id="metric-realized">$0.00</strong></div>
-            <div class="metric-item"><span>Win Rate:</span><strong id="metric-winrate">0%</strong></div>
-            <div class="metric-item" data-tip-pos="bottom" data-tip="Media matematica netta guadagnata o persa per singolo trade chiuso"><span>Trade Medio:</span><strong id="metric-avg-trade">$0.00</strong></div>
-        </div>
-    </div>
-
-    <!-- 5. TAB 1: BYBIT POSITIONS (DEFAULT) -->
-    <div class="section" id="view-bybit">
-        <div class="section-header">
-            <span class="section-title">Posizioni Attive Bybit (Futures 24/7)</span>
-            <span class="mono" style="font-size: 10px; color: var(--text-muted);">Size: $15k / Macro BTC Shield / TP: +3.6% (1:3 R:R) / SL: -1.2% / BE: +0.8%</span>
-        </div>
-        <div id="bybit-positions-list">
-            <div style="padding: 20px 0; text-align: center; color: var(--text-dim);" class="mono">
-                Caricamento posizioni...
+        <!-- ====================================================================
+             TAB 2: ALPACA EQUITIES (WALL STREET)
+             ==================================================================== -->
+        <div id="view-alpaca" class="hidden">
+            <div class="section-header-apple">Portafoglio Wall Street (NYSE / NASDAQ)</div>
+            <div class="apple-group-card mono">
+                <div class="apple-cell" data-tip="Valore di mercato totale dei titoli azionari e fondi detenuti su Alpaca Wall Street">
+                    <div class="cell-leading">
+                        <span class="cell-title">Alpaca Portfolio Value</span>
+                        <span class="cell-subtitle">Azioni USA (15:30 - 22:00 CET)</span>
+                    </div>
+                    <div class="cell-trailing">
+                        <span class="cell-value" id="alpaca-equity">$0.00</span>
+                    </div>
+                </div>
+                <div class="apple-cell" data-tip="Potere d'acquisto disponibile su Alpaca per nuove posizioni azionarie">
+                    <div class="cell-leading">
+                        <span class="cell-title">Buying Power</span>
+                        <span class="cell-subtitle">Liquidità &amp; Margine Alpaca</span>
+                    </div>
+                    <div class="cell-trailing">
+                        <span class="cell-value" id="alpaca-bp" style="color: var(--apple-blue);">$0.00</span>
+                    </div>
+                </div>
             </div>
-        </div>
-    </div>
 
-    <!-- 6. TAB 2: ALPACA EQUITIES -->
-    <div class="section hidden" id="view-alpaca">
-        <div class="section-header">
-            <span class="section-title">Alpaca Wall Street (NYSE / NASDAQ)</span>
-            <span class="mono" style="font-size: 10px; color: var(--text-muted);">Orari: 15:30 - 22:00 CET</span>
-        </div>
-        <div class="table-responsive-container mobile-hide-table">
-            <table class="clean-table mono">
-                <thead>
-                    <tr>
-                        <th>Ticker</th>
-                        <th>Qty</th>
-                        <th>Ingresso</th>
-                        <th>Attuale</th>
-                        <th>Valore</th>
-                        <th>PnL</th>
-                    </tr>
-                </thead>
-                <tbody id="alpaca-tbody">
-                    <tr>
-                        <td colspan="6" style="text-align: center; padding: 20px 0; color: var(--text-dim);">
-                            Nessun titolo aperto. Wall Street chiusa nel weekend.
-                        </td>
-                    </tr>
-                </tbody>
-            </table>
-        </div>
-        <div id="alpaca-cards-list" class="mobile-card-list mono"></div>
-    </div>
-
-    <!-- 7. TAB 3: STORICO CHIUSI -->
-    <div class="section hidden" id="view-history">
-        <div class="section-header">
-            <span class="section-title">Storico Trade Chiusi (Bybit)</span>
-            <div style="display: flex; gap: 8px; align-items: center;">
-                <span class="mono" style="font-size: 10px; color: var(--blue);" id="history-avg-label">Trade Medio: $0.00</span>
-                <span class="mono" style="font-size: 10px; color: var(--text-muted);" id="closed-count-label">0 eseguiti</span>
+            <div class="section-header-apple">Titoli e Posizioni Azionarie</div>
+            <div class="table-responsive-container mobile-hide-table">
+                <table class="clean-table mono">
+                    <thead>
+                        <tr>
+                            <th>Ticker</th>
+                            <th>Qty</th>
+                            <th>Ingresso</th>
+                            <th>Attuale</th>
+                            <th>Valore</th>
+                            <th>PnL</th>
+                        </tr>
+                    </thead>
+                    <tbody id="alpaca-tbody">
+                        <tr>
+                            <td colspan="6" style="text-align: center; padding: 20px 0; color: var(--text-dim);">
+                                Nessun titolo aperto. Wall Street chiusa nel weekend.
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
             </div>
+            <div id="alpaca-cards-list" class="mobile-card-list mono"></div>
         </div>
-        <div class="table-responsive-container mobile-hide-table">
-            <table class="clean-table mono">
-                <thead>
-                    <tr>
-                        <th>Ora</th>
-                        <th>Simbolo</th>
-                        <th>Lato</th>
-                        <th>Investito ($)</th>
-                        <th>Prezzi</th>
-                        <th>Fee</th>
-                        <th>PnL Netto</th>
-                        <th>Resa %</th>
-                    </tr>
-                </thead>
-                <tbody id="history-tbody">
-                    <tr>
-                        <td colspan="8" style="text-align: center; padding: 20px 0; color: var(--text-dim);">
-                            Nessun trade chiuso di recente.
-                        </td>
-                    </tr>
-                </tbody>
-            </table>
-        </div>
-        <div id="history-cards-list" class="mobile-card-list mono"></div>
-    </div>
 
-    <!-- 8. TAB 4: GUIDA COMPLETA & MANUALE OPERATIVO -->
-    <div class="section hidden" id="view-guide">
+        <!-- ====================================================================
+             TAB 3: STORICO OPERAZIONI E TRADE CHIUSI
+             ==================================================================== -->
+        <div id="view-history" class="hidden">
+            <div class="section-header-apple">
+                <span>Storico Trade Eseguiti</span>
+                <div style="display: flex; gap: 8px; align-items: center;">
+                    <span class="mono" style="font-size: 11px; color: var(--apple-blue);" id="history-avg-label">Trade Medio: $0.00</span>
+                    <span class="mono" style="font-size: 11px; color: var(--text-secondary);" id="closed-count-label">0 eseguiti</span>
+                </div>
+            </div>
+
+            <div class="table-responsive-container mobile-hide-table">
+                <table class="clean-table mono">
+                    <thead>
+                        <tr>
+                            <th>Ora</th>
+                            <th>Simbolo</th>
+                            <th>Lato</th>
+                            <th>Investito ($)</th>
+                            <th>Prezzi</th>
+                            <th>Fee</th>
+                            <th>PnL Netto</th>
+                            <th>Resa %</th>
+                        </tr>
+                    </thead>
+                    <tbody id="history-tbody">
+                        <tr>
+                            <td colspan="8" style="text-align: center; padding: 20px 0; color: var(--text-dim);">
+                                Nessun trade chiuso di recente.
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+            <div id="history-cards-list" class="mobile-card-list mono"></div>
+        </div>
+
+        <!-- ====================================================================
+             TAB 4: GUIDA OPERATIVA & MANUALE DESK
+             ==================================================================== -->
+        <div id="view-guide" class="hidden">
+            <div class="section hidden" id="view-guide">
         <div class="section-header">
             <span class="section-title">📖 Guida Operativa &amp; Significato Indicatori</span>
             <span class="mono" style="font-size: 10px; color: var(--text-dim);">MANUALE PRATICO</span>
@@ -1339,7 +1210,28 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 
         </div>
     </div>
+        </div>
 
+        <!-- ====================================================================
+             GHOST DOM BINDER FOR SCRIPT COMPATIBILITY (PRESERVES IDS AND EVENTS)
+             ==================================================================== -->
+        <div class="ghost-dom-binder">
+            <button id="btn-inst-bybit" onclick="setChartInstance('bybit')"></button>
+            <button id="btn-inst-alpaca" onclick="setChartInstance('alpaca')"></button>
+            <button id="btn-inst-total" onclick="setChartInstance('total')"></button>
+            <div id="card-tf-3s"></div><div id="delta-3s-val"></div><div id="delta-3s-pct"></div>
+            <div id="card-tf-1m"></div><div id="delta-1m-val"></div><div id="delta-1m-pct"></div>
+            <div id="card-tf-1h"></div><div id="delta-1h-val"></div><div id="delta-1h-pct"></div>
+            <div id="card-tf-1d"></div><div id="delta-1d-val"></div><div id="delta-1d-pct"></div>
+            <div id="card-tf-1w"></div><div id="delta-1w-val"></div><div id="delta-1w-pct"></div>
+            <div id="card-tf-1M"></div><div id="delta-1M-val"></div><div id="delta-1M-pct"></div>
+        </div>
+
+    </main>
+
+    <!-- ========================================================================
+         MODAL POPUP ANALISI TRADE AVANZATA
+         ======================================================================== -->
     <!-- MODAL POPUP ANALISI TRADE AVANZATA -->
     <div class="modal-overlay" id="trade-modal" onclick="closeTradeModal(event)">
         <div class="modal-card mono" onclick="event.stopPropagation()">
@@ -1472,6 +1364,10 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     </div>
 
     <!-- BOTTOM TABBAR IPHONE CON ICONE NATIVE -->
+
+    <!-- ========================================================================
+         APPLE FROSTED GLASS BOTTOM TABBAR
+         ======================================================================== -->
     <nav class="tabbar">
         <button class="tab-item active" id="tab-btn-bybit" onclick="showTab('bybit')">
             <span class="dot"></span>
@@ -1495,12 +1391,13 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         </button>
     </nav>
 
-    <!-- TOAST INFORMATIVO PER TOOLTIP SU MOBILE / IPHONE -->
+    <!-- APPLE DYNAMIC TOAST NOTIFICATION -->
     <div id="mobile-tooltip-toast" class="toast-tooltip-mobile">
         <div style="flex: 1;" id="mobile-tooltip-text">Spiegazione dell'indicatore</div>
         <button class="toast-tooltip-close" onclick="hideMobileToast()">&times;</button>
     </div>
 
+    <!-- JAVASCRIPT CONTROLLERS -->
     <script>
         let chartInstance = null;
         let currentTimeframe = '3s';
@@ -2705,9 +2602,12 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         });
 
     </script>
+
 </body>
 </html>
 """
+
+
 
 async def handle_dashboard_page(request):
     """Serve la pagina HTML della dashboard."""
