@@ -999,11 +999,12 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                     <th>Prezzi</th>
                     <th>Fee</th>
                     <th>PnL Netto</th>
+                    <th>Resa %</th>
                 </tr>
             </thead>
             <tbody id="history-tbody">
                 <tr>
-                    <td colspan="7" style="text-align: center; padding: 20px 0; color: var(--text-dim);">
+                    <td colspan="8" style="text-align: center; padding: 20px 0; color: var(--text-dim);">
                         Nessun trade chiuso di recente.
                     </td>
                 </tr>
@@ -1079,7 +1080,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                     <strong>• Cifra Principale (es. $162,260.09):</strong> È l'<strong>Equity Totale Consolidata</strong> (Total Equity), che somma a prezzi di mercato correnti tutti gli asset del conto (1 BTC spot ~ $60,700, 1 ETH spot ~ $1,710, 50,000 USDC e USDT).<br>
                     <strong>• Disponibile (es. $49,764 USDT):</strong> È la liquidità cash in stablecoin USDT libera da vincoli di margine, utilizzabile per aprire nuovi contratti futures.<br>
                     <strong>• Credito Demo Iniziale Assegnato da Bybit:</strong> All'attivazione del conto Demo UTA, Bybit accredita di default un pacchetto multi-asset composto da <strong>50,000 USDT</strong>, <strong>50,000 USDC</strong>, <strong>1 BTC</strong> e <strong>1 ETH</strong>. Le variazioni dell'equity totale riflettono sia le oscillazioni del valore di mercato di BTC/ETH sia i profitti e le perdite realizzati dal bot.<br>
-                    <strong>• Capitale Investito &amp; Trade Medio nello Storico:</strong> Nella tab <strong>Storico Trade</strong> viene indicata la colonna <strong>Investito ($)</strong> (notionale del trade aperto, circa $15,000 pari al 10% dell'equity) e il <strong>Trade Medio</strong> (media matematica del guadagno/perdita netto per singola operazione conclusa).
+                    <strong>• Capitale Investito, PnL &amp; Resa % nello Storico:</strong> Nella tab <strong>Storico Trade</strong> viene indicata la colonna <strong>Investito ($)</strong> (notionale del trade aperto, circa $15,000 pari al 10% dell'equity), il <strong>PnL Netto</strong> monetario e la <strong>Resa %</strong> (percentuale netta di guadagno o perdita calcolata sul capitale investito nell'operazione). In alto è sempre visibile il <strong>Trade Medio</strong> (media matematica per singolo trade concluso).
                 </div>
             </div>
 
@@ -2058,7 +2059,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             document.getElementById('closed-count-label').innerText = `${sortedClosed.length} eseguiti`;
             const hBody = document.getElementById('history-tbody');
             if (sortedClosed.length === 0) {
-                hBody.innerHTML = `<tr><td colspan="7" style="text-align: center; padding: 20px 0; color: var(--text-dim);">Nessun trade chiuso recente.</td></tr>`;
+                hBody.innerHTML = `<tr><td colspan="8" style="text-align: center; padding: 20px 0; color: var(--text-dim);">Nessun trade chiuso recente.</td></tr>`;
             } else {
                 hBody.innerHTML = sortedClosed.slice(0, 20).map(c => {
                     const pVal = parseFloat(c.closedPnl || 0);
@@ -2070,6 +2071,13 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                     const invested = parseFloat(c.cumEntryValue || 0) || (parseFloat(c.closedSize || 0) * parseFloat(c.avgEntryPrice || 0));
                     const investedStr = invested > 0 ? '$' + Math.round(invested).toLocaleString('en-US') : '--';
 
+                    // Calcolo Resa Percentuale sul Capitale Investito
+                    let pctStr = '--';
+                    if (invested > 0) {
+                        const pct = (pVal / invested) * 100;
+                        pctStr = `${pSign}${pct.toFixed(2)}%`;
+                    }
+
                     return `
                         <tr>
                             <td style="color: var(--text-muted); font-weight: 500;">${timeStr}</td>
@@ -2079,6 +2087,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                             <td>$${parseFloat(c.avgEntryPrice || 0).toFixed(3)} &rarr; $${parseFloat(c.avgExitPrice || 0).toFixed(3)}</td>
                             <td style="color: var(--text-dim);">$${(parseFloat(c.openFee || 0) + parseFloat(c.closeFee || 0)).toFixed(2)}</td>
                             <td class="${pClass}">${pSign}$${pVal.toFixed(2)}</td>
+                            <td class="${pClass}">${pctStr}</td>
                         </tr>
                     `;
                 }).join('');
