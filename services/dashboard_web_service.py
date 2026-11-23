@@ -248,6 +248,49 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             letter-spacing: -0.8px;
             line-height: 1.1;
         }
+        .hero-accounts-split {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            margin-top: 12px;
+            margin-bottom: 2px;
+        }
+        .hero-sub-account {
+            background: var(--surface);
+            border: 0.5px solid var(--border);
+            border-radius: var(--radius-card);
+            padding: 10px 12px;
+            display: flex;
+            flex-direction: column;
+            gap: 3px;
+            cursor: pointer;
+            transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+        .hero-sub-account:active {
+            transform: scale(0.98);
+        }
+        .hero-sub-account.active-acc {
+            border-color: var(--apple-blue);
+            background: rgba(10, 132, 255, 0.08);
+        }
+        .hero-sub-label {
+            font-size: 11px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        .hero-sub-amount {
+            font-size: 16px;
+            font-weight: 700;
+            letter-spacing: -0.4px;
+            color: var(--text-primary);
+        }
+        .hero-sub-meta {
+            font-size: 10px;
+            color: var(--text-tertiary);
+        }
         .hero-delta-strip {
             display: flex;
             align-items: center;
@@ -801,15 +844,35 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 
     <main class="app-container">
 
-        <!-- 2. TOTAL HERO PORTFOLIO STATS (APPLE STOCKS STYLE) -->
+        <!-- 2. TOTAL HERO PORTFOLIO STATS & CONTI SEPARATI -->
         <section class="hero-equity-card">
-            <div class="hero-equity-label" data-tip="Patrimonio complessivo convertito in USD sommando il conto Bybit Futures e il broker Alpaca Wall Street">Patrimonio Totale</div>
+            <div class="hero-equity-label" id="hero-main-label" data-tip="Patrimonio complessivo convertito in USD sommando il conto Bybit Futures e il broker Alpaca Wall Street">Patrimonio Consolidato</div>
             <div class="hero-equity-amount mono" id="total-equity">$0.00</div>
             <div class="hero-delta-strip mono">
                 <span id="hero-delta-display" class="val-up">+0.00%</span>
                 <span style="color: var(--text-tertiary);">&bull;</span>
                 <span id="total-unrealized" style="color: var(--text-secondary); font-size: 12px;">+$0.00 fluttuante</span>
                 <span class="hero-delta-badge" id="hud-trend-badge" style="background: var(--apple-green-bg); color: var(--apple-green);">STABILE</span>
+            </div>
+
+            <!-- Due Conti Distinti con Patrimoni Separati -->
+            <div class="hero-accounts-split mono">
+                <div class="hero-sub-account active-acc" id="sub-acc-bybit" onclick="showTab('bybit')">
+                    <div class="hero-sub-label">
+                        <span>BYBIT (CRYPTO)</span>
+                        <span style="color: var(--apple-blue); font-size: 9px;">24/7</span>
+                    </div>
+                    <div class="hero-sub-amount" id="hero-bybit-amount">$0.00</div>
+                    <div class="hero-sub-meta" id="hero-bybit-sub">Disponibile: $0 USDT</div>
+                </div>
+                <div class="hero-sub-account" id="sub-acc-alpaca" onclick="showTab('alpaca')">
+                    <div class="hero-sub-label">
+                        <span>ALPACA (USA)</span>
+                        <span style="color: var(--apple-amber); font-size: 9px;">WALL ST</span>
+                    </div>
+                    <div class="hero-sub-amount" id="hero-alpaca-amount">$0.00</div>
+                    <div class="hero-sub-meta" id="hero-alpaca-sub">BP: $0</div>
+                </div>
             </div>
         </section>
 
@@ -1509,6 +1572,14 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 if (chartCard) chartCard.classList.remove('hidden');
             }
 
+            // Evidenzia visivamente il conto attivo nei due box patrimonio
+            const subBybit = document.getElementById('sub-acc-bybit');
+            const subAlpaca = document.getElementById('sub-acc-alpaca');
+            if (subBybit && subAlpaca) {
+                subBybit.classList.toggle('active-acc', tabName === 'bybit');
+                subAlpaca.classList.toggle('active-acc', tabName === 'alpaca');
+            }
+
             // Separazione istanze: quando navigo su Bybit o Alpaca sincronizza il grafico corrispondente
             if (tabName === 'bybit') {
                 setChartInstance('bybit');
@@ -1970,7 +2041,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 console.error("Compass render error:", errCompass);
             }
 
-            // 2. Acc Summary
+            // 2. Acc Summary & Divisione Conti Distinti
             const bEq = bWallet.total_equity || 0;
             const aEq = parseFloat(aAcc.portfolio_value || 0);
             const totalEq = bEq + aEq;
@@ -1983,6 +2054,17 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 
             document.getElementById('alpaca-equity').innerText = '$' + aEq.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
             document.getElementById('alpaca-bp').innerText = 'BP: $' + parseFloat(aAcc.buying_power || 0).toLocaleString('en-US', {maximumFractionDigits: 0});
+
+            // Popola i due conti separati nell'Hero Card in cima
+            const heroBVal = document.getElementById('hero-bybit-amount');
+            if (heroBVal) heroBVal.innerText = '$' + bEq.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+            const heroBSub = document.getElementById('hero-bybit-sub');
+            if (heroBSub) heroBSub.innerText = 'Disponibile: $' + usdtCash.toLocaleString('en-US', {maximumFractionDigits: 0}) + ' USDT';
+
+            const heroAVal = document.getElementById('hero-alpaca-amount');
+            if (heroAVal) heroAVal.innerText = '$' + aEq.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+            const heroASub = document.getElementById('hero-alpaca-sub');
+            if (heroASub) heroASub.innerText = 'BP: $' + parseFloat(aAcc.buying_power || 0).toLocaleString('en-US', {maximumFractionDigits: 0});
 
             // PnL & Posizioni Bybit
             let totPnl = 0;
