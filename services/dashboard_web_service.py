@@ -974,117 +974,21 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 </div>
             </div>
 
-            <!-- SCHEDA ANALISI QUANTITATIVA, CICLICA HURST, MIGLIORINO, ELLIOTT & PREVISIONE MONTE CARLO (PERMANENTE) -->
+            <!-- SELETTORE ASSET RAPIDO: APRE LA SCHEDA PREVISIONI/CICLICA AL TOCCO -->
             <div class="section-header-apple">
-                <span>Analisi Quantitativa &amp; Previsioni</span>
-                <div style="display: flex; gap: 4px; align-items: center;">
-                    <button class="tf-pill active" id="fc-asset-BTCUSDT" onclick="switchEmbeddedForecastAsset('BTCUSDT')" style="padding: 2px 7px; font-size: 9px;">BTC</button>
-                    <button class="tf-pill" id="fc-asset-ETHUSDT" onclick="switchEmbeddedForecastAsset('ETHUSDT')" style="padding: 2px 7px; font-size: 9px;">ETH</button>
-                    <button class="tf-pill" id="fc-asset-SOLUSDT" onclick="switchEmbeddedForecastAsset('SOLUSDT')" style="padding: 2px 7px; font-size: 9px;">SOL</button>
-                    <button class="tf-pill" id="fc-asset-XRPUSDT" onclick="switchEmbeddedForecastAsset('XRPUSDT')" style="padding: 2px 7px; font-size: 9px;">XRP</button>
-                </div>
+                <span>Analisi &amp; Previsioni al Tocco</span>
+                <span class="mono" style="font-size: 10px; color: var(--text-secondary);">Tocca un asset</span>
             </div>
-
-            <div class="apple-group-card mono" style="padding: 14px; margin-bottom: 16px;">
-                <!-- Header con Timeframe & Badge -->
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; flex-wrap: wrap; gap: 6px;">
-                    <div style="display: flex; gap: 6px; align-items: center;">
-                        <span id="fc-embed-symbol-label" style="font-size: 13px; font-weight: 700; color: var(--apple-blue);">BTCUSDT</span>
-                        <div style="display: flex; gap: 3px;">
-                            <button class="tf-pill active" id="embed-tf-1d" onclick="switchEmbeddedForecastTf('1d')" style="padding: 2px 7px; font-size: 9px;">1D</button>
-                            <button class="tf-pill" id="embed-tf-4h" onclick="switchEmbeddedForecastTf('4h')" style="padding: 2px 7px; font-size: 9px;">4H</button>
-                            <button class="tf-pill" id="embed-tf-1h" onclick="switchEmbeddedForecastTf('1h')" style="padding: 2px 7px; font-size: 9px;">1H</button>
-                        </div>
-                    </div>
-                    <div style="display: flex; gap: 6px; align-items: center;">
-                        <span id="embed-tf-badge" class="badge mono" style="background: var(--surface-glass); color: var(--text-secondary); font-size: 9px; padding: 2px 6px; border-radius: 4px;">1D &bull; MACRO</span>
-                        <span id="embed-mc-prob" class="badge mono" style="background: var(--apple-green-bg); color: var(--apple-green); font-size: 10px; padding: 2px 6px; border-radius: 4px;">Prob. Up: 50%</span>
-                    </div>
-                </div>
-
-                <!-- Grafico Previsionale Stocastico Monte Carlo, Hurst FLD & Battleplan Migliorino -->
-                <div class="forecast-chart-container" style="height: 220px;">
-                    <canvas id="embeddedForecastChart"></canvas>
-                </div>
-
-                <!-- Legenda Grafica -->
-                <div style="display: flex; justify-content: space-between; flex-wrap: wrap; gap: 6px; font-size: 9px; color: var(--text-secondary); margin-bottom: 12px; padding: 6px 8px; background: var(--surface-glass); border-radius: 8px;">
-                    <span style="color: #38bdf8;">━ Prezzo Storico</span>
-                    <span style="color: #f59e0b;">╌╌ Hurst FLD (T/2)</span>
-                    <span style="color: #06b6d4;">··· Battleplan Migliorino</span>
-                    <span style="color: #a855f7;">╌╌ Mediana MC P50</span>
-                    <span style="color: #30d158;">░ Confidenza 95%</span>
-                </div>
-
-                <!-- Griglia Diagnostica 4 Card -->
-                <div class="diag-grid" style="margin-bottom: 12px;">
-                    <div class="diag-card">
-                        <span class="diag-card-title">Ciclica di Hurst (FLD)</span>
-                        <span class="diag-card-val" id="embed-hurst-val" style="color: var(--apple-amber);">FLD: $0.00</span>
-                        <span class="diag-card-desc" id="embed-hurst-desc">Calcolo centratura ciclica in corso...</span>
-                    </div>
-                    <div class="diag-card">
-                        <span class="diag-card-title">Battleplan &amp; Vincolo</span>
-                        <span class="diag-card-val" id="embed-migliorino-val" style="color: #06b6d4;">1° Tempo (T+2)</span>
-                        <span class="diag-card-desc" id="embed-migliorino-desc">Analisi rottura minimi e vincolo...</span>
-                    </div>
-                    <div class="diag-card">
-                        <span class="diag-card-title">Onde di Elliott</span>
-                        <span class="diag-card-val" id="embed-elliott-val" style="color: var(--apple-blue);">Onda Frattale</span>
-                        <span class="diag-card-desc" id="embed-elliott-desc">Diagnostica frattale del trend...</span>
-                    </div>
-                    <div class="diag-card">
-                        <span class="diag-card-title">Distribuzione Monte Carlo</span>
-                        <span class="diag-card-val" id="embed-mc-val" style="color: var(--apple-green);">Target: $0.00</span>
-                        <span class="diag-card-desc" id="embed-mc-desc">Range al 95% di confidenza.</span>
-                    </div>
-                </div>
-
-                <!-- Schema Onde di Elliott & Fibonacci -->
-                <div style="background: var(--surface-glass); border-radius: 10px; padding: 10px 12px; font-size: 11px; margin-bottom: 10px;">
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
-                        <strong style="color: var(--text-primary);">Mappatura Onde (1-2-3-4-5 &amp; A-B-C):</strong>
-                        <span id="embed-wave-fib" class="mono" style="font-size: 10px; color: var(--apple-blue);">Fib: --</span>
-                    </div>
-                    <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; text-align: center; margin-bottom: 6px; font-size: 10px;">
-                        <div style="background: var(--surface-elevated); border-radius: 6px; padding: 4px 2px;">
-                            <div style="color: var(--text-secondary); font-size: 8px;">IMPULSO (1-3-5)</div>
-                            <div id="embed-wave-impulse-status" style="font-weight: 700; color: var(--apple-green);">Onda 3</div>
-                        </div>
-                        <div style="background: var(--surface-elevated); border-radius: 6px; padding: 4px 2px;">
-                            <div style="color: var(--text-secondary); font-size: 8px;">CORREZIONE (2-4)</div>
-                            <div id="embed-wave-correct-status" style="font-weight: 700; color: var(--text-secondary);">Attesa</div>
-                        </div>
-                        <div style="background: var(--surface-elevated); border-radius: 6px; padding: 4px 2px;">
-                            <div style="color: var(--text-secondary); font-size: 8px;">HURST FLD</div>
-                            <div id="embed-wave-hurst-status" style="font-weight: 700; color: var(--apple-amber);">Rialzista</div>
-                        </div>
-                        <div style="background: var(--surface-elevated); border-radius: 6px; padding: 4px 2px;">
-                            <div style="color: var(--text-secondary); font-size: 8px;">MIGLIORINO</div>
-                            <div id="embed-wave-migl-status" style="font-weight: 700; color: #06b6d4;">T+2</div>
-                        </div>
-                    </div>
-                    <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; text-align: center; font-size: 10px;">
-                        <div style="background: var(--surface-elevated); border-radius: 6px; padding: 3px 2px;">
-                            <div style="color: var(--text-secondary); font-size: 8px;">FIB 38.2%</div>
-                            <div id="embed-fib-382-val" style="font-weight: 700; font-size: 9px;">--</div>
-                        </div>
-                        <div style="background: var(--surface-elevated); border-radius: 6px; padding: 3px 2px;">
-                            <div style="color: var(--text-secondary); font-size: 8px;">FIB 50.0% (MEDIANA)</div>
-                            <div id="embed-fib-500-val" style="font-weight: 700; color: var(--apple-blue); font-size: 9px;">--</div>
-                        </div>
-                        <div style="background: var(--surface-elevated); border-radius: 6px; padding: 3px 2px;">
-                            <div style="color: var(--text-secondary); font-size: 8px;">GOLDEN 61.8%</div>
-                            <div id="embed-fib-618-val" style="font-weight: 700; color: var(--apple-amber); font-size: 9px;">--</div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Verdetto Operativo -->
-                <div style="background: var(--surface-glass); border-radius: 10px; padding: 10px 12px; font-size: 11px;">
-                    <strong style="color: var(--text-primary);">Verdetto Ciclico &amp; Operativo:</strong>
-                    <div id="embed-advice-text" style="color: var(--text-secondary); margin-top: 4px; line-height: 1.45;">
-                        Caricamento sintesi operativa...
+            <div class="apple-group-card" style="padding: 10px 14px; margin-bottom: 16px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
+                    <div class="mono" style="font-size: 11px; color: var(--text-secondary);">Crypto Watchlist:</div>
+                    <div style="display: flex; gap: 6px; flex-wrap: wrap;">
+                        <button class="tf-pill" onclick="openTradeModal('BTCUSDT', 'LONG', 0, 0)" style="padding: 4px 10px; font-size: 11px; font-weight: 700; color: var(--apple-blue);">BTC</button>
+                        <button class="tf-pill" onclick="openTradeModal('ETHUSDT', 'LONG', 0, 0)" style="padding: 4px 10px; font-size: 11px; font-weight: 700; color: var(--apple-blue);">ETH</button>
+                        <button class="tf-pill" onclick="openTradeModal('SOLUSDT', 'LONG', 0, 0)" style="padding: 4px 10px; font-size: 11px; font-weight: 700; color: var(--apple-blue);">SOL</button>
+                        <button class="tf-pill" onclick="openTradeModal('XRPUSDT', 'SHORT', 0, 0)" style="padding: 4px 10px; font-size: 11px; font-weight: 700; color: var(--apple-blue);">XRP</button>
+                        <button class="tf-pill" onclick="openTradeModal('LINKUSDT', 'LONG', 0, 0)" style="padding: 4px 10px; font-size: 11px; font-weight: 700; color: var(--apple-blue);">LINK</button>
+                        <button class="tf-pill" onclick="openTradeModal('AVAXUSDT', 'LONG', 0, 0)" style="padding: 4px 10px; font-size: 11px; font-weight: 700; color: var(--apple-blue);">AVAX</button>
                     </div>
                 </div>
             </div>
@@ -2479,7 +2383,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                         const uSign = u >= 0 ? '+' : '';
                         return `
                             <tr>
-                                <td style="font-weight: 700; color: var(--text-main);">${ap.symbol}</td>
+                                <td style="font-weight: 700; color: var(--apple-amber); cursor: pointer;" onclick="openTradeModal('${ap.symbol}', 'LONG', ${parseFloat(ap.avg_entry_price || 0)}, ${parseFloat(ap.current_price || 0)})">${ap.symbol} ↗</td>
                                 <td>${ap.qty}</td>
                                 <td>$${parseFloat(ap.avg_entry_price || 0).toFixed(2)}</td>
                                 <td>$${parseFloat(ap.current_price || 0).toFixed(2)}</td>
@@ -2497,7 +2401,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                         return `
                             <div class="mobile-trade-card">
                                 <div class="mobile-trade-card-header">
-                                    <strong style="color: var(--text-main); font-size: 13px;">${ap.symbol}</strong>
+                                    <strong style="color: var(--apple-amber); font-size: 13px; cursor: pointer;" onclick="openTradeModal('${ap.symbol}', 'LONG', ${parseFloat(ap.avg_entry_price || 0)}, ${parseFloat(ap.current_price || 0)})">${ap.symbol} ↗</strong>
                                     <span class="${uClass}" style="font-weight: 700; font-size: 13px;">${uSign}$${u.toFixed(2)}</span>
                                 </div>
                                 <div class="mobile-trade-card-grid">
@@ -2547,7 +2451,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                         return `
                             <tr>
                                 <td style="color: var(--text-muted); font-weight: 500;">${timeStr}</td>
-                                <td style="font-weight: 700; color: var(--text-main);">${c.symbol}</td>
+                                <td style="font-weight: 700; color: var(--apple-blue); cursor: pointer;" onclick="openTradeModal('${c.symbol}', '${c.side.toUpperCase()}', ${parseFloat(c.avgEntryPrice || 0)}, ${parseFloat(c.avgExitPrice || 0)})" title="Tocca per visualizzare la scheda previsionale">${c.symbol} ↗</td>
                                 <td>${c.side}</td>
                                 <td style="color: var(--text-main); font-weight: 600;">${investedStr}</td>
                                 <td>$${parseFloat(c.avgEntryPrice || 0).toFixed(3)} &rarr; $${parseFloat(c.avgExitPrice || 0).toFixed(3)}</td>
@@ -2580,7 +2484,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                             <div class="mobile-trade-card">
                                 <div class="mobile-trade-card-header">
                                     <div>
-                                        <strong style="color: var(--text-main); font-size: 13px;">${c.symbol}</strong>
+                                        <strong style="color: var(--apple-blue); font-size: 13px; cursor: pointer;" onclick="openTradeModal('${c.symbol}', '${c.side.toUpperCase()}', ${parseFloat(c.avgEntryPrice || 0)}, ${parseFloat(c.avgExitPrice || 0)})">${c.symbol} ↗</strong>
                                         <span class="badge mono" style="margin-left: 6px; font-size: 9px; padding: 1px 5px; background: ${c.side.toLowerCase() === 'buy' ? 'var(--green-bg)' : 'var(--red-bg)'}; color: ${c.side.toLowerCase() === 'buy' ? 'var(--green)' : 'var(--red)'};">${c.side.toUpperCase()}</span>
                                         <span style="font-size: 10px; color: var(--text-dim); margin-left: 6px;">${timeStr}</span>
                                     </div>
@@ -2601,222 +2505,6 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             }
         }
 
-
-        // ====================================================================
-        // SCHEDA PREVISIONI, CICLICA HURST, MIGLIORINO & MONTE CARLO EMBEDDED
-        // ====================================================================
-        let embeddedForecastChartInstance = null;
-        let currentEmbeddedSymbol = 'BTCUSDT';
-        let currentEmbeddedTf = '1d';
-
-        function switchEmbeddedForecastAsset(sym) {
-            currentEmbeddedSymbol = sym;
-            ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'XRPUSDT'].forEach(s => {
-                const btn = document.getElementById(`fc-asset-${s}`);
-                if (btn) btn.classList.toggle('active', s === sym);
-            });
-            const lbl = document.getElementById('fc-embed-symbol-label');
-            if (lbl) lbl.innerText = sym;
-            loadEmbeddedForecast(currentEmbeddedSymbol, currentEmbeddedTf);
-        }
-
-        function switchEmbeddedForecastTf(tf) {
-            currentEmbeddedTf = tf;
-            ['1d', '4h', '1h'].forEach(t => {
-                const btn = document.getElementById(`embed-tf-${t}`);
-                if (btn) btn.classList.toggle('active', t === tf);
-            });
-            const badge = document.getElementById('embed-tf-badge');
-            if (badge) {
-                const name = tf === '1d' ? '1D • MACRO' : (tf === '4h' ? '4H • SWING' : '1H • INTRADAY');
-                badge.innerText = name;
-            }
-            loadEmbeddedForecast(currentEmbeddedSymbol, currentEmbeddedTf);
-        }
-
-        async function loadEmbeddedForecast(symbol, tf) {
-            const adviceEl = document.getElementById('embed-advice-text');
-            if (adviceEl) adviceEl.innerText = `Analisi ciclica & previsionale in corso per ${symbol} (${tf.toUpperCase()})...`;
-
-            try {
-                const res = await fetch(`/api/trade-forecast?symbol=${symbol}&tf=${tf}`);
-                const data = await res.json();
-                if (data.error) {
-                    if (adviceEl) adviceEl.innerText = data.error;
-                    return;
-                }
-
-                // Hurst
-                const c = data.cycle || {};
-                const hVal = document.getElementById('embed-hurst-val');
-                if (hVal) hVal.innerText = `FLD: $${(c.hurst_fld_value || 0).toFixed(4)}`;
-                const hDesc = document.getElementById('embed-hurst-desc');
-                if (hDesc) hDesc.innerText = c.hurst_fld_signal || 'FLD attiva';
-
-                // Migliorino
-                const mVal = document.getElementById('embed-migliorino-val');
-                if (mVal) mVal.innerText = c.tempo_battleplan || 'Ciclo T+2';
-                const mDesc = document.getElementById('embed-migliorino-desc');
-                if (mDesc) mDesc.innerText = `${c.vincolo_migliorino || 'LIBERO'}: ${c.descrizione_battleplan || ''}`;
-
-                // Elliott
-                const el = data.elliott || {};
-                const eVal = document.getElementById('embed-elliott-val');
-                if (eVal) eVal.innerText = el.wave_label || 'Struttura Frattale';
-                const eDesc = document.getElementById('embed-elliott-desc');
-                if (eDesc) eDesc.innerText = el.analysis || 'Onde di Elliott in sviluppo.';
-
-                // Monte Carlo
-                const mc = data.monte_carlo || {};
-                const mcProb = document.getElementById('embed-mc-prob');
-                if (mcProb) mcProb.innerText = `Prob. Up: ${mc.probability_positive || '50%'}`;
-                const mcVal = document.getElementById('embed-mc-val');
-                if (mcVal) mcVal.innerText = `Mediana: $${(mc.median_forecast || 0).toFixed(4)}`;
-                const mcDesc = document.getElementById('embed-mc-desc');
-                if (mcDesc) mcDesc.innerText = `95% CI: ${mc.ci_95_range || ''} (Vol: ${mc.annualized_vol || 0}%)`;
-
-                // Sub-box Onde
-                const wImp = document.getElementById('embed-wave-impulse-status');
-                if (wImp && el.wave_label) wImp.innerText = el.wave_label.includes('Onda') ? el.wave_label : 'Fase Attiva';
-                const wCorr = document.getElementById('embed-wave-correct-status');
-                if (wCorr && el.correction_type) wCorr.innerText = el.correction_type;
-                const wHurst = document.getElementById('embed-wave-hurst-status');
-                if (wHurst && c.cycle_direction) wHurst.innerText = c.cycle_direction;
-                const wMigl = document.getElementById('embed-wave-migl-status');
-                if (wMigl && c.tempo_battleplan) wMigl.innerText = c.tempo_battleplan;
-
-                // Fibonacci
-                const fibObj = el.fib_levels || {};
-                const f382 = document.getElementById('embed-fib-382-val');
-                const f500 = document.getElementById('embed-fib-500-val');
-                const f618 = document.getElementById('embed-fib-618-val');
-                if (f382 && fibObj.fib_382) f382.innerText = `$${Number(fibObj.fib_382).toLocaleString('en-US', {maximumFractionDigits: 2})}`;
-                if (f500 && fibObj.fib_500) f500.innerText = `$${Number(fibObj.fib_500).toLocaleString('en-US', {maximumFractionDigits: 2})}`;
-                if (f618 && fibObj.fib_618) f618.innerText = `$${Number(fibObj.fib_618).toLocaleString('en-US', {maximumFractionDigits: 2})}`;
-
-                if (adviceEl) adviceEl.innerText = `${c.consiglio_pratico || ''} Analisi multi-timeframe completata su ${symbol}.`;
-
-                initEmbeddedForecastChart(data.chart_data);
-            } catch (err) {
-                console.error("Embedded forecast error:", err);
-                if (adviceEl) adviceEl.innerText = 'Impossibile caricare il modello previsionale.';
-            }
-        }
-
-        function initEmbeddedForecastChart(chartData) {
-            if (!chartData || typeof Chart === 'undefined') return;
-            const canvas = document.getElementById('embeddedForecastChart');
-            if (!canvas) return;
-
-            if (embeddedForecastChartInstance) {
-                embeddedForecastChartInstance.destroy();
-                embeddedForecastChartInstance = null;
-            }
-
-            const ctx = canvas.getContext('2d');
-            const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
-            const gridColor = isDark ? 'rgba(255, 255, 255, 0.06)' : 'rgba(0, 0, 0, 0.06)';
-            const tickColor = isDark ? '#94a3b8' : '#64748b';
-
-            const histPrices = chartData.historical_prices || [];
-            const fldCurve = chartData.hurst_fld_curve || [];
-            const battleCurve = chartData.battleplan_curve || [];
-            const p50 = chartData.forecast_p50 || [];
-            const p05 = chartData.forecast_p05 || [];
-            const p95 = chartData.forecast_p95 || [];
-
-            const histLen = histPrices.length;
-            const labels = (chartData.historical_labels || []).concat((chartData.forecast_labels || []).slice(1));
-
-            const padArr = new Array(Math.max(0, histLen - 1)).fill(null);
-            const p50Padded = padArr.concat(p50);
-            const p05Padded = padArr.concat(p05);
-            const p95Padded = padArr.concat(p95);
-
-            embeddedForecastChartInstance = new Chart(ctx, {
-                type: 'line',
-                data: {
-                    labels: labels,
-                    datasets: [
-                        {
-                            label: 'Prezzo Reale',
-                            data: histPrices,
-                            borderColor: '#38bdf8',
-                            borderWidth: 2,
-                            pointRadius: 0,
-                            tension: 0.1
-                        },
-                        {
-                            label: 'Hurst FLD',
-                            data: fldCurve,
-                            borderColor: '#f59e0b',
-                            borderWidth: 1.8,
-                            borderDash: [5, 4],
-                            pointRadius: 0,
-                            tension: 0.1
-                        },
-                        {
-                            label: 'Battleplan Migliorino',
-                            data: battleCurve,
-                            borderColor: '#06b6d4',
-                            borderWidth: 1.6,
-                            borderDash: [2, 2],
-                            pointRadius: 0,
-                            tension: 0.25
-                        },
-                        {
-                            label: 'MC Mediana P50',
-                            data: p50Padded,
-                            borderColor: '#a855f7',
-                            borderWidth: 2,
-                            borderDash: [4, 4],
-                            pointRadius: 0,
-                            tension: 0.15
-                        },
-                        {
-                            label: 'Upper 95% CI',
-                            data: p95Padded,
-                            borderColor: 'transparent',
-                            backgroundColor: 'rgba(48, 209, 88, 0.15)',
-                            fill: '+1',
-                            pointRadius: 0
-                        },
-                        {
-                            label: 'Lower 95% CI',
-                            data: p05Padded,
-                            borderColor: 'transparent',
-                            backgroundColor: 'transparent',
-                            fill: false,
-                            pointRadius: 0
-                        }
-                    ]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    animation: false,
-                    interaction: { mode: 'index', intersect: false },
-                    plugins: {
-                        legend: { display: false }
-                    },
-                    scales: {
-                        x: {
-                            grid: { color: gridColor },
-                            ticks: { color: tickColor, font: { family: 'SF Mono, monospace', size: 8 }, maxTicksLimit: 6 }
-                        },
-                        y: {
-                            position: 'right',
-                            grid: { color: gridColor },
-                            ticks: {
-                                color: tickColor,
-                                font: { family: 'SF Mono, monospace', size: 9 },
-                                callback: v => '$' + v.toLocaleString('en-US')
-                            }
-                        }
-                    }
-                }
-            });
-        }
 
         let forecastChartInstance = null;
         let currentModalSymbol = 'BTCUSDT';
@@ -2848,7 +2536,11 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             const sideEl = document.getElementById('modal-trade-side');
             sideEl.innerText = side;
             sideEl.className = side === 'LONG' ? 'trade-side-long' : 'trade-side-short';
-            document.getElementById('modal-trade-price').innerText = `Entry: $${entry.toFixed(4)} | Mark: $${mark.toFixed(4)}`;
+            if (entry > 0 && mark > 0) {
+                document.getElementById('modal-trade-price').innerText = `Entry: $${entry.toFixed(4)} | Mark: $${mark.toFixed(4)}`;
+            } else {
+                document.getElementById('modal-trade-price').innerText = `Analisi Quantitativa & Ciclica Live`;
+            }
 
             await loadModalForecast(symbol, side, '1d');
         }
@@ -2976,9 +2668,9 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 forecastChartInstance = null;
             }
 
-            const hist = chartData.historical || [];
-            const hurstFld = chartData.hurst_fld || [];
-            const battleplan = chartData.battleplan_migliorino || [];
+            const hist = chartData.historical || chartData.historical_prices || [];
+            const hurstFld = chartData.hurst_fld || chartData.hurst_fld_curve || [];
+            const battleplan = chartData.battleplan_migliorino || chartData.battleplan_curve || [];
             const p50 = chartData.forecast_p50 || [];
             const p05 = chartData.forecast_p05 || [];
             const p95 = chartData.forecast_p95 || [];
