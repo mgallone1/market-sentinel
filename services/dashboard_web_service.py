@@ -1843,11 +1843,11 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 const data = await res.json();
                 renderUI(data);
                 consecutiveErrors = 0;
-                document.querySelector('.status-dot').style.background = 'var(--green)';
+                (document.querySelector('.nav-pulse-dot') || document.querySelector('.status-dot')).style.background = 'var(--green)';
             } catch (e) {
                 console.error("Dashboard sync error:", e);
                 consecutiveErrors++;
-                document.querySelector('.status-dot').style.background = 'var(--red)';
+                (document.querySelector('.nav-pulse-dot') || document.querySelector('.status-dot')).style.background = 'var(--red)';
                 if (consecutiveErrors <= 3) {
                     setTimeout(fetchData, 1500);
                 }
@@ -1870,9 +1870,10 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             const heroDeltaEl = document.getElementById('hero-delta-display');
             if (heroDeltaEl && variations['1d']) {
                 const d1d = variations['1d'];
-                const pSign = d1d.delta_pct >= 0 ? '+' : '';
-                heroDeltaEl.innerText = `${pSign}${d1d.delta_pct.toFixed(2)}% oggi`;
-                heroDeltaEl.className = d1d.delta_pct >= 0 ? 'val-up' : 'val-down';
+                const pctVal = typeof d1d.delta_equity_pct === 'number' ? d1d.delta_equity_pct : 0;
+                const pSign = pctVal >= 0 ? '+' : '';
+                heroDeltaEl.innerText = `${pSign}${pctVal.toFixed(2)}% oggi`;
+                heroDeltaEl.className = pctVal >= 0 ? 'val-up' : 'val-down';
             }
 
             // 1. Trading Compass & Edge Score (RENDERIZZAZIONE IMMEDIATA E PROTETTA)
