@@ -1423,6 +1423,23 @@ DASHBOARD_HTML = """<!DOCTYPE html>
              TAB 3: STORICO OPERAZIONI E TRADE CHIUSI
              ==================================================================== -->
         <div id="view-history" class="hidden">
+            <!-- Apple Style Group Card: Statistiche Esecuzioni & Resoconto Quantitativo -->
+            <div class="apple-group-card" id="journal-intelligence-card" style="margin-bottom: 16px;">
+                <div class="apple-cell" style="padding: 12px 14px;">
+                    <div class="cell-leading">
+                        <span class="cell-title">Riepilogo Esecuzioni</span>
+                        <span class="cell-subtitle">Parametri e diagnostica delle posizioni concluse</span>
+                    </div>
+                    <div class="cell-trailing">
+                        <span class="cell-value mono" id="journal-winrate-val" style="color: var(--apple-green);">0%</span>
+                        <span class="badge mono" id="journal-stats-badge" style="font-size: 9px; padding: 1px 6px; background: rgba(255, 255, 255, 0.08); color: var(--text-secondary); border-radius: 4px;">Cap 70%</span>
+                    </div>
+                </div>
+                <div id="journal-insights-list">
+                    <!-- Popolato dinamicamente come righe .apple-cell coerenti -->
+                </div>
+            </div>
+
             <div class="section-header-apple">
                 <span>Storico Trade Eseguiti</span>
                 <div style="display: flex; gap: 8px; align-items: center;">
@@ -2996,7 +3013,61 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 }
             }
 
-            // 7. Statistiche storiche salvate in safe-mode
+            // 7. Render Registro Esecuzioni & Diagnostica Uscite (Formato nativo Apple Cell)
+            const jList = document.getElementById('journal-insights-list');
+            const jBadge = document.getElementById('journal-stats-badge');
+            const jWinrate = document.getElementById('journal-winrate-val');
+            const jData = data.journal || {};
+            const insights = jData.insights || [];
+            const jStats = jData.stats || {};
+
+            if (jWinrate && jStats.win_rate !== undefined) {
+                jWinrate.innerText = `${jStats.win_rate}% Win`;
+                jWinrate.style.color = jStats.win_rate >= 50 ? 'var(--apple-green)' : 'var(--apple-amber)';
+            }
+            if (jBadge && jStats.total_trades > 0) {
+                jBadge.innerHTML = `${jStats.wins_count}V / ${jStats.losses_count}P &bull; Cap: 70%`;
+            }
+
+            if (jList) {
+                if (insights.length === 0) {
+                    jList.innerHTML = `
+                        <div class="apple-cell" style="padding: 12px 14px; color: var(--text-secondary); font-size: 11px;">
+                            Ogni posizione chiusa registra i parametri di esecuzione e la motivazione tecnica di uscita.
+                        </div>
+                    `;
+                } else {
+                    jList.innerHTML = insights.slice(0, 4).map(ins => {
+                        const isWin = (ins.pnl_pct || 0) >= 0;
+                        const badgeColor = isWin ? 'var(--apple-green)' : 'var(--apple-red)';
+                        const badgeBg = isWin ? 'rgba(48, 209, 88, 0.15)' : 'rgba(255, 69, 58, 0.15)';
+                        const pSign = isWin ? '+' : '';
+                        const tagLabel = isWin ? 'WIN' : 'PROTETTO';
+                        const avatar = getAssetAvatarHtml(ins.symbol);
+                        return `
+                            <div class="apple-cell" style="padding: 11px 14px; align-items: flex-start; gap: 10px;">
+                                <div style="display: flex; align-items: center; gap: 8px;">
+                                    ${avatar}
+                                    <div>
+                                        <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 2px;">
+                                            <b style="color: var(--text-primary); font-size: 13px;">${ins.symbol}</b>
+                                            <span class="badge mono" style="font-size: 8px; padding: 1px 5px; background: rgba(255,255,255,0.06); color: var(--text-secondary); border-radius: 4px;">${tagLabel}</span>
+                                            <span class="badge mono" style="font-size: 9px; padding: 1px 5px; background: ${badgeBg}; color: ${badgeColor}; border-radius: 4px;">${ins.close_reason || 'CHIUSO'}</span>
+                                        </div>
+                                        <div style="color: var(--text-secondary); line-height: 1.35; font-size: 11px; max-width: 250px;">
+                                            ${ins.post_mortem_analysis || ins.learned_lesson || 'Diagnostica quantitativa registrata.'}
+                                        </div>
+                                    </div>
+                                </div>
+                                <div style="text-align: right; white-space: nowrap;">
+                                    <div class="mono" style="font-weight: 700; color: ${badgeColor}; font-size: 12px;">${pSign}${parseFloat(ins.pnl_pct || 0).toFixed(2)}%</div>
+                                    <div class="mono" style="font-size: 10px; color: var(--text-tertiary);">$${parseFloat(ins.pnl_usd || 0).toFixed(2)}</div>
+                                </div>
+                            </div>
+                        `;
+                    }).join('');
+                }
+            }
         }
 
 
