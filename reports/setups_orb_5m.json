@@ -1,0 +1,62 @@
+{
+  "period": [
+    "2026-09-27",
+    "2026-11-24"
+  ],
+  "symbols": [
+    "AAPL",
+    "AMZN",
+    "GOOGL",
+    "JPM",
+    "META",
+    "MSFT",
+    "NVDA",
+    "QQQ",
+    "SPY",
+    "TSLA"
+  ],
+  "orb": {
+    "n_trades": 222,
+    "win_rate": 0.32882882882882886,
+    "avg_win": 0.005282119883936564,
+    "avg_loss": 0.0042041085039697815,
+    "payoff": 1.256418543657676,
+    "profit_factor": 0.6155607630000693,
+    "expectancy_ret": -0.0010847631331717487,
+    "expectancy_R": -0.2530404116771425,
+    "avg_bars_held": 9.617117117117116,
+    "cost_share": 1.2273500771158556,
+    "total_return": -0.023841313610733383,
+    "CAGR": -0.13783787012550563,
+    "sharpe": -5.51248515626675,
+    "sortino": -7.203748904472834,
+    "max_drawdown": -0.0243817812459044,
+    "exposure": 0.6676047529706066,
+    "turnover": 44.15320534421891,
+    "maker_fill_rate": 1.0,
+    "maker_orders": 0,
+    "maker_missed": 0
+  },
+  "always_long": {
+    "n_trades": 4091,
+    "win_rate": 0.2925934979222684,
+    "avg_win": 0.004278232609166961,
+    "avg_loss": 0.00315919821781091,
+    "payoff": 1.3542146817655076,
+    "profit_factor": 0.5601226586293409,
+    "expectancy_ret": -0.0009830543165905456,
+    "expectancy_R": -0.4691494348616954,
+    "avg_bars_held": 6.441212417501833,
+    "cost_share": 1.6289227793335306,
+    "total_return": -0.30461005447590406,
+    "CAGR": -0.8927784906666261,
+    "sharpe": -19.209610113828756,
+    "sortino": -24.42545040410803,
+    "max_drawdown": -0.30882704909342196,
+    "exposure": 8.239837398373984,
+    "turnover": 624.976881945793,
+    "maker_fill_rate": 1.0,
+    "maker_orders": 0,
+    "maker_missed": 0
+  }
+}

@@ -130,3 +130,18 @@ def test_progress_logging_does_not_change_results(wf, caplog):
     cols = ["n_trades", "expectancy_ret", "profit_factor", "auc", "oos_logloss", "dsr"]
     pd.testing.assert_frame_equal(quiet.summary[cols], loud.summary[cols])
     pd.testing.assert_frame_equal(quiet.summary[cols], res.summary.loc[quiet.summary.index, cols])
+
+
+def test_verdict_requires_incremental_edge_over_primary_and_random():
+    """Un modello con expectancy > 0 ma che non batte primary_only / il filtro casuale (solo beta) non e' deployable."""
+    from quant.research.report import verdict
+    good = dict(kind="rf", role="model", logloss_vs_base=-0.01, dsr=0.99, expectancy_ret=0.012, n_trades=500, auc=0.60)
+    rows = {"rf": good,
+            "primary_only": dict(kind="primary", role="control", expectancy_ret=0.010),
+            "random@rf": dict(kind="rf", role="control", expectancy_ret=0.008)}
+    assert verdict(rows, 0.1)["deployable"]
+    rows["primary_only"]["expectancy_ret"] = 0.013          # il filtro non aggiunge valore
+    assert not verdict(rows, 0.1)["deployable"]
+    rows["primary_only"]["expectancy_ret"] = 0.010
+    rows["rf"] = dict(good, auc=0.45)                        # AUC sotto la soglia
+    assert not verdict(rows, 0.1)["deployable"]

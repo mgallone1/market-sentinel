@@ -1,0 +1,11 @@
+{
+  "name": "day-trader-skill",
+  "owner": {"name": "Jake Schincariol"},
+  "plugins": [
+    {
+      "name": "day-trader-skill",
+      "source": "./",
+      "description": "11 Claude skills for day trading: scan thousands of charts, track breaking news, time every entry and exit, and replay every outcome before you risk a dollar."
+    }
+  ]
+}
