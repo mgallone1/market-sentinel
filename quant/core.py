@@ -28,6 +28,7 @@ class CostModel:
     taker_fee: float = 0.0          # frazione del nozionale per lato (0.00055 = 0.055%)
     maker_fee: float = 0.0
     slippage_bps: float = 0.0       # slippage per lato in basis point
+    stop_slippage_bps: float = 0.0  # slippage AGGIUNTIVO sulle uscite stop-market (il prezzo supera il livello prima del fill)
     per_share: float = 0.0          # commissione per azione (USD)
     min_ticket: float = 0.0         # commissione minima per ordine (USD)
     borrow_rate_annual: float = 0.0 # costo prestito titoli per short azionari
@@ -39,12 +40,12 @@ class CostModel:
 
 
 COST_PRESETS: Dict[str, CostModel] = {
-    "bybit_perp": CostModel(taker_fee=0.00055, maker_fee=0.0002, slippage_bps=2.0, apply_funding=True),
-    "binance_perp": CostModel(taker_fee=0.0005, maker_fee=0.0002, slippage_bps=2.0, apply_funding=True),
-    "crypto_spot": CostModel(taker_fee=0.001, maker_fee=0.001, slippage_bps=3.0),
-    "alpaca_equity": CostModel(taker_fee=0.0, maker_fee=0.0, slippage_bps=2.0, borrow_rate_annual=0.03),
-    "ibkr_equity": CostModel(per_share=0.005, min_ticket=1.0, slippage_bps=2.0, borrow_rate_annual=0.03),
-    "index_etf": CostModel(slippage_bps=1.0, borrow_rate_annual=0.01),
+    "bybit_perp": CostModel(taker_fee=0.00055, maker_fee=0.0002, slippage_bps=2.0, stop_slippage_bps=3.0, apply_funding=True),
+    "binance_perp": CostModel(taker_fee=0.0005, maker_fee=0.0002, slippage_bps=2.0, stop_slippage_bps=3.0, apply_funding=True),
+    "crypto_spot": CostModel(taker_fee=0.001, maker_fee=0.001, slippage_bps=3.0, stop_slippage_bps=5.0),
+    "alpaca_equity": CostModel(taker_fee=0.0, maker_fee=0.0, slippage_bps=2.0, stop_slippage_bps=3.0, borrow_rate_annual=0.03),
+    "ibkr_equity": CostModel(per_share=0.005, min_ticket=1.0, slippage_bps=2.0, stop_slippage_bps=3.0, borrow_rate_annual=0.03),
+    "index_etf": CostModel(slippage_bps=1.0, stop_slippage_bps=2.0, borrow_rate_annual=0.01),
 }
 
 

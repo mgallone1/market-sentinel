@@ -24,9 +24,14 @@ def _regime_path(rng, n, regimes):
 def _build(rng, rets, sigma_t, n, interval, with_taker, with_funding, start):
     close = 100.0 * np.exp(np.cumsum(rets))
     prev = np.concatenate([[100.0], close[:-1]])
-    open_ = prev * np.exp(rng.normal(0, 0.05, n) * sigma_t)
-    hi = np.maximum(open_, close) * np.exp(np.abs(rng.normal(0, 0.4, n)) * sigma_t)
-    lo = np.minimum(open_, close) * np.exp(-np.abs(rng.normal(0, 0.4, n)) * sigma_t)
+    # OHLC coerenti con un moto browniano continuo: open = close precedente, estremi campionati
+    # esattamente dal ponte browniano tra log(open) e log(close) (nessun bias sugli stop).
+    open_ = prev.copy()
+    a, b = np.log(open_), np.log(close)
+    var = np.asarray(sigma_t, dtype=float) ** 2 * np.ones(n)
+    u1, u2 = rng.random(n), rng.random(n)
+    hi = np.exp((a + b + np.sqrt((b - a) ** 2 - 2 * var * np.log(u1))) / 2)
+    lo = np.exp((a + b - np.sqrt((b - a) ** 2 - 2 * var * np.log(u2))) / 2)
     vol = np.exp(rng.normal(5.0, 0.4, n)) * (1 + 20 * sigma_t * np.abs(rets / np.maximum(sigma_t, 1e-12)) / 10)
     idx = pd.date_range(pd.Timestamp(start, tz="UTC"), periods=n, freq=pd.Timedelta(hours=interval_to_hours(interval)), name="ts")
     df = pd.DataFrame({"open": open_, "high": hi, "low": lo, "close": close, "volume": vol}, index=idx)
