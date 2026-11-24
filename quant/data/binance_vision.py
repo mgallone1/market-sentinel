@@ -16,6 +16,7 @@ from quant.data.cache import cached_monthly, drop_forming
 
 log = logging.getLogger(__name__)
 BASE = "https://data.binance.vision/data/futures/um"
+BASE_SPOT = "https://data.binance.vision/data/spot"
 _KLINE_COLS = ["open_time", "open", "high", "low", "close", "volume", "close_time", "quote_volume",
                "count", "taker_buy_volume", "taker_buy_quote_volume", "ignore"]
 
@@ -102,15 +103,17 @@ def attach_oi(bars: pd.DataFrame, oi: pd.Series, interval: str) -> pd.DataFrame:
 
 
 def _fetch_month(symbol: str, interval: str, m0: pd.Timestamp, m1: pd.Timestamp, include_oi: bool,
-                 now: pd.Timestamp) -> pd.DataFrame:
+                 now: pd.Timestamp, market: str = "um") -> pd.DataFrame:
+    spot = market == "spot"
+    base = BASE_SPOT if spot else BASE
     cur = pd.Timestamp(now.year, now.month, 1, tz="UTC")
     if m0 < cur:
-        blob = _fetch(f"{BASE}/monthly/klines/{symbol}/{interval}/{symbol}-{interval}-{m0:%Y-%m}.zip")
+        blob = _fetch(f"{base}/monthly/klines/{symbol}/{interval}/{symbol}-{interval}-{m0:%Y-%m}.zip")
         bars = parse_klines(blob) if blob else pd.DataFrame()
         days = pd.date_range(m0, m1 - pd.Timedelta(days=1), freq="D")
     else:
         days = pd.date_range(m0, now.normalize() - pd.Timedelta(days=1), freq="D")
-        urls = [f"{BASE}/daily/klines/{symbol}/{interval}/{symbol}-{interval}-{d:%Y-%m-%d}.zip" for d in days]
+        urls = [f"{base}/daily/klines/{symbol}/{interval}/{symbol}-{interval}-{d:%Y-%m-%d}.zip" for d in days]
         with ThreadPoolExecutor(8) as ex:
             blobs = list(ex.map(_fetch, urls))
         parts = [parse_klines(b) for b in blobs if b]
@@ -119,6 +122,8 @@ def _fetch_month(symbol: str, interval: str, m0: pd.Timestamp, m1: pd.Timestamp,
         log.warning("binance_vision: nessun dato %s %s %s", symbol, interval, m0.strftime("%Y-%m"))
         return bars
     bars = bars[~bars.index.duplicated(keep="last")].sort_index()
+    if spot:
+        return bars
     fblob = _fetch(f"{BASE}/monthly/fundingRate/{symbol}/{symbol}-fundingRate-{m0:%Y-%m}.zip") if m0 < cur else None
     bars = attach_funding(bars, parse_funding(fblob) if fblob else pd.Series(dtype="float64"), interval)
     if include_oi:
@@ -131,11 +136,16 @@ def _fetch_month(symbol: str, interval: str, m0: pd.Timestamp, m1: pd.Timestamp,
 
 
 def get_bars(symbol: str, interval: str, start, end, include_oi: bool = False, use_cache: bool = True,
-             now: pd.Timestamp | None = None) -> pd.DataFrame:
+             now: pd.Timestamp | None = None, market: str = "um") -> pd.DataFrame:
+    """market: 'um' (USD-M perp, default; con funding) | 'spot'. Cache key distinta per mercato."""
+    if market not in ("um", "spot"):
+        raise ValueError(f"market sconosciuto: {market}")
     now = now or pd.Timestamp.now(tz="UTC")
-    df = cached_monthly("binance", symbol, interval, start, end,
-                        lambda m0, m1: _fetch_month(symbol, interval, m0, m1, include_oi, now),
-                        use_cache=use_cache, tag="oi" if include_oi else "", now=now)
+    provider = "binance" if market == "um" else "binance_spot"
+    df = cached_monthly(provider, symbol, interval, start, end,
+                        lambda m0, m1: _fetch_month(symbol, interval, m0, m1, include_oi and market == "um", now,
+                                                    market),
+                        use_cache=use_cache, tag="oi" if include_oi and market == "um" else "", now=now)
     if df.empty:
         return df
     df = drop_forming(df, interval, now)

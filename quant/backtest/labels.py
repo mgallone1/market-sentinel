@@ -4,12 +4,14 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from .engine import Ctx, finish_trade, plan_trade
+from .engine import Ctx, finish_trade, plan_trade, resolve_entry
 
 
 def triple_barrier_labels(bars, side, rules, spec, interval, maker_entry=False,
-                          ref_notional: float = 10_000.0) -> pd.DataFrame:
+                          ref_notional: float = 10_000.0, entry_mode="taker", offset_bps=0.0,
+                          max_wait_bars=2, through_bps=1.0) -> pd.DataFrame:
     ctx = Ctx(bars, spec, interval)
+    em = resolve_entry(entry_mode, maker_entry, offset_bps, max_wait_bars, through_bps)
     n = len(bars)
     if np.isscalar(side):
         sd = np.full(n, float(side))
@@ -19,10 +21,10 @@ def triple_barrier_labels(bars, side, rules, spec, interval, maker_entry=False,
     rows = []
     for t in np.flatnonzero(sd != 0):
         s = 1 if sd[t] > 0 else -1
-        pl = plan_trade(ctx, int(t), s, rules)
+        pl = plan_trade(ctx, int(t), s, rules, em)
         if pl is None:
             continue
-        r = finish_trade(ctx, pl, ref_notional / pl["entry"], maker_entry)
+        r = finish_trade(ctx, pl, ref_notional / pl["entry"])
         rows.append((idx[t], s, r["ret_net"], int(r["ret_net"] > 0), r["exit_ts"], r["reason"], r["R"]))
     out = pd.DataFrame(rows, columns=["ts", "side", "ret_net", "label", "t1", "exit_reason", "R"])
     return out.set_index("ts")

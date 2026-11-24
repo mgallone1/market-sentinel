@@ -1,6 +1,7 @@
 from functools import partial
 
 from .baselines import always_long, donchian_breakout, ema_cross, meanrev_z, random, tsmom
+from .xs_momentum import xs_momentum
 from .legacy import legacy_crypto, legacy_equity
 
 STRATEGIES = {
@@ -12,6 +13,7 @@ STRATEGIES = {
     "ema_cross": ema_cross,
     "always_long": always_long,
     "random": random,
+    "xs_momentum": xs_momentum,
 }
 
 
