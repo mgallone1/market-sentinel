@@ -1421,6 +1421,22 @@ DASHBOARD_HTML = """<!DOCTYPE html>
              TAB 3: STORICO OPERAZIONI E TRADE CHIUSI
              ==================================================================== -->
         <div id="view-history" class="hidden">
+            <!-- ==========================================
+                 TRADE JOURNAL & POST-MORTEM INTELLIGENCE
+                 ========================================== -->
+            <div id="journal-intelligence-card" class="apple-group-card" style="margin-bottom: 20px; border-left: 3px solid var(--apple-blue); padding: 14px 16px;">
+                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
+                    <div style="display: flex; align-items: center; gap: 6px;">
+                        <span style="font-size: 13px; font-weight: 700; color: var(--text-primary); letter-spacing: 0.2px;">POST-MORTEM & APPRENDIMENTO ATTIVO</span>
+                        <span class="badge mono" style="font-size: 9px; padding: 1px 6px; background: rgba(10, 132, 255, 0.15); color: var(--apple-blue); border-radius: 4px; font-weight: 700;">AI SENTINEL</span>
+                    </div>
+                    <span id="journal-stats-badge" class="mono" style="font-size: 11px; color: var(--text-secondary);">Capitale allocabile: fino a 70%</span>
+                </div>
+                <div id="journal-insights-list" style="display: flex; flex-direction: column; gap: 8px; font-size: 11px;">
+                    <div style="color: var(--text-secondary); font-style: italic;">Inizializzazione registro lezioni apprese...</div>
+                </div>
+            </div>
+
             <div class="section-header-apple">
                 <span>Storico Trade Eseguiti</span>
                 <div style="display: flex; gap: 8px; align-items: center;">
@@ -1507,15 +1523,15 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             <!-- Card 3: Regola Aurea Macro BTC Shield, Squeeze Funding & Alpha vs BTC -->
             <div class="acc-cell" style="padding: 14px; text-align: left;">
                 <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
-                    <strong style="color: var(--text-main); font-size: 13px;">3. Lo Scudo Macro Multi-Asset (Crypto Bybit &amp; Wall Street Alpaca)</strong>
+                    <strong style="color: var(--text-main); font-size: 13px;">3. Motore Quantitativo Adattivo, Trade Journal &amp; Cap Capitale 70%</strong>
                     <span class="badge mono" style="background: var(--amber); color: #fff; font-size: 9px; padding: 2px 6px; border-radius: 3px;">QUANT SUITE PRO</span>
                 </div>
                 <div style="font-size: 11px; color: var(--text-muted); line-height: 1.45;">
-                    Il sistema combina il trend strutturale a 4 Ore/Daily, la reattività a 1 Ora, i cicli di Hurst/Migliorino, il posizionamento dei derivati e la forza relativa sia sulle Crypto che sull'Azionario:<br>
-                    <strong>• Crypto Macro Shield (BTC 4H + 1H):</strong> In regime Bearish (4H &lt; EMA 50 e 1H &lt; EMA 50) sono ammessi solo SHORT; in regime Bullish solo LONG. In regime NEUTRAL l'operatività viene sbloccata subordinata alla Ciclica a 1H (LONG in 1°/2° Tempo e Prezzo &gt; FLD; SHORT in 3°/4° Tempo).<br>
-                    <strong>• Wall Street Macro Shield (SPY Daily + 1H &amp; VIX Dynamic Engine):</strong> Sull'azionario USA (Alpaca) il bot monitora l'S&amp;P 500 (SPY ETF) e la pendenza del VIX (^VIX). Non usa soglie fisse rigide ma calcola la variazione percentuale (ΔVIX): se il VIX è in distensione/cooling (ΔVIX &lt; 0, es. -25% come nei rimbalzi istituzionali) e SPY 1H supera l'EMA20, sblocca il regime NEUTRAL consentendo acquisti LONG sui titoli ad alto Alpha relativo (es. NVDA, TSLA, AMD). Il VIX Shock Shield interviene esclusivamente se la paura esplode violentemente (ΔVIX &gt; +12% sopra 28 o VIX estremo &gt; 40).<br>
-                    <strong>• Alpha vs Benchmark (Alpha vs BTC &amp; Alpha vs SPY):</strong> Priorità assoluta agli asset che sovraperformano il mercato. Per le crypto si analizza l'Alpha a 24h rispetto a BTC; per l'azionario USA rispetto all'indice SPY.<br>
-                    <strong>• Squeeze &amp; Risk Shields:</strong> Sulle crypto monitora il Funding Rate Bybit (anti Long/Short Squeeze) e l'Order Book Imbalance (OBI). Su Wall Street opera con bracket ordini rigidi a R:R 1:3 calibrati su 1.4x ATR, Break-Even Safe a +0.80% e Trailing Profit Lock a +1.60%.
+                    Il sistema combina trend strutturale, cicli di Hurst/Migliorino, Order Flow CVD e la nuova architettura di Trade Journaling e Cap Dinamico:<br>
+                    <strong>• Esposizione Flessibile Fino al 70% del Capitale:</strong> Rimosso il vecchio vincolo rigido dei 3 trade. Se il mercato offre opportunità simultanee con rating A+, il bot apre posizioni mantenendo la size piena al 10% dell'equity per trade, fino a un tetto massimo di esposizione pari al 70% dell'equity totale (garantendo sempre un buffer liquido intoccabile del 30%).<br>
+                    <strong>• Trade Journal &amp; Post-Mortem Intelligence:</strong> Ogni operazione congelata all'ingresso registra il contesto multi-fattoriale (Macro Bias, Ciclo Battleplan, FLD Hurst, CVD Ratio, RSI, OBI e Sentiment). Alla chiusura, l'AI diagnostica Post-Mortem analizza il motivo della vincita o della perdita, arricchendo il registro delle lezioni apprese visualizzato nella tab Storico.<br>
+                    <strong>• Integrazione Fondamentale Sentinella:</strong> La Sentinella analizza in tempo reale le disclosure istituzionali (Capitol Hill Nancy Pelosi PTR) e le breaking news aziendali/downgrade. Gli asset con news flow negativo vengono automaticamente esclusi dai LONG; gli asset con acquisti istituzionali o catalyst positivi ricevono un Boost di priorità.<br>
+                    <strong>• Scudo Macro &amp; Ratchet Trailing a 4 Scalini:</strong> Monitora BTC 4H/1H per le crypto e SPY/VIX per Wall Street. Gli ordini operano con target asimmetrico 1:3 (+3.60% TP / -1.20% SL) e Ratchet Stop progressivo (+0.40% &rarr; rischio ridotto a -0.30%, +0.80% &rarr; Break-Even Safe, +1.20% &rarr; Lock +0.60%, +1.60% &rarr; Lock +1.00%).
                 </div>
             </div>
 
@@ -2987,6 +3003,51 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                     }).join('') + '</div>';
                 }
             }
+
+            // 7. Render Post-Mortem Journal & Learned Lessons
+            const jList = document.getElementById('journal-insights-list');
+            const jBadge = document.getElementById('journal-stats-badge');
+            const jData = data.journal || {};
+            const insights = jData.insights || [];
+            const jStats = jData.stats || {};
+
+            if (jBadge && jStats.total_trades > 0) {
+                jBadge.innerHTML = `Win Rate: <b style="color: var(--apple-green);">${jStats.win_rate}%</b> (${jStats.wins_count}V / ${jStats.losses_count}P) &bull; Cap: 70%`;
+            }
+
+            if (jList) {
+                if (insights.length === 0) {
+                    jList.innerHTML = `
+                        <div style="background: rgba(255,255,255,0.03); border-radius: 8px; padding: 10px 12px; border: 1px solid rgba(255,255,255,0.05);">
+                            <div style="color: var(--text-primary); font-weight: 600; margin-bottom: 2px;">Sistema in apprendimento attivo</div>
+                            <div style="color: var(--text-secondary); line-height: 1.4;">Ogni posizione chiusa registra il contesto analitico completo (Macro, Ciclo, CVD, OBI, Sentinella) e produce una diagnosi automatica post-mortem.</div>
+                        </div>
+                    `;
+                } else {
+                    jList.innerHTML = insights.slice(0, 4).map(ins => {
+                        const isWin = (ins.pnl_pct || 0) >= 0;
+                        const icon = isWin ? '🎓' : '🛡️';
+                        const badgeColor = isWin ? 'var(--apple-green)' : 'var(--apple-red)';
+                        const badgeBg = isWin ? 'rgba(48, 209, 88, 0.15)' : 'rgba(255, 69, 58, 0.15)';
+                        const pSign = isWin ? '+' : '';
+                        return `
+                            <div style="background: rgba(255,255,255,0.03); border-radius: 8px; padding: 9px 11px; border: 1px solid rgba(255,255,255,0.06);">
+                                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px;">
+                                    <div style="display: flex; align-items: center; gap: 6px;">
+                                        <span>${icon}</span>
+                                        <b style="color: var(--text-primary);">${ins.symbol}</b>
+                                        <span class="badge mono" style="font-size: 9px; padding: 1px 5px; background: ${badgeBg}; color: ${badgeColor}; border-radius: 4px;">${ins.close_reason || 'CHIUSO'}</span>
+                                    </div>
+                                    <span class="mono" style="font-weight: 700; color: ${badgeColor};">${pSign}${parseFloat(ins.pnl_pct || 0).toFixed(2)}% ($${parseFloat(ins.pnl_usd || 0).toFixed(2)})</span>
+                                </div>
+                                <div style="color: var(--text-secondary); line-height: 1.35; font-size: 11px;">
+                                    ${ins.post_mortem_analysis || ins.learned_lesson || 'Diagnostica quantitativa registrata.'}
+                                </div>
+                            </div>
+                        `;
+                    }).join('');
+                }
+            }
         }
 
 
@@ -3479,6 +3540,14 @@ def _build_dashboard_payload_sync(tf: str):
     # Interroga solo la query SQLite locale per il timeframe specifico (<2ms)
     history = perf_tracker.get_timeframe_history(tf)
 
+    journal_insights = []
+    journal_stats = {}
+    try:
+        journal_insights = _trade_journal_service.get_recent_insights(limit=10)
+        journal_stats = _trade_journal_service.get_learning_stats()
+    except Exception as e_ji:
+        pass
+
     return {
         "status": "online",
         "timestamp": datetime.now(ZoneInfo("Europe/Rome")).isoformat(),
@@ -3493,6 +3562,10 @@ def _build_dashboard_payload_sync(tf: str):
         "alpaca": {
             "account": s["a_summary"].get("account", {}),
             "positions": s["a_summary"].get("positions", [])
+        },
+        "journal": {
+            "insights": journal_insights,
+            "stats": journal_stats
         },
         "perf_history": history,
         "variations": s["variations"]

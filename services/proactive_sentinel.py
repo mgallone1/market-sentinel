@@ -680,3 +680,67 @@ class ProactiveSentinelService:
                 }
             ]
         }
+
+    def get_asset_fundamental_sentiment(self, symbol: str) -> Dict[str, Any]:
+        """
+        Valuta il sentiment fondamentale e informativo per un dato asset (Crypto o Wall Street).
+        Interroga:
+        1. Disclosure politiche recenti (es. Nancy Pelosi / Congress su NVDA, MSFT, AAPL)
+        2. Squawk wire / Breaking News aziendali recenti (sentiment positivo vs warning/downgrade)
+        3. Livello di allarme VIX o macro
+        Restituisce un dizionario con sentiment ('BULLISH', 'BEARISH', 'NEUTRAL'), score (-1.0 a +1.0) e boost flag.
+        """
+        clean_sym = symbol.replace("USDT", "").replace("-USD", "").upper()
+        res = {
+            "symbol": clean_sym,
+            "sentiment": "NEUTRAL",
+            "score": 0.0,
+            "has_political_interest": False,
+            "has_breaking_catalyst": False,
+            "reasons": []
+        }
+        try:
+            # 1. Verifica trade politici recenti (Nancy Pelosi / Congress)
+            pelosi_reports = self.day_trader_svc.get_congress_trades(member="pelosi", max_reports=3)
+            for rep in pelosi_reports:
+                for tr in rep.get("trades", []):
+                    t_sym = tr.get("ticker", "").upper()
+                    if t_sym == clean_sym or clean_sym in t_sym:
+                        side = tr.get("side", "").upper()
+                        res["has_political_interest"] = True
+                        if "BUY" in side or "PURCHASE" in side:
+                            res["score"] += 0.45
+                            res["reasons"].append(f"Acquisto istituzionale Capitol Hill (Nancy Pelosi PTR)")
+                        elif "SALE" in side or "SELL" in side:
+                            res["score"] -= 0.45
+                            res["reasons"].append(f"Vendita istituzionale Capitol Hill (Nancy Pelosi PTR)")
+
+            # 2. Verifica breaking news aziendali
+            try:
+                from services.news_sentiment import get_news_sentiment_service
+                news_svc = get_news_sentiment_service()
+                news_items = news_svc.fetch_yahoo_news([clean_sym], max_items_per_ticker=3)
+                for item in news_items:
+                    title = item.get("title", "").lower()
+                    if any(w in title for w in ["upgrade", "beats", "record", "surge", "bull", "partnership", "all-time high", "breakthrough"]):
+                        res["score"] += 0.25
+                        res["reasons"].append("News flow positivo / upgrade")
+                    elif any(w in title for w in ["downgrade", "probe", "investigation", "miss", "lawsuit", "fall", "drop", "warns", "slump"]):
+                        res["score"] -= 0.35
+                        res["reasons"].append("News flow avverso / downgrade")
+            except Exception as e_n:
+                logger.debug(f"Verifica news sentiment per {clean_sym}: {e_n}")
+
+            # Sintesi sentiment finale
+            if res["score"] >= 0.25:
+                res["sentiment"] = "BULLISH"
+                res["has_breaking_catalyst"] = True
+            elif res["score"] <= -0.25:
+                res["sentiment"] = "BEARISH"
+            else:
+                res["sentiment"] = "NEUTRAL"
+
+        except Exception as e_f:
+            logger.warning(f"Errore calcolo fundamental sentiment per {clean_sym}: {e_f}")
+
+        return res

@@ -61,11 +61,13 @@ from services.video_downloader import VideoDownloaderService
 from services.day_trader_service import DayTraderService
 from services.ensemble_predictor import EnsemblePredictorEngine
 from services.proactive_sentinel import ProactiveSentinelService
+from services.trade_journal_service import TradeJournalService
 
 supabase_svc = SupabaseService()
 llm_svc = LLMReasoningService()
 day_trader_svc = DayTraderService()
 sentinel_svc = ProactiveSentinelService()
+trade_journal_svc = TradeJournalService()
 ACTIVE_CHAT_IDS: Set[int] = set()
 
 def get_target_chat_ids() -> Set[int]:
@@ -3155,6 +3157,10 @@ def _sync_alpaca_risk_and_screening():
             if eq_bias == "BEARISH" and side == "long" and plpc < -0.15:
                 print(f"🛑 [Alpaca Macro Shield] Chiusura posizione Long contro-trend su {sym} (Macro SPY: BEARISH).")
                 alpaca_service.close_position(sym)
+                try:
+                    trade_journal_svc.record_exit(broker="ALPACA", symbol=sym, exit_price=float(p.get("current_price", 0.0) or 0.0), pnl_usd=unrealized, pnl_pct=plpc, close_reason="MACRO_SHIELD")
+                except Exception as e_j:
+                    print(f"[!] Warning journal exit: {e_j}")
                 notification_events.append((
                     f"🛑 *WALL STREET SHIELD: CHIUSURA PREVENTIVA CONTRO-TREND*\n"
                     f"────────────────────────\n"
@@ -3193,6 +3199,11 @@ def _sync_alpaca_risk_and_screening():
             if plpc >= 3.60 or plpc <= -1.20:
                 alpaca_service.close_position(sym)
                 is_tp = plpc >= 3.60
+                c_reason = "TAKE_PROFIT" if is_tp else "STOP_LOSS"
+                try:
+                    trade_journal_svc.record_exit(broker="ALPACA", symbol=sym, exit_price=float(p.get("current_price", 0.0) or 0.0), pnl_usd=unrealized, pnl_pct=plpc, close_reason=c_reason)
+                except Exception as e_j:
+                    print(f"[!] Warning journal exit: {e_j}")
                 event_title = "🎯 *TAKE PROFIT RAGGIUNTO (+3.60%)*" if is_tp else "🛑 *STOP LOSS ESEGUITO (-1.20%)*"
                 notification_events.append((
                     f"{event_title}\n"
@@ -3202,13 +3213,20 @@ def _sync_alpaca_risk_and_screening():
                     f"• *Disciplina Quantitativa:* Uscita disciplinata 1:3 eseguita su Alpaca."
                 ))
 
-        # 4. Dynamic Position Sizing (Fixed Fractional Compounding su conto Alpaca)
+        # 4. Dynamic Capital Exposure & Flexible Position Sizing (Fino al 70% del Capitale)
         acc_info = alpaca_service._api_request("account")
         equity_alpaca = float(acc_info.get("equity", 100000.0) or 100000.0) if isinstance(acc_info, dict) else 100000.0
-        dynamic_shares_budget = round(max(2000.0, min(25000.0, equity_alpaca * 0.10)), 0)
+        
+        # Calcolo esposizione reale a mercato attuale
+        current_invested_alpaca = sum(float(p.get("market_value", 0.0) or 0.0) for p in positions)
+        max_allowed_exposure_alpaca = equity_alpaca * 0.70  # Fino al 70% del capitale
+        available_risk_budget_alpaca = max(0.0, max_allowed_exposure_alpaca - current_invested_alpaca)
+        
+        # Size per singolo trade dinamica (10% dell'equity per operazione piena, o budget residuo se capiente)
+        dynamic_shares_budget = round(max(2000.0, min(equity_alpaca * 0.10, available_risk_budget_alpaca)), 0)
 
-        # 5. Screening Ingressi Selettivi Wall Street (Massimo 3 posizioni attive)
-        if len(positions) < 3 and eq_bias in ["BULLISH", "BEARISH", "NEUTRAL"]:
+        # 5. Screening Ingressi Flessibili Wall Street (Fino al 70% del capitale senza limite fisso a 3)
+        if available_risk_budget_alpaca >= 2000.0 and eq_bias in ["BULLISH", "BEARISH", "NEUTRAL"]:
             import yfinance as yf
             import pandas as pd
             from services.hurst_migliorino_cycles import HurstMigliorinoCycleService
@@ -3294,23 +3312,55 @@ def _sync_alpaca_risk_and_screening():
                             print(f"⚠️ [Filtro Ciclico Ignorato Long] {sym} ha vincolo ciclico ribassista. Scartato.")
                             continue
 
+                        # Filtro Fondamentale & Sentiment dalla Sentinella
+                        sentinel_data = sentinel_svc.get_asset_fundamental_sentiment(sym)
+                        if sentinel_data.get("sentiment") == "BEARISH":
+                            print(f"🛡️ [Sentinel Shield Wall Street] {sym} presenta news flow avverso / downgrade: {sentinel_data.get('reasons')}. Trade Long evitato.")
+                            continue
+
                         target_p = round(last_c * (1 + dynamic_tp_pct / 100.0), 2)
                         stop_p = round(last_c * (1 - dynamic_sl_pct / 100.0), 2)
 
                         print(f"📈 [Setup A+ WALL STREET LONG] {sym} (Macro: {eq_bias}, Ciclo: {tempo_battleplan}, Alpha: {alpha:+.2f}%, RSI: {rsi:.1f}, ATR-SL: {dynamic_sl_pct}%). Ordine bracket {shares} azioni...")
                         order_res = alpaca_service.place_bracket_order(sym, shares, "buy", target_p, stop_p)
                         if "error" not in order_res:
+                            # Registra nel Trade Journal con contesto analitico completo
+                            try:
+                                trade_journal_svc.record_entry(
+                                    broker="ALPACA",
+                                    symbol=sym,
+                                    side="LONG",
+                                    entry_price=last_c,
+                                    notional_usd=shares * last_c,
+                                    context={
+                                        "macro_bias": eq_bias,
+                                        "cycle_tempo": tempo_battleplan,
+                                        "alpha_spy": round(alpha, 2),
+                                        "rsi": round(rsi, 1),
+                                        "vix": round(vix_val, 1),
+                                        "sentinel_sentiment": sentinel_data.get("sentiment"),
+                                        "sentinel_reasons": sentinel_data.get("reasons", []),
+                                        "sentinel_boost": sentinel_data.get("has_breaking_catalyst", False)
+                                    }
+                                )
+                            except Exception as e_j:
+                                print(f"[!] Warning trade journal entry: {e_j}")
+
+                            boost_txt = f"\n• *Fondamentali Sentinella:* `{sentinel_data.get('sentiment')}` ({', '.join(sentinel_data.get('reasons', ['Allineato']))})" if sentinel_data.get("reasons") else ""
                             notification_events.append((
                                 f"🟢 *NUOVO ORDINE WALL STREET APERTO (ALPACA)*\n"
                                 f"────────────────────────\n"
                                 f"• *Titolo:* `{sym}` (x{shares} quote)\n"
-                                f"• *Controvalore Dinamico (10% Equity):* `${dynamic_shares_budget:,.0f}`\n"
+                                f"• *Controvalore Dinamico (Cap 70%):* `${shares * last_c:,.0f}`\n"
                                 f"• *Macro Regime SPY:* `{eq_bias}` | *Ciclica 1H:* `{tempo_battleplan or 'Allineata'}`\n"
                                 f"• *Alpha vs SPY:* `{alpha:+.2f}%` | *VIX:* `{vix_val:.1f}` ({vix_delta_pct:+.1f}%)\n"
-                                f"• *Target R:R 1:3 ATR:* TP `${target_p:.2f}` (+{dynamic_tp_pct:.2f}%) | SL `${stop_p:.2f}` (-{dynamic_sl_pct:.2f}%)\n"
-                                f"• *Confluenza:* VIX Dynamic Shield e Battleplan sincronizzati."
+                                f"• *Target R:R 1:3 ATR:* TP `${target_p:.2f}` (+{dynamic_tp_pct:.2f}%) | SL `${stop_p:.2f}` (-{dynamic_sl_pct:.2f}%){boost_txt}\n"
+                                f"• *Confluenza:* VIX Dynamic Shield, Battleplan e Sentinella sincronizzati."
                             ))
-                        break
+                        # Consenti ulteriori ingressi fino al raggiungimento del cap del 70% di capitale
+                        available_risk_budget_alpaca -= (shares * last_c)
+                        if available_risk_budget_alpaca < 2000.0:
+                            break
             except Exception as e_screening:
                 print(f"[!] Errore screening equities Alpaca: {e_screening}")
 
@@ -3379,6 +3429,10 @@ def _sync_crypto_risk_and_screening():
             if macro_bias == "BEARISH" and bside == "BUY" and pnl_pct < -0.10:
                 print(f"🛑 [Macro Shield] Chiusura posizione Long contro-trend su {bsym} (Macro: BEARISH).")
                 bybit_service.close_position(bsym)
+                try:
+                    trade_journal_svc.record_exit(broker="BYBIT", symbol=bsym, exit_price=float(bp.get("current_price", 0.0) or entry_p), pnl_usd=unrealized, pnl_pct=pnl_pct, close_reason="MACRO_SHIELD")
+                except Exception as e_j:
+                    print(f"[!] Warning journal exit: {e_j}")
                 notification_events.append((
                     f"🛑 *MACRO SHIELD: CHIUSURA PREVENTIVA CONTRO-TREND*\n"
                     f"────────────────────────\n"
@@ -3391,6 +3445,10 @@ def _sync_crypto_risk_and_screening():
             elif macro_bias == "BULLISH" and bside == "SELL" and pnl_pct < -0.10:
                 print(f"🛑 [Macro Shield] Chiusura posizione Short contro-trend su {bsym} (Macro: BULLISH).")
                 bybit_service.close_position(bsym)
+                try:
+                    trade_journal_svc.record_exit(broker="BYBIT", symbol=bsym, exit_price=float(bp.get("current_price", 0.0) or entry_p), pnl_usd=unrealized, pnl_pct=pnl_pct, close_reason="MACRO_SHIELD")
+                except Exception as e_j:
+                    print(f"[!] Warning journal exit: {e_j}")
                 notification_events.append((
                     f"🛑 *MACRO SHIELD: CHIUSURA PREVENTIVA CONTRO-TREND*\n"
                     f"────────────────────────\n"
@@ -3474,6 +3532,11 @@ def _sync_crypto_risk_and_screening():
             if pnl_pct >= 3.60 or pnl_pct <= -1.20:
                 bybit_service.close_position(bsym)
                 is_tp = pnl_pct >= 3.60
+                c_reason = "TAKE_PROFIT" if is_tp else "STOP_LOSS"
+                try:
+                    trade_journal_svc.record_exit(broker="BYBIT", symbol=bsym, exit_price=float(bp.get("current_price", 0.0) or entry_p), pnl_usd=unrealized, pnl_pct=pnl_pct, close_reason=c_reason)
+                except Exception as e_j:
+                    print(f"[!] Warning journal exit: {e_j}")
                 event_title = "🎯 *TAKE PROFIT RAGGIUNTO (+3.60%)*" if is_tp else "🛑 *STOP LOSS ESEGUITO (-1.20%)*"
                 notification_events.append((
                     f"{event_title}\n"
@@ -3483,23 +3546,34 @@ def _sync_crypto_risk_and_screening():
                     f"• *Gestione Disciplinata:* Esecuzione target 1:3 asimmetrico completata su Bybit."
                 ))
 
-        # 3. Dynamic Position Sizing (Fixed Fractional Compounding sul Capitale Bybit)
-        # Calcola la size in percentuale al conto (10% dell'equity totale UTA, min $3,000, max $30,000)
+        # 3. Dynamic Capital Exposure & Flexible Position Sizing (Fino al 70% del Capitale Bybit)
         wallet = bybit_service.get_wallet_summary()
         bybit_equity = float(wallet.get("total_equity", 160000.0) or 160000.0)
-        dynamic_notional = round(max(3000.0, min(30000.0, bybit_equity * 0.10)), 0)
-
-        # Screening ingressi selettivi A+ (Massimo 3 posizioni, guidate dal Macro Bias, Filtro Ciclico, Squeeze Funding e Alpha vs BTC)
+        
         bybit_positions = bybit_service.get_open_positions()
-        if len(bybit_positions) < 3 and macro_bias in ["BULLISH", "BEARISH", "NEUTRAL"]:
-            active_bybit_syms = {bp["symbol"] for bp in bybit_positions}
+        active_bybit_syms = {bp["symbol"] for bp in bybit_positions}
+        
+        # Calcolo esposizione reale a mercato attuale (somma dei nozionali aperti)
+        current_invested_bybit = sum(float(bp.get("size", 0.0) or 0.0) * float(bp.get("entry_price", 0.0) or 0.0) for bp in bybit_positions)
+        max_allowed_exposure_bybit = bybit_equity * 0.70  # Fino al 70% dell'equity
+        available_risk_budget_bybit = max(0.0, max_allowed_exposure_bybit - current_invested_bybit)
+        
+        # Sizing a pieno carico (10% dell'equity per trade, max $30,000, o budget residuo se capiente)
+        dynamic_notional = round(max(3000.0, min(bybit_equity * 0.10, available_risk_budget_bybit)), 0)
+
+        # Screening ingressi flessibili A+ (Oltre 3 trade contemporanei, fino al cap del 70% del capitale)
+        if available_risk_budget_bybit >= 3000.0 and macro_bias in ["BULLISH", "BEARISH", "NEUTRAL"]:
             bybit_candidates = [
                 ("SOLUSDT", "SOL-USD", "Solana"),
                 ("BTCUSDT", "BTC-USD", "Bitcoin"),
                 ("ETHUSDT", "ETH-USD", "Ethereum"),
                 ("LINKUSDT", "LINK-USD", "Chainlink"),
                 ("AVAXUSDT", "AVAX-USD", "Avalanche"),
-                ("XRPUSDT", "XRP-USD", "Ripple")
+                ("XRPUSDT", "XRP-USD", "Ripple"),
+                ("ADAUSDT", "ADA-USD", "Cardano"),
+                ("SUIUSDT", "SUI-USD", "Sui"),
+                ("NEARUSDT", "NEAR-USD", "Near Protocol"),
+                ("DOGEUSDT", "DOGE-USD", "Dogecoin")
             ]
 
             # 1. Recupera Tickers Bybit per estrarre Funding Rate e Variazione 24h (Alpha vs BTC)
@@ -3635,20 +3709,54 @@ def _sync_crypto_risk_and_screening():
                             print(f"⚠️ [Filtro Ciclico Ignorato Short] {b_sym} in inizio ciclo/spinta rialzista ({tempo_battleplan}). Short evitato.")
                             continue
 
+                        # Filtro Fondamentale & Sentiment dalla Sentinella
+                        sentinel_data = sentinel_svc.get_asset_fundamental_sentiment(b_sym)
+                        if sentinel_data.get("sentiment") == "BULLISH" and sentinel_data.get("has_political_interest"):
+                            print(f"🛡️ [Sentinel Shield Short] {b_sym} presenta catalizzatore rialzista / acquisto istituzionale: {sentinel_data.get('reasons')}. Short evitato.")
+                            continue
+
                         print(f"📉 [Setup A+ SHORT Confluente] {b_sym} (Macro: {macro_bias}, Ciclo: {tempo_battleplan}, Funding: {c_funding:+.4f}%, Alpha: {c_alpha:+.2f}%, RSI: {rsi:.1f}, VolRatio: {vol_ratio:.2f}x, ATR-SL: {dynamic_sl_pct}%). Ordine dinamico ${dynamic_notional:,.0f}...")
                         order_res = bybit_service.place_order(b_sym, side="Sell", notional_usd=dynamic_notional, take_profit_pct=dynamic_tp_pct, stop_loss_pct=dynamic_sl_pct)
                         if "error" not in order_res:
+                            # Registra nel Trade Journal
+                            try:
+                                trade_journal_svc.record_entry(
+                                    broker="BYBIT",
+                                    symbol=b_sym,
+                                    side="SHORT",
+                                    entry_price=last_c,
+                                    notional_usd=dynamic_notional,
+                                    context={
+                                        "macro_bias": macro_bias,
+                                        "cycle_tempo": tempo_battleplan,
+                                        "hurst_fld": hurst_fld,
+                                        "funding_rate": c_funding,
+                                        "alpha_btc": c_alpha,
+                                        "cvd_ratio": cvd_ratio,
+                                        "rsi": round(rsi, 1),
+                                        "vol_ratio": round(vol_ratio, 2),
+                                        "sentinel_sentiment": sentinel_data.get("sentiment"),
+                                        "sentinel_reasons": sentinel_data.get("reasons", [])
+                                    }
+                                )
+                            except Exception as e_j:
+                                print(f"[!] Warning trade journal entry: {e_j}")
+
+                            boost_txt = f"\n• *Sentinella Macro/News:* `{sentinel_data.get('sentiment')}` ({', '.join(sentinel_data.get('reasons', ['Allineato']))})" if sentinel_data.get("reasons") else ""
                             notification_events.append((
                                 f"🔻 *NUOVO ORDINE SHORT APERTO (SETUP A+)*\n"
                                 f"────────────────────────\n"
                                 f"• *Asset:* `{b_sym}` ({b_name})\n"
-                                f"• *Notionale Dinamico (10% Equity):* `${dynamic_notional:,.0f}`\n"
+                                f"• *Notionale Dinamico (Cap 70%):* `${dynamic_notional:,.0f}`\n"
                                 f"• *Macro Regime:* `{macro_bias}` | *Ciclica 1H:* `{tempo_battleplan or 'Allineata'}`\n"
                                 f"• *Derivati & Alpha:* Funding `{c_funding:+.4f}%` | Alpha BTC `{c_alpha:+.2f}%`\n"
-                                f"• *Target R:R 1:3 ATR:* Take Profit +{dynamic_tp_pct:.2f}% | Stop Loss -{dynamic_sl_pct:.2f}%\n"
-                                f"• *Confluenza:* OBI Confermato, FLD Hurst e Squeeze Shield attivi."
+                                f"• *Target R:R 1:3 ATR:* Take Profit +{dynamic_tp_pct:.2f}% | Stop Loss -{dynamic_sl_pct:.2f}%{boost_txt}\n"
+                                f"• *Confluenza:* OBI Confermato, FLD Hurst, Sentinella e Squeeze Shield attivi."
                             ))
-                        break
+                        # Scala budget residuo per consentire trade multipli fino al cap del 70%
+                        available_risk_budget_bybit -= dynamic_notional
+                        if available_risk_budget_bybit < 3000.0:
+                            break
 
                     # INGRESSO LONG (Ammesso se consentito dal Macro Bias, Ciclica e Flusso CVD)
                     elif allow_long and (last_c > or_high) and (last_c > ema20 > ema50) and (rsi > 52) and (vol_ratio >= min_vol_required):
@@ -3675,20 +3783,54 @@ def _sync_crypto_risk_and_screening():
                             print(f"⚠️ [Filtro Ciclico Ignorato Long] {b_sym} ha vincolo ciclico ribassista in corso. Trade scartato.")
                             continue
 
+                        # Filtro Fondamentale & Sentiment dalla Sentinella
+                        sentinel_data = sentinel_svc.get_asset_fundamental_sentiment(b_sym)
+                        if sentinel_data.get("sentiment") == "BEARISH":
+                            print(f"🛡️ [Sentinel Shield Long] {b_sym} presenta news flow avverso / downgrade: {sentinel_data.get('reasons')}. Long evitato.")
+                            continue
+
                         print(f"📈 [Setup A+ LONG Confluente] {b_sym} (Macro: {macro_bias}, Ciclo: {tempo_battleplan}, Funding: {c_funding:+.4f}%, Alpha: {c_alpha:+.2f}%, RSI: {rsi:.1f}, VolRatio: {vol_ratio:.2f}x, ATR-SL: {dynamic_sl_pct}%). Ordine dinamico ${dynamic_notional:,.0f}...")
                         order_res = bybit_service.place_order(b_sym, side="Buy", notional_usd=dynamic_notional, take_profit_pct=dynamic_tp_pct, stop_loss_pct=dynamic_sl_pct)
                         if "error" not in order_res:
+                            # Registra nel Trade Journal
+                            try:
+                                trade_journal_svc.record_entry(
+                                    broker="BYBIT",
+                                    symbol=b_sym,
+                                    side="LONG",
+                                    entry_price=last_c,
+                                    notional_usd=dynamic_notional,
+                                    context={
+                                        "macro_bias": macro_bias,
+                                        "cycle_tempo": tempo_battleplan,
+                                        "hurst_fld": hurst_fld,
+                                        "funding_rate": c_funding,
+                                        "alpha_btc": c_alpha,
+                                        "cvd_ratio": cvd_ratio,
+                                        "rsi": round(rsi, 1),
+                                        "vol_ratio": round(vol_ratio, 2),
+                                        "sentinel_sentiment": sentinel_data.get("sentiment"),
+                                        "sentinel_reasons": sentinel_data.get("reasons", [])
+                                    }
+                                )
+                            except Exception as e_j:
+                                print(f"[!] Warning trade journal entry: {e_j}")
+
+                            boost_txt = f"\n• *Sentinella Macro/News:* `{sentinel_data.get('sentiment')}` ({', '.join(sentinel_data.get('reasons', ['Allineato']))})" if sentinel_data.get("reasons") else ""
                             notification_events.append((
                                 f"🟢 *NUOVO ORDINE LONG APERTO (SETUP A+)*\n"
                                 f"────────────────────────\n"
                                 f"• *Asset:* `{b_sym}` ({b_name})\n"
-                                f"• *Notionale Dinamico (10% Equity):* `${dynamic_notional:,.0f}`\n"
+                                f"• *Notionale Dinamico (Cap 70%):* `${dynamic_notional:,.0f}`\n"
                                 f"• *Macro Regime:* `{macro_bias}` | *Ciclica 1H:* `{tempo_battleplan or 'Allineata'}`\n"
                                 f"• *Derivati & Alpha:* Funding `{c_funding:+.4f}%` | Alpha BTC `{c_alpha:+.2f}%`\n"
-                                f"• *Target R:R 1:3 ATR:* Take Profit +{dynamic_tp_pct:.2f}% | Stop Loss -{dynamic_sl_pct:.2f}%\n"
-                                f"• *Confluenza:* OBI Confermato, FLD Hurst e Squeeze Shield attivi."
+                                f"• *Target R:R 1:3 ATR:* Take Profit +{dynamic_tp_pct:.2f}% | Stop Loss -{dynamic_sl_pct:.2f}%{boost_txt}\n"
+                                f"• *Confluenza:* OBI Confermato, FLD Hurst, Sentinella e Squeeze Shield attivi."
                             ))
-                        break
+                        # Scala budget residuo per consentire trade multipli fino al cap del 70%
+                        available_risk_budget_bybit -= dynamic_notional
+                        if available_risk_budget_bybit < 3000.0:
+                            break
                 except Exception as ex:
                     pass
     except Exception as e:
