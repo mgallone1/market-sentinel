@@ -15,8 +15,8 @@ logger = logging.getLogger(__name__)
 
 class AlpacaExecutionService:
     def __init__(self):
-        self.api_key = os.environ.get("ALPACA_API_KEY", "")
-        self.secret_key = os.environ.get("ALPACA_SECRET_KEY", "")
+        self.api_key = os.environ.get("ALPACA_API_KEY", "").strip()
+        self.secret_key = os.environ.get("ALPACA_SECRET_KEY", "").strip()
         self.is_paper = os.environ.get("ALPACA_PAPER_TRADE", "true").lower() == "true"
         self._load_credentials()
 
@@ -27,17 +27,19 @@ class AlpacaExecutionService:
             try:
                 with open(env_path) as f:
                     env = dict(line.strip().split('=', 1) for line in f if '=' in line)
-                    self.api_key = env.get('ALPACA_API_KEY', '')
-                    self.secret_key = env.get('ALPACA_SECRET_KEY', '')
+                    self.api_key = env.get('ALPACA_API_KEY', '').strip()
+                    self.secret_key = env.get('ALPACA_SECRET_KEY', '').strip()
                     self.is_paper = env.get('ALPACA_PAPER_TRADE', 'true').lower() == 'true'
             except Exception as e:
                 logger.error(f"Error reading local alpaca env: {e}")
 
-        # Hardcoded fallback for paper demo
-        if not self.api_key:
-            self.api_key = "PKWXW7ZOPAE4UPWCHT6DEJVJO6"
-            self.secret_key = "2eEjHoVUYdmKM2YcQL1M2JhP3mtMMc2pLgN3wSgd5rsL"
-            self.is_paper = True
+        # Se le credenziali mancano, errore esplicito: vietato qualsiasi fallback o valore di default
+        if not self.api_key or not self.secret_key:
+            raise ValueError(
+                "CRITICAL SECURITY ERROR: Credenziali Alpaca assenti! "
+                "ALPACA_API_KEY e ALPACA_SECRET_KEY devono essere fornite tramite variabili d'ambiente. "
+                "È vietato l'uso di chiavi hardcoded o credenziali di default."
+            )
 
         self.base_url = "https://paper-api.alpaca.markets/v2" if self.is_paper else "https://api.alpaca.markets/v2"
 
