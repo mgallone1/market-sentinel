@@ -3479,6 +3479,11 @@ def _fetch_shared_live_state_sync():
         b_closed_res = _bybit_service.session.get_closed_pnl(category="linear", limit=50)
         raw_closed = b_closed_res.get("result", {}).get("list", [])
         b_closed = sorted(raw_closed, key=lambda c: int(c.get("updatedTime", 0) or 0), reverse=True)
+        # Sincronizza i trade chiusi con il Trade Journal per estrarre lezioni e statistiche
+        try:
+            _trade_journal_service.sync_historical_trades_from_broker(b_closed, broker="BYBIT")
+        except Exception:
+            pass
     except Exception:
         b_closed = []
 

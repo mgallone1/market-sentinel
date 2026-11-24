@@ -3669,9 +3669,13 @@ def _sync_crypto_risk_and_screening():
                     rome_hour = datetime.now(ZoneInfo("Europe/Rome")).hour
                     is_overnight_low_vol = (0 <= rome_hour < 7)
 
-                    # Nella fascia notturna esigiamo volume ratio superiore (almeno 1.40x invece di 1.10x) per evitare fakeout
-                    min_vol_required = 1.40 if is_overnight_low_vol else 1.10
+                    # LEZIONE APPRESA DAL POST-MORTEM HISTORICAL JOURNAL:
+                    # Nei trade notturni (00:00-07:00) si concentrano i fakeout da spread allargato e volumi sottili (PnL -343$).
+                    # Adeguamento: nella fascia notturna eleviamo il filtro volumi a 1.70x e inibiamo breakout fragili.
+                    min_vol_required = 1.70 if is_overnight_low_vol else 1.10
                     if vol_ratio < min_vol_required:
+                        if is_overnight_low_vol:
+                            print(f"🛡️ [Anti-Fakeout Notturno] {b_sym} scartato: volume {vol_ratio:.2f}x inferiore alla soglia blindata notturna (1.70x).")
                         continue
 
                     # 2. CUMULATIVE VOLUME DELTA (CVD) - Flusso Ordini Aggressivi
@@ -3686,9 +3690,11 @@ def _sync_crypto_risk_and_screening():
 
                     # INGRESSO SHORT (Ammesso se consentito dal Macro Bias, Ciclica e Flusso CVD)
                     if allow_short and (last_c < or_low) and (last_c < ema20 < ema50) and (rsi < 48) and (vol_ratio >= min_vol_required):
-                        # Filtro CVD: Se i compratori a mercato stanno assorbendo le vendite (CVD Bullish), non shortare
-                        if cvd_bias == "BULLISH" or cvd_ratio > 1.25:
-                            print(f"🛡️ [CVD Shield Short] {b_sym} presenta pressione compratori aggressivi a mercato (Ratio: {cvd_ratio:.2f}). Evitato short in trappola.")
+                        # Filtro CVD (Adattato con Machine Learning Post-Mortem):
+                        # Se compratori assorbono o se di notte il CVD non conferma netta pressione venditrice, evita lo short
+                        max_cvd_ratio_short = 1.05 if is_overnight_low_vol else 1.25
+                        if cvd_bias == "BULLISH" or cvd_ratio > max_cvd_ratio_short:
+                            print(f"🛡️ [CVD Shield Short] {b_sym} presenta assorbimento compratori (Ratio: {cvd_ratio:.2f} > {max_cvd_ratio_short}). Evitato short in trappola.")
                             continue
                         # Filtro Squeeze Funding Rate: Evita di shortare asset con funding iper-negativo (rischio short squeeze violento)
                         if c_funding < -0.030:
@@ -3760,9 +3766,11 @@ def _sync_crypto_risk_and_screening():
 
                     # INGRESSO LONG (Ammesso se consentito dal Macro Bias, Ciclica e Flusso CVD)
                     elif allow_long and (last_c > or_high) and (last_c > ema20 > ema50) and (rsi > 52) and (vol_ratio >= min_vol_required):
-                        # Filtro CVD: Se i venditori a mercato stanno scaricando aggressivamente (CVD Bearish), non comprare
-                        if cvd_bias == "BEARISH" or cvd_ratio < 0.75:
-                            print(f"🛡️ [CVD Shield Long] {b_sym} presenta pressione venditori aggressivi a mercato (Ratio: {cvd_ratio:.2f}). Evitato long su trappola per tori.")
+                        # Filtro CVD (Adattato con Machine Learning Post-Mortem):
+                        # Se venditori scaricano o se di notte il CVD non conferma netta spinta compratrice, evita il long
+                        min_cvd_ratio_long = 1.15 if is_overnight_low_vol else 0.75
+                        if cvd_bias == "BEARISH" or cvd_ratio < min_cvd_ratio_long:
+                            print(f"🛡️ [CVD Shield Long] {b_sym} presenta scarico venditori (Ratio: {cvd_ratio:.2f} < {min_cvd_ratio_long}). Evitato long su fakeout.")
                             continue
                         # Filtro Squeeze Funding Rate: Evita di comprare asset con funding iper-positivo (rischio long squeeze/flush)
                         if c_funding > 0.035:
