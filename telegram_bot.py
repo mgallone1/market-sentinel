@@ -3552,9 +3552,10 @@ def _sync_crypto_risk_and_screening():
                     tempo_battleplan = cycle_data.get("tempo_battleplan", "")
                     hurst_fld = float(cycle_data.get("hurst_fld_value", 0.0) or 0.0)
 
-                    # Regole di ammissibilità Direzionale con Filtro Ciclico di Hurst & Migliorino:
-                    allow_short = (macro_bias == "BEARISH") or (macro_bias == "NEUTRAL" and ("3° TEMPO" in tempo_battleplan.upper() or "4° TEMPO" in tempo_battleplan.upper() or last_c < hurst_fld))
-                    allow_long = (macro_bias == "BULLISH") or (macro_bias == "NEUTRAL" and ("1° TEMPO" in tempo_battleplan.upper() or "2° TEMPO" in tempo_battleplan.upper() or last_c > hurst_fld))
+                    # Regole di ammissibilità Direzionale con Filtro Ciclico di Hurst & Migliorino (Anti-Fakeout):
+                    # Se il macro trend 4H non è esplicitamente rialzista, i LONG richiedono sia 1°/2° tempo ciclico SIA prezzo > FLD (congiunzione stretta AND, non OR)
+                    allow_short = (macro_bias == "BEARISH") or (macro_bias == "NEUTRAL" and ("3° TEMPO" in tempo_battleplan.upper() or "4° TEMPO" in tempo_battleplan.upper()) and last_c < hurst_fld)
+                    allow_long = (macro_bias == "BULLISH") or (macro_bias == "NEUTRAL" and ("1° TEMPO" in tempo_battleplan.upper() or "2° TEMPO" in tempo_battleplan.upper()) and last_c > hurst_fld)
 
                     # INGRESSO SHORT (Ammesso se consentito dal Macro Bias e dalla Ciclica)
                     if allow_short and (last_c < or_low) and (last_c < ema20 < ema50) and (rsi < 48) and (vol_ratio >= 1.10):

@@ -346,6 +346,12 @@ class ProactiveSentinelService:
         if weekend_mode:
             logger.info("[Sentinel] Modalità Weekend attiva: controllo grandi asset azionari tradizionali sospeso.")
             return "weekend_crypto_only"
+        # Verifica orario di mercato per titoli azionari USA
+        # Prima delle 10:00 CET le azioni USA sono ferme e mostrano la variazione di IERI:
+        # non inviare alert su dati non aggiornati di ieri mattina!
+        current_hour_rome = datetime.now(ROME_TZ).hour
+        is_us_equities_trading_hours = (current_hour_rome >= 10 and current_hour_rome < 23)
+
         # Solo i Grandi della Terra, Zero Spazzatura
         major_assets = [
             # 1. Mega-Cap Tech & AI Leaders
@@ -414,6 +420,14 @@ class ProactiveSentinelService:
 
         for ma in major_assets:
             ticker = ma["ticker"]
+            asset_type = ma.get("type", "")
+
+            # Se è un titolo azionario USA (megacap, growth_leader, crypto_proxy, chip, defense, pharma, finance, industry)
+            # e siamo prima delle 10:00 CET, salta il controllo: le borse USA sono chiuse e il dato è la chiusura di ieri!
+            if asset_type in ["megacap", "growth_leader", "crypto_proxy", "chip", "defense", "pharma", "finance", "industry", "luxury"]:
+                if not is_us_equities_trading_hours:
+                    continue
+
             last_alert = self.ticker_cooldowns.get(ticker, 0.0)
             if now_ts - last_alert < self.cooldown_seconds:
                 continue
