@@ -230,11 +230,13 @@ class NewsSentimentService:
                             pub_formatted = dt_str[:16]
 
                         sentiment = cls.analyze_text(clean_text)
+                        age_min = age_hours * 60.0 if 'age_hours' in locals() else 999.0
                         squawk_items.append({
                             "title": clean_text[:140],
                             "summary": clean_text,
                             "link": f"https://t.me/{ch}",
                             "published": pub_formatted,
+                            "age_minutes": age_min,
                             "source": f"Squawk Wire (@{ch})",
                             "sentiment": sentiment
                         })
@@ -307,6 +309,12 @@ class NewsSentimentService:
         now_ts = time.time()
 
         for item in squawk_items:
+            # Filtro tassativo di freschezza: solo notizie degli ultimi 45 minuti!
+            # Scarta categoricamente notizie di ieri o ore fa!
+            age_m = item.get("age_minutes", 999.0)
+            if age_m > max_age_minutes:
+                continue
+
             title = item.get("title", "")
             raw_text = f"{title} {item.get('summary', '')}".lower()
 

@@ -38,7 +38,7 @@ class ProactiveSentinelService:
         # Cooldown per ticker (timestamp dell'ultimo alert inviato)
         self.ticker_cooldowns: Dict[str, float] = {}
         # Cooldown standard: 4 ore (14400 secondi) per lo stesso ticker
-        self.cooldown_seconds = 14400
+        self.cooldown_seconds = 21600
 
         # Tracciamento alert geopolitici e macro shock
         self.last_geopolitical_title: Optional[str] = None
@@ -49,7 +49,7 @@ class ProactiveSentinelService:
         # Tracciamento giornaliero alert
         self.today_date_str = ""
         self.alerts_sent_today = 0
-        self.max_alerts_per_day = 12  # Fino a 12 alert giornalieri per garantire che nessuna disclosure politica o shock venga bloccato
+        self.max_alerts_per_day = 6  # Fino a 12 alert giornalieri per garantire che nessuna disclosure politica o shock venga bloccato
 
         # Ultimo doc_id Pelosi e Trump notificato
         self.last_pelosi_doc_id: Optional[str] = None
