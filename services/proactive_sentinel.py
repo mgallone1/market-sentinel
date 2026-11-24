@@ -26,6 +26,29 @@ from services.llm_reasoning import LLMReasoningService, clean_telegram_markdown
 
 logger = logging.getLogger(__name__)
 
+import json
+import os
+
+SENTINEL_STATE_FILE = "/app/data/sentinel_state.json" if os.path.exists("/app/data") else os.path.join(os.path.dirname(os.path.dirname(__file__)), "sentinel_state.json")
+
+def _load_sentinel_state() -> dict:
+    try:
+        if os.path.exists(SENTINEL_STATE_FILE):
+            with open(SENTINEL_STATE_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+    except Exception as e:
+        logger.warning(f"Errore lettura sentinel_state.json: {e}")
+    return {}
+
+def _save_sentinel_state(state: dict):
+    try:
+        os.makedirs(os.path.dirname(SENTINEL_STATE_FILE), exist_ok=True)
+        with open(SENTINEL_STATE_FILE, "w", encoding="utf-8") as f:
+            json.dump(state, f, indent=2)
+    except Exception as e:
+        logger.warning(f"Errore scrittura sentinel_state.json: {e}")
+
+
 ROME_TZ = ZoneInfo("Europe/Rome")
 
 
@@ -47,9 +70,12 @@ class ProactiveSentinelService:
         self.geopolitical_cooldown_seconds = 10800  # 3 ore
 
         # Tracciamento giornaliero alert
-        self.today_date_str = ""
-        self.alerts_sent_today = 0
-        self.max_alerts_per_day = 6  # Fino a 12 alert giornalieri per garantire che nessuna disclosure politica o shock venga bloccato
+        # Caricamento stato persistente anti-spam (sopravvive a riavvii di Railway e deploy)
+        saved_state = _load_sentinel_state()
+        self.today_date_str = saved_state.get("today_date_str", "")
+        self.alerts_sent_today = saved_state.get("alerts_sent_today", 0)
+        self.ticker_cooldowns = saved_state.get("ticker_cooldowns", {})
+        self.max_alerts_per_day = 5  # Massimo 5 alert al giorno in totale  # Fino a 12 alert giornalieri per garantire che nessuna disclosure politica o shock venga bloccato
 
         # Ultimo doc_id Pelosi e Trump notificato
         self.last_pelosi_doc_id: Optional[str] = None
@@ -81,11 +107,22 @@ class ProactiveSentinelService:
         """Verifica se oggi è sabato o domenica a Roma."""
         return datetime.now(ROME_TZ).weekday() >= 5
 
+    def _save_current_state(self):
+        """Salva lo stato corrente su disco per evitare ripetizioni dopo i riavvii."""
+        _save_sentinel_state({
+            "today_date_str": self.today_date_str,
+            "alerts_sent_today": self.alerts_sent_today,
+            "ticker_cooldowns": self.ticker_cooldowns,
+            "last_pelosi_doc_id": self.last_pelosi_doc_id,
+            "last_trump_doc_id": self.last_trump_doc_id
+        })
+
     def _reset_daily_counter_if_needed(self):
         today_str = datetime.now(ROME_TZ).strftime("%Y-%m-%d")
         if self.today_date_str != today_str:
             self.today_date_str = today_str
             self.alerts_sent_today = 0
+            self._save_current_state()
 
     async def run_sentinel_watchdog(self, app) -> Optional[str]:
         """
@@ -352,6 +389,7 @@ class ProactiveSentinelService:
                     await self._broadcast_alert(app, chat_ids, alert_msg, reply_markup=markup)
                     self.ticker_cooldowns[ticker] = now_ts
                     self.alerts_sent_today += 1
+                    self._save_current_state()
                     logger.info(f"[Sentinel] Alert portafoglio inviato per {ticker} ({change_pct:+.2f}%)!")
                     return f"portfolio_alert_{ticker}"
 
@@ -443,7 +481,7 @@ class ProactiveSentinelService:
 
             # Se è un titolo azionario USA (megacap, growth_leader, crypto_proxy, chip, defense, pharma, finance, industry)
             # e siamo prima delle 10:00 CET, salta il controllo: le borse USA sono chiuse e il dato è la chiusura di ieri!
-            if asset_type in ["megacap", "growth_leader", "crypto_proxy", "chip", "defense", "pharma", "finance", "industry", "luxury"]:
+            if asset_type in ["megacap", "growth_leader", "crypto_proxy", "chip", "defense", "pharma", "finance", "industry", "luxury", "commodity", "energy"]:
                 if not is_us_equities_trading_hours:
                     continue
 
@@ -507,6 +545,7 @@ class ProactiveSentinelService:
                     await self._broadcast_alert(app, chat_ids, alert_msg, reply_markup=markup)
                     self.ticker_cooldowns[ticker] = now_ts
                     self.alerts_sent_today += 1
+                    self._save_current_state()
                     logger.info(f"[Sentinel] Alert grande asset inviato per {ticker} ({change_pct:+.2f}%)!")
                     return f"major_asset_alert_{ticker}"
 
@@ -563,6 +602,7 @@ class ProactiveSentinelService:
                     await self._broadcast_alert(app, chat_ids, pred_msg, reply_markup=markup)
                     self.ticker_cooldowns[f"pred_{cand}"] = now_ts
                     self.alerts_sent_today += 1
+                    self._save_current_state()
                     logger.info(f"[Sentinel] Predictive Squeeze alert inviato per {cand}!")
                     return f"predictive_squeeze_{cand}"
 
