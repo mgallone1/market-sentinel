@@ -3485,7 +3485,11 @@ def _fetch_shared_live_state_sync():
     if not _bybit_service:
         _bybit_service = BybitExecutionService()
     if not _alpaca_service:
-        _alpaca_service = AlpacaExecutionService()
+        try:
+            _alpaca_service = AlpacaExecutionService()
+        except Exception as e_alp:
+            # Credenziali Alpaca assenti: la dashboard mostra solo Bybit invece di fallire
+            print(f"[!] Dashboard: Alpaca disabilitato ({e_alp})")
 
     try:
         b_wallet = _bybit_service.get_wallet_summary()
