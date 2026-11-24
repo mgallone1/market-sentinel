@@ -39,7 +39,8 @@ def _env_b(name: str, default: bool) -> bool:
 class RiskConfig:
     enabled: bool = True
     max_daily_loss_pct: float = 2.0
-    max_trades_per_day: int = 6
+    max_trades_per_day: int = 0  # 0 = illimitati nella giornata; limite spostato sui trade contemporanei
+    max_concurrent_trades: int = 6
     max_open_risk_pct: float = 3.0
     max_loss_per_trade_pct: float = 0.75
     min_reward_risk: float = 1.5
@@ -55,7 +56,8 @@ class RiskConfig:
         return cls(
             enabled=_env_b("RISK_ENABLED", True),
             max_daily_loss_pct=_env_f("RISK_MAX_DAILY_LOSS_PCT", 2.0),
-            max_trades_per_day=int(_env_f("RISK_MAX_TRADES_PER_DAY", 6)),
+            max_trades_per_day=int(_env_f("RISK_MAX_TRADES_PER_DAY", 0)),
+            max_concurrent_trades=int(_env_f("RISK_MAX_CONCURRENT_TRADES", 6)),
             max_open_risk_pct=_env_f("RISK_MAX_OPEN_RISK_PCT", 3.0),
             max_loss_per_trade_pct=_env_f("RISK_MAX_LOSS_PER_TRADE_PCT", 0.75),
             min_reward_risk=_env_f("RISK_MIN_REWARD_RISK", 1.5),
@@ -228,8 +230,11 @@ def check_entry(cfg: RiskConfig, state: RiskState, broker: str, equity: float,
     if daily_pnl <= -start * cfg.max_daily_loss_pct / 100.0:
         return False, f"DAILY_LOSS: {daily_pnl / start * 100:.2f}% <= -{cfg.max_daily_loss_pct}%"
 
-    if r.get("trades_opened", 0) >= cfg.max_trades_per_day:
+    if cfg.max_trades_per_day > 0 and r.get("trades_opened", 0) >= cfg.max_trades_per_day:
         return False, f"TRADES_PER_DAY: {r['trades_opened']} >= {cfg.max_trades_per_day}"
+
+    if cfg.max_concurrent_trades > 0 and len(open_positions) >= cfg.max_concurrent_trades:
+        return False, f"MAX_CONCURRENT_TRADES: {len(open_positions)} >= {cfg.max_concurrent_trades}"
 
     if not stop_price or stop_price <= 0:
         if cfg.require_stop:
