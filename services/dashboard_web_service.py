@@ -194,7 +194,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             height: 8px;
             border-radius: 50%;
             background: var(--apple-green);
-            box-shadow: 0 0 10px var(--apple-green);
+            box-shadow: none;
             animation: pulse-apple 2s infinite ease-in-out;
         }
         @keyframes pulse-apple {
@@ -358,21 +358,21 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             background: rgba(10, 132, 255, 0.22);
             color: var(--apple-blue);
             border: 0.5px solid rgba(10, 132, 255, 0.4);
-            box-shadow: 0 2px 10px rgba(10, 132, 255, 0.25);
+            box-shadow: none;
             font-weight: 700;
         }
         .apple-segment-item.active-alpaca {
             background: rgba(255, 159, 10, 0.22);
             color: var(--apple-amber);
             border: 0.5px solid rgba(255, 159, 10, 0.4);
-            box-shadow: 0 2px 10px rgba(255, 159, 10, 0.25);
+            box-shadow: none;
             font-weight: 700;
         }
         .apple-segment-item.active-total {
             background: rgba(191, 90, 242, 0.22);
             color: #BF5AF2;
             border: 0.5px solid rgba(191, 90, 242, 0.4);
-            box-shadow: 0 2px 10px rgba(191, 90, 242, 0.25);
+            box-shadow: none;
             font-weight: 700;
         }
 
@@ -1332,7 +1332,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             </div>
 
             <!-- Quantitative Trading Compass & Setup Readiness Radar -->
-            <div class="section-header-apple">Trading Compass &amp; Setup Radar</div>
+            <div class="section-header-apple">Metriche di Portafoglio &amp; Setup Pre-Trade</div>
             <div class="apple-group-card">
                 <div class="apple-cell" data-tip="Misura la convergenza statistica e salute dei trade aperti. A mercato flat rimane giustamente sul benchmark neutro di 50.">
                     <div class="cell-leading">
@@ -1347,7 +1347,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 
                 <div class="apple-cell" data-tip="Radar pre-trade: monitora l'avvicinamento al trigger d'ingresso tramite Macro Bias, Ciclica Hurst, RSI e Order Book OBI.">
                     <div class="cell-leading">
-                        <span class="cell-title">Setup Readiness Radar</span>
+                        <span class="cell-title">Indice di Confluenza Pre-Trade</span>
                         <span class="cell-subtitle" id="readiness-desc-el">Accumulo in corso</span>
                         <div style="width: 140px; height: 4px; background: var(--surface-glass); border-radius: 2px; overflow: hidden; margin-top: 6px;">
                             <div id="readiness-bar-fill" style="width: 50%; height: 100%; background: var(--apple-blue); transition: width 0.3s ease;"></div>
@@ -1429,13 +1429,13 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             <div id="journal-intelligence-card" class="apple-group-card" style="margin-bottom: 20px; border-left: 3px solid var(--apple-blue); padding: 14px 16px;">
                 <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
                     <div style="display: flex; align-items: center; gap: 6px;">
-                        <span style="font-size: 13px; font-weight: 700; color: var(--text-primary); letter-spacing: 0.2px;">DIAGNOSTICA STORICA & LEARNING ENGINE</span>
-                        <span class="badge mono" style="font-size: 9px; padding: 1px 6px; background: rgba(10, 132, 255, 0.15); color: var(--apple-blue); border-radius: 4px; font-weight: 700;">AUDIT QUANTITATIVO</span>
+                        <span style="font-size: 13px; font-weight: 700; color: var(--text-primary); letter-spacing: 0.2px;">REGISTRO ESECUZIONI &amp; STATISTICHE</span>
+                        <span class="badge mono" style="font-size: 9px; padding: 1px 6px; background: rgba(255, 255, 255, 0.08); color: var(--text-secondary); border-radius: 4px; font-weight: 600;">STATISTICA ESEGUITI</span>
                     </div>
                     <span id="journal-stats-badge" class="mono" style="font-size: 11px; color: var(--text-secondary);">Capitale allocabile: fino a 70%</span>
                 </div>
                 <div id="journal-insights-list" style="display: flex; flex-direction: column; gap: 8px; font-size: 11px;">
-                    <div style="color: var(--text-secondary); font-style: italic;">Inizializzazione registro lezioni apprese...</div>
+                    <div style="color: var(--text-secondary); font-style: italic;">Caricamento archivio esecuzioni...</div>
                 </div>
             </div>
 
@@ -1509,12 +1509,12 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             <!-- Card 2: Trading Compass & Metriche Quant -->
             <div class="acc-cell" style="padding: 14px; text-align: left;">
                 <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
-                    <strong style="color: var(--text-main); font-size: 13px;">2. Trading Compass &amp; Setup Readiness Radar (Pre-Trade)</strong>
+                    <strong style="color: var(--text-main); font-size: 13px;">2. Metriche di Rischio &amp; Indice di Confluenza (Pre-Trade)</strong>
                     <span class="badge mono" style="background: var(--green); color: #fff; font-size: 9px; padding: 2px 6px; border-radius: 3px;">STATISTICA &amp; RADAR</span>
                 </div>
                 <div style="display: flex; flex-direction: column; gap: 8px; font-size: 11px; line-height: 1.45;">
                     <div><strong>• Health &amp; Alignment Score (0-100):</strong> Misura la salute dei <em>trade già aperti a mercato</em> (convergenza di win rate, profit factor, posizioni a break-even e PnL fluttuante). A mercato flat rimane giustamente sul benchmark neutro di 50.</div>
-                    <div><strong>• Setup Readiness Radar (0-100) (Attivo a Mercato Flat):</strong> Monitora in tempo reale quanto il mercato è vicino ad attivare un nuovo ordine di trading anche se non ci sono posizioni aperte. Si compone di 4 pilastri da 25 punti: <strong>Macro Bias (4H+1H)</strong>, <strong>Ciclica Hurst/FLD</strong>, <strong>Momentum RSI</strong> e <strong>Order Book OBI</strong>. Sopra 75 = trigger imminente; 55-74 = fase di maturazione/accumulo; sotto 55 = stand-by rigido.</div>
+                    <div><strong>• Indice di Confluenza Pre-Trade (0-100):</strong> Monitora in tempo reale quanto il mercato è vicino ad attivare un nuovo ordine di trading anche se non ci sono posizioni aperte. Si compone di 4 pilastri da 25 punti: <strong>Macro Bias (4H+1H)</strong>, <strong>Ciclica Hurst/FLD</strong>, <strong>Momentum RSI</strong> e <strong>Order Book OBI</strong>. Sopra 75 = trigger imminente; 55-74 = fase di maturazione/accumulo; sotto 55 = stand-by rigido.</div>
                     <div><strong>• Expected Value (EV):</strong> Il valore matematico atteso per ogni trade. Se positivo (es. <code>+$45</code>), ogni operazione genera mediamente 45 dollari di profitto nel tempo.</div>
                     <div><strong>• R:R Reale vs Target:</strong> Rapporto tra vincita media e perdita media. Con Take Profit +3.6% e Stop Loss -1.2%, il rapporto target è <strong>1:3.0</strong> (1 euro di rischio per 3 euro di potenziale utile).</div>
                     <div><strong>• Profit Factor:</strong> Rapporto tra tutti i profitti lordi e tutte le perdite lorde. Valori sopra 1.5 indicano un sistema statistico profittevole.</div>
@@ -1525,13 +1525,13 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             <!-- Card 3: Regola Aurea Macro BTC Shield, Squeeze Funding & Alpha vs BTC -->
             <div class="acc-cell" style="padding: 14px; text-align: left;">
                 <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
-                    <strong style="color: var(--text-main); font-size: 13px;">3. Motore Quantitativo Adattivo, Trade Journal &amp; Cap Capitale 70%</strong>
-                    <span class="badge mono" style="background: var(--amber); color: #fff; font-size: 9px; padding: 2px 6px; border-radius: 3px;">QUANT SUITE PRO</span>
+                    <strong style="color: var(--text-main); font-size: 13px;">3. Gestione del Rischio, Registro Operazioni &amp; Cap Capitale 70%</strong>
+                    <span class="badge mono" style="background: var(--amber); color: #fff; font-size: 9px; padding: 2px 6px; border-radius: 3px;">GESTIONE RISCHIO</span>
                 </div>
                 <div style="font-size: 11px; color: var(--text-muted); line-height: 1.45;">
                     Il sistema combina trend strutturale, cicli di Hurst/Migliorino, Order Flow CVD e la nuova architettura di Trade Journaling e Cap Dinamico:<br>
                     <strong>• Esposizione Flessibile Fino al 70% del Capitale:</strong> Rimosso il vecchio vincolo rigido dei 3 trade. Se il mercato offre opportunità simultanee con rating A+, il bot apre posizioni mantenendo la size piena al 10% dell'equity per trade, fino a un tetto massimo di esposizione pari al 70% dell'equity totale (garantendo sempre un buffer liquido intoccabile del 30%).<br>
-                    <strong>• Trade Journal &amp; Post-Mortem Intelligence:</strong> Ogni operazione congelata all'ingresso registra il contesto multi-fattoriale (Macro Bias, Ciclo Battleplan, FLD Hurst, CVD Ratio, RSI, OBI e Sentiment). Alla chiusura, l'AI diagnostica Post-Mortem analizza il motivo della vincita o della perdita, arricchendo il registro delle lezioni apprese visualizzato nella tab Storico.<br>
+                    <strong>• Registro Esecuzioni &amp; Storico Dettagliato:</strong> Ogni posizione aperta registra i parametri quantitativi di ingresso (Macro Bias, Ciclo, CVD Ratio, RSI, OBI). Alla chiusura, viene archiviata la causale oggettiva di uscita (Take Profit, Stop Loss o Ratchet Lock) per il calcolo trasparente delle metriche storiche.<br>
                     <strong>• Integrazione Fondamentale Sentinella:</strong> La Sentinella analizza in tempo reale le disclosure istituzionali (Capitol Hill Nancy Pelosi PTR) e le breaking news aziendali/downgrade. Gli asset con news flow negativo vengono automaticamente esclusi dai LONG; gli asset con acquisti istituzionali o catalyst positivi ricevono un Boost di priorità.<br>
                     <strong>• Scudo Macro &amp; Ratchet Trailing a 4 Scalini:</strong> Monitora BTC 4H/1H per le crypto e SPY/VIX per Wall Street. Gli ordini operano con target asimmetrico 1:3 (+3.60% TP / -1.20% SL) e Ratchet Stop progressivo (+0.40% &rarr; rischio ridotto a -0.30%, +0.80% &rarr; Break-Even Safe, +1.20% &rarr; Lock +0.60%, +1.60% &rarr; Lock +1.00%).
                 </div>
@@ -1584,7 +1584,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             <!-- Card 8: Notifiche Push Telegram Smart -->
             <div class="acc-cell" style="padding: 14px; text-align: left;">
                 <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
-                    <strong style="color: var(--text-main); font-size: 13px;">7. Notifiche Push Telegram Intelligenti (Zero Spam) &amp; Recap 22:00</strong>
+                    <strong style="color: var(--text-main); font-size: 13px;">7. Notifiche Telegram &amp; Report Serale 22:00</strong>
                     <span class="badge mono" style="background: var(--green); color: #fff; font-size: 9px; padding: 2px 6px; border-radius: 3px;">ALERT 24/7</span>
                 </div>
                 <div style="font-size: 11px; color: var(--text-muted); line-height: 1.45;">
@@ -1600,12 +1600,12 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             <!-- Card 8: Scheda Tattica Operativa, Livelli Interattivi & Diagnostica Ciclica -->
             <div class="acc-cell" style="padding: 14px; text-align: left;">
                 <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
-                    <strong style="color: var(--text-main); font-size: 13px;">8. Scheda Tattica Azionabile &amp; Proiezione Futura Ciclica</strong>
-                    <span class="badge mono" style="background: var(--apple-blue); color: #fff; font-size: 9px; padding: 2px 6px; border-radius: 3px;">ACTIONABLE QUANT</span>
+                    <strong style="color: var(--text-main); font-size: 13px;">8. Analisi Ciclica &amp; Livelli Operativi</strong>
+                    <span class="badge mono" style="background: var(--apple-blue); color: #fff; font-size: 9px; padding: 2px 6px; border-radius: 3px;">ANALISI TECNICA</span>
                 </div>
                 <div style="font-size: 11px; color: var(--text-muted); line-height: 1.45;">
                     Toccando qualsiasi asset della watchlist o trade aperto si apre il pannello operativo tattico:<br>
-                    <strong>• Piano Tattico Azionabile (Cosa fare ADESSO):</strong> Un box evidente che sintetizza senza ambiguità l'azione da compiere (<em>COMPRA / ACCUMULO</em>, <em>SHORT / HEDGE</em>, <em>PREPARA LIQUIDITÀ</em>, <em>STAND-BY</em>) indicando il Target di Take Profit suggerito da Fibonacci, lo Stop Loss di difesa e le barre stimate prima della prossima finestra di inversione ciclica.<br>
+                    <strong>• Livelli Operativi (Cosa fare ADESSO):</strong> Un box evidente che sintetizza senza ambiguità l'azione da compiere (<em>COMPRA / ACCUMULO</em>, <em>SHORT / HEDGE</em>, <em>PREPARA LIQUIDITÀ</em>, <em>STAND-BY</em>) indicando il Target di Take Profit suggerito da Fibonacci, lo Stop Loss di difesa e le barre stimate prima della prossima finestra di inversione ciclica.<br>
                     <strong>• Filtro Livelli a Pillole Interattive:</strong> Puoi isolare le curve con un tocco: <em>Tutti i Livelli</em>, <em>Prezzo + Monte Carlo</em> (intervallo di probabilità stocastico a cono P05-P95), <em>Hurst FLD</em> (linea di demarcazione T/2) oppure <em>Battleplan 4 Tempi</em> (sinusoide di Giuseppe Migliorino).<br>
                     <strong>• Hurst FLD (Future Line of Demarcation):</strong> Traslazione a mezzo periodo T/2: il superamento al rialzo della FLD conferma la nascita del nuovo ciclo con target sul massimo; la rottura al ribasso proietta verso il pavimento ciclico.<br>
                     <strong>• Battleplan e Vincolo di Migliorino:</strong> Mostra in quale dei 4 tempi (quarti) si trova il ciclo corrente (~32 barre per il mensile T+2). Se il minimo di partenza viene violato, scatta il vincolo ribassista obbligatorio secondo le leggi cicliche.<br>
@@ -1651,7 +1651,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 <div id="tactical-box" class="tactical-decision-box">
                     <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 4px;">
                         <div>
-                            <div style="font-size: 9px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-secondary); font-weight: 700;">Piano Tattico Azionabile</div>
+                            <div style="font-size: 9px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-secondary); font-weight: 700;">Livelli Operativi</div>
                             <div id="tactical-verdict" style="font-size: 14px; font-weight: 800; color: var(--apple-green); margin-top: 1px;">CALCOLO IN CORSO...</div>
                         </div>
                         <span id="tactical-badge" class="badge mono" style="padding: 3px 8px; font-size: 10px; border-radius: 6px; font-weight: 700; background: rgba(48,209,88,0.2); color: var(--apple-green);">ANALISI</span>
@@ -3027,8 +3027,8 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 if (insights.length === 0) {
                     jList.innerHTML = `
                         <div style="background: rgba(255,255,255,0.03); border-radius: 8px; padding: 10px 12px; border: 1px solid rgba(255,255,255,0.05);">
-                            <div style="color: var(--text-primary); font-weight: 600; margin-bottom: 2px;">Sistema in apprendimento attivo</div>
-                            <div style="color: var(--text-secondary); line-height: 1.4;">Ogni posizione chiusa registra il contesto analitico completo (Macro, Ciclo, CVD, OBI, Sentinella) e produce una diagnosi automatica post-mortem.</div>
+                            <div style="color: var(--text-primary); font-weight: 600; margin-bottom: 2px;">Registro Esecuzioni</div>
+                            <div style="color: var(--text-secondary); line-height: 1.4;">Ogni posizione chiusa registra i parametri di esecuzione e la motivazione tecnica di uscita.</div>
                         </div>
                     `;
                 } else {
