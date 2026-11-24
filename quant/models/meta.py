@@ -109,7 +109,8 @@ class MetaModel:
             self.subs_ = [MetaModel(k, self.n_splits, self.embargo_frac, self.seed, C_grid=self.C_grid,
                                     **self.params).fit(X, y, t1, w) for k in ("logit", "hgb")]
             return self
-        cols = _cols(X)
+        # scarta colonne costanti o interamente NaN nel training (HGB fallisce con < 2 valori distinti)
+        cols = [c for c in _cols(X) if X[c].nunique(dropna=True) >= 2]
         self.columns_ = cols
         order = np.argsort(pd.DatetimeIndex(t1.index).asi8, kind="stable")
         Xs = X[cols].to_numpy(float)[order]

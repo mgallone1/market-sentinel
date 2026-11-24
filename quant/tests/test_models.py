@@ -107,3 +107,17 @@ def test_noise_report_verdict_no_edge():
                           hmm_kwargs=dict(n_init=1, n_iter=15), model_params=FAST)
     v = verdict({n: dict(r) for n, r in res.summary.to_dict("index").items()}, res.pbo)
     assert v["verdict"] == NO_EDGE and not v["deployable"]
+
+
+def test_constant_and_empty_columns_are_dropped():
+    import numpy as np, pandas as pd
+    from quant.models.meta import MetaModel
+    rng = np.random.default_rng(0)
+    n = 400
+    idx = pd.date_range("2024-01-01", periods=n, freq="1D", tz="UTC")
+    X = pd.DataFrame({"a": rng.normal(size=n), "const": 1.0, "empty": np.nan}, index=idx)
+    y = (rng.random(n) < 0.5).astype(int)
+    t1 = pd.Series(idx + pd.Timedelta(days=2), index=idx)
+    m = MetaModel("hgb", max_iter=20).fit(X, y, t1)
+    assert m.columns_ == ["a"]
+    assert np.all(np.isfinite(m.predict_proba(X)))
