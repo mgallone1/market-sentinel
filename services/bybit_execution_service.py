@@ -2,6 +2,50 @@ import os
 from typing import Dict, Any, List, Optional
 from pybit.unified_trading import HTTP
 
+
+import re as _re
+
+
+def make_order_link_id(symbol: str, side: str, bar_open_ts) -> str:
+    """Id deterministico (<=36 char, [A-Za-z0-9_-]) da simbolo, lato e open-time della barra chiusa del segnale.
+    bar_open_ts: epoch in secondi (int/float) o pandas.Timestamp/datetime."""
+    sym = _re.sub(r"[^A-Za-z0-9]", "", str(symbol).upper())[:8]
+    s = "L" if str(side).lower() in ("l", "long", "buy", "compra") else "S"
+    ts = bar_open_ts.timestamp() if hasattr(bar_open_ts, "timestamp") else float(bar_open_ts)
+    return f"ms{sym}{s}{int(ts // 60)}"[:36]
+
+
+def is_duplicate_link_id_response(res) -> bool:
+    """True se Bybit segnala orderLinkId duplicato (retCode 10014 o retMsg 'duplicate')."""
+    if not isinstance(res, dict):
+        return False
+    if res.get("retCode") == 10014:
+        return True
+    return "duplicate" in str(res.get("retMsg", "")).lower()
+
+
+def classify_btc_bias(closes_4h, closes_1h) -> str:
+    """Classificazione macro BTC (EMA20/50 su 4h e 1h; serie dalla piu' vecchia alla piu' recente, solo barre chiuse)."""
+    def _ema(vals, span):
+        a = 2.0 / (span + 1.0)
+        e = vals[0]
+        for v in vals[1:]:
+            e = a * v + (1.0 - a) * e
+        return e
+    ema20_4h, ema50_4h, last_4h = _ema(closes_4h, 20), _ema(closes_4h, 50), closes_4h[-1]
+    ema50_1h, last_1h = _ema(closes_1h, 50), closes_1h[-1]
+    if last_4h > ema50_4h and ema20_4h >= ema50_4h:
+        return "BULLISH"
+    if last_4h < ema50_4h and last_1h < ema50_1h:
+        return "BEARISH"
+    return "NEUTRAL"
+
+
+def hysteresis_bias(current: str, previous: str) -> str:
+    """Bias confermato solo se le due valutazioni consecutive concordano, altrimenti NEUTRAL."""
+    return current if current == previous else "NEUTRAL"
+
+
 class BybitExecutionService:
     """
     Servizio di Trading Ufficiale per Bybit (Unified Trading Account - Linear USDT Perpetuals).
@@ -214,10 +258,13 @@ class BybitExecutionService:
         notional_usd: float = 2500.0,
         take_profit_pct: Optional[float] = 2.5,
         stop_loss_pct: Optional[float] = 1.5,
-        leverage: int = 1
+        leverage: int = 1,
+        order_link_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Piazza un ordine di apertura LONG o SHORT su Bybit Linear USDT.
+        order_link_id: id idempotente (max 36 char, [A-Za-z0-9_-]) inviato come orderLinkId:
+        Bybit rifiuta un secondo ordine con lo stesso id (-> {"duplicate": True}).
         Calcola automaticamente la quantità di contratti in base al notional in dollari
         e imposta leva, Take Profit e Stop Loss se specificati.
         """
@@ -282,9 +329,13 @@ class BybitExecutionService:
             order_params["takeProfit"] = tp_str
         if sl_str:
             order_params["stopLoss"] = sl_str
+        if order_link_id:
+            order_params["orderLinkId"] = str(order_link_id)
 
         try:
             res = self.session.place_order(**order_params)
+            if is_duplicate_link_id_response(res):
+                return {"error": "duplicate_order_link_id", "duplicate": True}
             if res.get("retCode") == 0:
                 return {
                     "status": "success",
@@ -299,6 +350,8 @@ class BybitExecutionService:
                 }
             return {"error": res.get("retMsg", "Errore piazzamento ordine Bybit")}
         except Exception as e:
+            if is_duplicate_link_id_response({"retMsg": str(e), "retCode": getattr(e, "status_code", None)}):
+                return {"error": "duplicate_order_link_id", "duplicate": True}
             return {"error": str(e)}
 
     def update_stop_loss(self, symbol: str, new_stop_loss: float) -> Dict[str, Any]:

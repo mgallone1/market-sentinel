@@ -12,6 +12,15 @@ import pandas as pd
 import numpy as np
 from typing import Dict, Any, List, Optional
 
+def _round_sig(x: float, sig: int = 8) -> float:
+    """Arrotonda a cifre significative (sicuro per prezzi di monete a basso valore)."""
+    x = float(x)
+    if x == 0 or not np.isfinite(x):
+        return x
+    from math import floor, log10
+    return round(x, sig - 1 - int(floor(log10(abs(x)))))
+
+
 class HurstMigliorinoCycleService:
     @staticmethod
     def calculate_cycle_metrics(df: pd.DataFrame) -> Dict[str, Any]:
@@ -47,13 +56,16 @@ class HurstMigliorinoCycleService:
         bars_since_settimanale_min = window_settimanale - 1 - min_settimanale_rel
 
         curr_price = float(prices[-1])
+        # Origine del ciclo: minimo ESCLUDENDO la barra corrente (altrimenti il vincolo non scatta mai)
+        origin_intermedio = float(np.min(prices[-window_intermedio:-1]))
+        origin_mensile = float(np.min(prices[-window_mensile:-1]))
 
         # 4. Calcolo Vincolo Ciclico di Migliorino:
         # Se il prezzo attuale buca il minimo di partenza del ciclo in corso, scatta il VINCOLO RIBASSISTA
         vincolo_mensile = "LIBERO (Fase Rialzista o Indeterminata)"
-        if curr_price < min_intermedio_price:
+        if curr_price < origin_intermedio:
             vincolo_mensile = "⚠️ VINCOLO RIBASSISTA ATTIVO SU INTERMEDIO T+3: Il prezzo ha rotto il minimo di partenza del ciclo. Tutti i successivi sottocicli (T+1 e T) hanno vincolo a chiudere sotto i rispettivi massimi."
-        elif bars_since_mensile_min > 16 and curr_price < min_mensile_price:
+        elif bars_since_mensile_min > 16 and curr_price < origin_mensile:
             vincolo_mensile = "🔴 VINCOLO RIBASSISTA SU CICLO MENSILE T+2: Chiusura della seconda metà del ciclo mensile in correzione verso il minimo."
 
         # 5. Hurst Future Line of Demarcation (FLD) per Ciclo a 20 barre (T+1)
@@ -100,7 +112,7 @@ class HurstMigliorinoCycleService:
             spiegazione_fld = f"Il prezzo attuale ({curr_price:.2f} €) è SOTTO la linea spartiacque FLD ({fld_val:.2f} €): proiezione ribassista verso il completamento della chiusura."
 
         return {
-            "current_price": round(curr_price, 2),
+            "current_price": _round_sig(curr_price),
             "bars_since_intermedio_min": int(bars_since_intermedio_min),
             "bars_since_mensile_min": int(bars_since_mensile_min),
             "bars_since_settimanale_min": int(bars_since_settimanale_min),
@@ -110,6 +122,6 @@ class HurstMigliorinoCycleService:
             "consiglio_pratico": consiglio_pratico,
             "vincolo_migliorino": vincolo_mensile,
             "spiegazione_vincolo": spiegazione_vincolo,
-            "hurst_fld_value": round(fld_val, 2),
+            "hurst_fld_value": _round_sig(fld_val),
             "hurst_fld_signal": spiegazione_fld
         }

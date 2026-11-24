@@ -49,12 +49,16 @@ from services.hurst_migliorino_cycles import HurstMigliorinoCycleService
 from services.cycle_radar import CycleRadarService
 from services.advanced_predictive_system import AdvancedPredictiveSystem
 from services.alpaca_execution_service import AlpacaExecutionService
-from services.bybit_execution_service import BybitExecutionService
+from services.bybit_execution_service import BybitExecutionService, make_order_link_id, classify_btc_bias, hysteresis_bias
 from services.risk_budget_manager import RiskBudgetManager
 from services.dashboard_web_service import create_web_app
 from aiohttp import web
 
-alpaca_service = AlpacaExecutionService()
+try:
+    alpaca_service = AlpacaExecutionService()
+except Exception as _e_alp:
+    alpaca_service = None
+    print(f"[!] Alpaca disabilitato: {_e_alp}")
 bybit_service = BybitExecutionService()
 risk_manager = RiskBudgetManager(max_risk_usd=100.0, min_rr=2.0)
 from services.video_downloader import VideoDownloaderService
@@ -1844,6 +1848,9 @@ async def _handle_text_message_core(update: Update, context: ContextTypes.DEFAUL
                 stop_loss = round(last_p * 1.015, 2)
                 take_profit = round(last_p * 0.97, 2)
 
+            if alpaca_service is None:
+                await send_safe_text(update, "Alpaca non configurato.")
+                return
             # Invia ordine bracket su Alpaca
             order_res = alpaca_service.place_bracket_order(
                 symbol=resolved_sym,
@@ -2580,6 +2587,10 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         await sentinel_cmd(update, context)
         return
 
+    if data in ("alpaca_refresh", "alpaca_close_all", "buy_gld", "buy_uso", "buy_slv", "buy_crypto_btc", "buy_crypto_eth", "buy_crypto_sol") and alpaca_service is None:
+        await query.message.reply_text("Alpaca non configurato.")
+        return
+
     if data == "alpaca_refresh":
         summary = alpaca_service.get_account_summary()
         acc = summary.get("account", {})
@@ -2939,6 +2950,8 @@ async def auto_flatten_overnight_job(application):
     per evitare commissioni di overnight e gap notturni.
     LE CRYPTO SONO ESCLUSE: il mercato crypto scambia 24/7 ed è gestito dal bot dedicato.
     """
+    if alpaca_service is None:
+        return
     try:
         summary = alpaca_service.get_account_summary()
         positions = summary.get("positions", [])
@@ -2981,49 +2994,42 @@ def _get_btc_macro_bias():
     2. Trend Tattico Intraday 1 Ora (EMA 20 e 50 di BTCUSDT)
     3. Fase Ciclica Hurst & Battleplan di Migliorino sul ciclo a 1H
     
+    ISTERESI (stateless, restart-safe): il bias e' calcolato sull'ultima 1H chiusa E sulla 1H chiusa
+    precedente; viene restituito solo se le due valutazioni concordano, altrimenti NEUTRAL. Questo evita
+    chiusure Macro-Shield causate dal flip di una singola candela.
+
     Se c'è discordanza tra 4H e 1H (es. 4H ancora sotto EMA50 ma 1H in solido recupero con rottura FLD),
     il mercato entra in stato NEUTRAL (Transizione). In stato NEUTRAL il bot sblocca l'operatività
     selettiva verificando la singola ciclica dell'asset.
     """
     try:
-        # Candele 4 Ore (Strutturale)
-        res_4h = bybit_service.session.get_kline(category="linear", symbol="BTCUSDT", interval="240", limit=60)
+        # Candele 4 Ore (Strutturale) con open-time, solo barre chiuse
+        res_4h = bybit_service.session.get_kline(category="linear", symbol="BTCUSDT", interval="240", limit=200)
         c_4h = res_4h.get("result", {}).get("list", [])
         if not c_4h or len(c_4h) < 30:
             return "NEUTRAL"
-        closes_4h = [float(c[4]) for c in reversed(c_4h)]
+        # Scarta la candela in formazione (Bybit restituisce per prima la piu' recente, ancora aperta)
+        c_4h = list(reversed(c_4h[1:]))
+        t_4h = [int(c[0]) for c in c_4h]
+        closes_4h = [float(c[4]) for c in c_4h]
 
         # Candele 1 Ora (Tattico Intraday)
-        res_1h = bybit_service.session.get_kline(category="linear", symbol="BTCUSDT", interval="60", limit=60)
+        res_1h = bybit_service.session.get_kline(category="linear", symbol="BTCUSDT", interval="60", limit=200)
         c_1h = res_1h.get("result", {}).get("list", [])
-        closes_1h = [float(c[4]) for c in reversed(c_1h)] if c_1h else closes_4h
-
-        def _ema(vals, span):
-            a = 2.0 / (span + 1.0)
-            e = vals[0]
-            for v in vals[1:]:
-                e = a * v + (1.0 - a) * e
-            return e
-
-        ema20_4h = _ema(closes_4h, 20)
-        ema50_4h = _ema(closes_4h, 50)
-        last_4h = closes_4h[-1]
-
-        ema20_1h = _ema(closes_1h, 20)
-        ema50_1h = _ema(closes_1h, 50)
-        last_1h = closes_1h[-1]
-
-        # 1. Pieno Allineamento Rialzista
-        if last_4h > ema50_4h and ema20_4h >= ema50_4h:
-            return "BULLISH"
-        
-        # 2. Pieno Allineamento Ribassista (4H sotto EMA50 E 1H sotto EMA50)
-        elif last_4h < ema50_4h and last_1h < ema50_1h:
-            return "BEARISH"
-        
-        # 3. Fase di Transizione / Rimbalzo Intraday (es. 1H sopra EMA50/20 ma 4H sotto EMA50)
-        else:
+        c_1h = list(reversed(c_1h[1:])) if c_1h else c_1h
+        if not c_1h or len(c_1h) < 3:
             return "NEUTRAL"
+        t_1h = [int(c[0]) for c in c_1h]
+        closes_1h = [float(c[4]) for c in c_1h]
+
+        current = classify_btc_bias(closes_4h, closes_1h)
+        # Valutazione precedente: senza l'ultima 1h chiusa; 4h solo se chiusa (open+4h) entro la chiusura della 1h precedente
+        prev_close_ms = t_1h[-1]
+        n4 = len([t for t in t_4h if t + 4 * 3600 * 1000 <= prev_close_ms])
+        if n4 < 30:
+            return "NEUTRAL"
+        previous = classify_btc_bias(closes_4h[:n4], closes_1h[:-1])
+        return hysteresis_bias(current, previous)
 
     except Exception as e_bias:
         print(f"[!] Errore calcolo bias BTC macro: {e_bias}")
@@ -3104,6 +3110,8 @@ def _sync_alpaca_risk_and_screening():
     3. Protezione Trailing Lock / Break-Even Safe sulle posizioni aperte
     4. Ranking Alpha vs SPY e Filtro Ciclico di Hurst & Migliorino per ingressi selettivi A+
     """
+    if alpaca_service is None:
+        return []
     global _LAST_NOTIFIED_EQUITIES_BIAS
     notification_events = []
     try:
@@ -3237,6 +3245,8 @@ def _sync_alpaca_risk_and_screening():
             # Scarica dati per ranking Alpha vs SPY
             try:
                 bulk_df = yf.download(universe_equities + ["SPY"], period="1mo", interval="1h", progress=False)
+                from services.indicators_safe import wilder_rsi, atr_wilder, drop_forming_bar
+                bulk_df = drop_forming_bar(bulk_df, 60)
                 spy_c = bulk_df["Close"]["SPY"].dropna()
                 spy_24h_ch = ((spy_c.iloc[-1] - spy_c.iloc[-7]) / spy_c.iloc[-7]) * 100 if len(spy_c) >= 8 else 0.0
 
@@ -3266,10 +3276,7 @@ def _sync_alpaca_risk_and_screening():
 
                     # Indicatori tecnici 1H
                     delta = sc.diff()
-                    gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
-                    loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
-                    rs = gain / (loss + 1e-9)
-                    rsi = float((100 - (100 / (1 + rs))).iloc[-1])
+                    rsi = float(wilder_rsi(sc, 14).iloc[-1])
                     ema20 = float(sc.ewm(span=20, adjust=False).mean().iloc[-1])
                     ema50 = float(sc.ewm(span=50, adjust=False).mean().iloc[-1])
 
@@ -3283,11 +3290,7 @@ def _sync_alpaca_risk_and_screening():
                     # Dynamic ATR 14
                     high_s = bulk_df["High"][sym].dropna()
                     low_s = bulk_df["Low"][sym].dropna()
-                    tr1 = high_s - low_s
-                    tr2 = (high_s - sc.shift(1)).abs()
-                    tr3 = (low_s - sc.shift(1)).abs()
-                    tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
-                    atr = float(tr.rolling(14).mean().iloc[-1] or (last_c * 0.015))
+                    atr = float(atr_wilder(high_s, low_s, sc, 14).iloc[-1] or (last_c * 0.015))
                     atr_pct = (atr / last_c) * 100.0
 
                     dynamic_sl_pct = round(max(0.90, min(2.50, atr_pct * 1.4)), 2)
@@ -3369,6 +3372,60 @@ def _sync_alpaca_risk_and_screening():
 
     return notification_events
 
+_META_GATE = None
+_META_GATE_LOADED = False
+
+
+def _get_meta_gate():
+    """Carica una sola volta il MetaGate se QUANT_META_GATE_PATH e' impostata (default OFF)."""
+    global _META_GATE, _META_GATE_LOADED
+    if _META_GATE_LOADED:
+        return _META_GATE
+    _META_GATE_LOADED = True
+    path = os.environ.get("QUANT_META_GATE_PATH")
+    if not path or not os.path.exists(path):
+        return None
+    try:
+        from quant.live.gate import MetaGate
+        _META_GATE = MetaGate.load(path)
+        print(f"[MetaGate] caricato da {path}")
+    except Exception as e:
+        print(f"[!] MetaGate disabilitato: {e}")
+        _META_GATE = None
+    return _META_GATE
+
+
+def _meta_gate_check(b_sym, df, side):
+    """Ritorna (allow, scala_notional). Con gate non configurato: (True, 1.0)."""
+    gate = _get_meta_gate()
+    if gate is None:
+        return True, 1.0
+    try:
+        from quant.core import crypto_perp
+        bars = df.rename(columns=str.lower)[["open", "high", "low", "close", "volume"]]
+        dec = gate.decide(bars, crypto_perp(b_sym, "bybit"), "15m", side)
+        if not dec.get("allow"):
+            print(f"[MetaGate] {b_sym} scartato: {dec.get('reason')} (p={dec.get('p')})")
+            return False, 1.0
+        sf = dec.get("size_frac")
+        scale = min(1.0, float(sf) / 0.10) if sf else 1.0
+        return True, scale
+    except Exception as e:
+        print(f"[!] MetaGate errore su {b_sym}, disabilito: {e}")
+        global _META_GATE
+        _META_GATE = None
+        return True, 1.0
+
+
+def _has_open_position(b_sym) -> bool:
+    """Race guard: rilegge le posizioni Bybit prima di aprire. In caso di errore di lettura, blocca (fail-safe)."""
+    try:
+        return any(p.get("symbol") == b_sym for p in bybit_service.get_open_positions([b_sym]))
+    except Exception as e:
+        print(f"[!] Race guard: lettura posizioni fallita per {b_sym}: {e}. Ordine saltato.")
+        return True
+
+
 def _sync_crypto_risk_and_screening():
     """Motore quantitativo istituzionale: allineamento Macro BTC, Dynamic Compounding Sizing e Risk Alerts."""
     global _LAST_NOTIFIED_MACRO_BIAS
@@ -3428,7 +3485,10 @@ def _sync_crypto_risk_and_screening():
             # A. Chiusura se la posizione è in conflitto totale col bias macro ed è in perdita
             if macro_bias == "BEARISH" and bside == "BUY" and pnl_pct < -0.10:
                 print(f"🛑 [Macro Shield] Chiusura posizione Long contro-trend su {bsym} (Macro: BEARISH).")
-                bybit_service.close_position(bsym)
+                _cr = bybit_service.close_position(bsym)
+                if "error" in _cr:
+                    print(f"[!] Macro Shield: chiusura {bsym} non eseguita ({_cr['error']}), nessun journal/notifica.")
+                    continue
                 try:
                     trade_journal_svc.record_exit(broker="BYBIT", symbol=bsym, exit_price=float(bp.get("current_price", 0.0) or entry_p), pnl_usd=unrealized, pnl_pct=pnl_pct, close_reason="MACRO_SHIELD")
                 except Exception as e_j:
@@ -3444,7 +3504,10 @@ def _sync_crypto_risk_and_screening():
                 continue
             elif macro_bias == "BULLISH" and bside == "SELL" and pnl_pct < -0.10:
                 print(f"🛑 [Macro Shield] Chiusura posizione Short contro-trend su {bsym} (Macro: BULLISH).")
-                bybit_service.close_position(bsym)
+                _cr = bybit_service.close_position(bsym)
+                if "error" in _cr:
+                    print(f"[!] Macro Shield: chiusura {bsym} non eseguita ({_cr['error']}), nessun journal/notifica.")
+                    continue
                 try:
                     trade_journal_svc.record_exit(broker="BYBIT", symbol=bsym, exit_price=float(bp.get("current_price", 0.0) or entry_p), pnl_usd=unrealized, pnl_pct=pnl_pct, close_reason="MACRO_SHIELD")
                 except Exception as e_j:
@@ -3530,7 +3593,10 @@ def _sync_crypto_risk_and_screening():
 
             # D. Target Istituzionale 1:3 (+3.60% TP / -1.20% SL)
             if pnl_pct >= 3.60 or pnl_pct <= -1.20:
-                bybit_service.close_position(bsym)
+                _cr = bybit_service.close_position(bsym)
+                if "error" in _cr:
+                    print(f"[!] TP/SL: chiusura {bsym} non eseguita ({_cr['error']}), nessun journal/notifica.")
+                    continue
                 is_tp = pnl_pct >= 3.60
                 c_reason = "TAKE_PROFIT" if is_tp else "STOP_LOSS"
                 try:
@@ -3607,15 +3673,31 @@ def _sync_crypto_risk_and_screening():
                 try:
                     import yfinance as yf
                     import pandas as pd
-                    df = yf.download(b_yf, period="3d", interval="15m", progress=False)
+                    from services.indicators_safe import wilder_rsi, atr_wilder, drop_forming_bar
+                    df = None
+                    try:
+                        # Klines 15m dai perpetual Bybit (stessa fonte prezzi degli ordini)
+                        kl = bybit_service.session.get_kline(category="linear", symbol=b_sym, interval="15", limit=300)
+                        kl_list = kl.get("result", {}).get("list", [])
+                        if kl_list and len(kl_list) >= 40:
+                            df = pd.DataFrame(list(reversed(kl_list)), columns=["start", "Open", "High", "Low", "Close", "Volume", "turnover"])
+                            for _col in ["Open", "High", "Low", "Close", "Volume"]:
+                                df[_col] = df[_col].astype(float)
+                            df.index = pd.to_datetime(df["start"].astype("int64"), unit="ms", utc=True)
+                            df = drop_forming_bar(df, 15)
+                    except Exception as e_kl:
+                        print(f"[!] Warning klines Bybit {b_sym}, fallback yfinance: {e_kl}")
+                        df = None
+                    if df is None or df.empty:
+                        df = yf.download(b_yf, period="3d", interval="15m", progress=False)
+                        if not df.empty:
+                            if hasattr(df.columns, "levels") and len(df.columns.levels) > 1:
+                                df.columns = df.columns.get_level_values(0)
+                            df = drop_forming_bar(df, 15)
                     if df.empty or len(df) < 35:
                         continue
                     close = df["Close"].iloc[:, 0] if isinstance(df["Close"], pd.DataFrame) else df["Close"]
-                    delta = close.diff()
-                    gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
-                    loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
-                    rs = gain / (loss + 1e-9)
-                    rsi = float((100 - (100 / (1 + rs))).iloc[-1])
+                    rsi = float(wilder_rsi(close, 14).iloc[-1])
                     ema20 = float(close.ewm(span=20, adjust=False).mean().iloc[-1])
                     ema50 = float(close.ewm(span=50, adjust=False).mean().iloc[-1])
                     last_c = float(close.iloc[-1])
@@ -3636,11 +3718,7 @@ def _sync_crypto_risk_and_screening():
                     c_alpha = c_info.get("change_24h_pct", 0.0) - btc_24h_change
 
                     # Calcolo ATR Dinamico (Average True Range a 14 periodi) per tarare Stop Loss e Take Profit
-                    tr1 = high - low
-                    tr2 = (high - close.shift(1)).abs()
-                    tr3 = (low - close.shift(1)).abs()
-                    tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
-                    atr = float(tr.rolling(14).mean().iloc[-1] or (last_c * 0.01))
+                    atr = float(atr_wilder(high, low, close, 14).iloc[-1] or (last_c * 0.01))
                     atr_pct = (atr / last_c) * 100
                     
                     # Stop Loss calibrato su 1.4x ATR (minimo 0.90%, massimo 1.80%)
@@ -3711,6 +3789,7 @@ def _sync_crypto_risk_and_screening():
                             print(f"[!] Warning verifica OBI: {e_obi}")
 
                         # Se il ciclo è esplicitamente vincolato al rialzo o in spinta d'inizio ciclo (1° Quarto), proteggi il capitale
+                        # NB: "RIALZISTA FORZATO" non viene mai prodotto da HurstMigliorinoCycleService (ramo morto, lasciato per compatibilita')
                         if "RIALZISTA FORZATO" in vincolo_migliorino.upper() or "1° TEMPO" in tempo_battleplan.upper():
                             print(f"⚠️ [Filtro Ciclico Ignorato Short] {b_sym} in inizio ciclo/spinta rialzista ({tempo_battleplan}). Short evitato.")
                             continue
@@ -3722,7 +3801,18 @@ def _sync_crypto_risk_and_screening():
                             continue
 
                         print(f"📉 [Setup A+ SHORT Confluente] {b_sym} (Macro: {macro_bias}, Ciclo: {tempo_battleplan}, Funding: {c_funding:+.4f}%, Alpha: {c_alpha:+.2f}%, RSI: {rsi:.1f}, VolRatio: {vol_ratio:.2f}x, ATR-SL: {dynamic_sl_pct}%). Ordine dinamico ${dynamic_notional:,.0f}...")
-                        order_res = bybit_service.place_order(b_sym, side="Sell", notional_usd=dynamic_notional, take_profit_pct=dynamic_tp_pct, stop_loss_pct=dynamic_sl_pct)
+                        _gate_ok, _gate_scale = _meta_gate_check(b_sym, df, -1)
+                        if not _gate_ok:
+                            continue
+                        if _gate_scale < 1.0:
+                            dynamic_notional *= _gate_scale
+                        if _has_open_position(b_sym):
+                            print(f"[Race Guard] {b_sym}: posizione gia' aperta, ordine {'LONG' if False else 'SHORT'} saltato.")
+                            continue
+                        order_res = bybit_service.place_order(b_sym, side="Sell", notional_usd=dynamic_notional, take_profit_pct=dynamic_tp_pct, stop_loss_pct=dynamic_sl_pct, order_link_id=make_order_link_id(b_sym, "S", df.index[-1]))
+                        if order_res.get("duplicate"):
+                            print(f"[Idempotenza] {b_sym}: orderLinkId gia' usato per questa barra, ordine saltato.")
+                            continue
                         if "error" not in order_res:
                             # Registra nel Trade Journal
                             try:
@@ -3730,7 +3820,7 @@ def _sync_crypto_risk_and_screening():
                                     broker="BYBIT",
                                     symbol=b_sym,
                                     side="SHORT",
-                                    entry_price=last_c,
+                                    entry_price=float(order_res.get("price") or last_c),
                                     notional_usd=dynamic_notional,
                                     context={
                                         "macro_bias": macro_bias,
@@ -3798,7 +3888,18 @@ def _sync_crypto_risk_and_screening():
                             continue
 
                         print(f"📈 [Setup A+ LONG Confluente] {b_sym} (Macro: {macro_bias}, Ciclo: {tempo_battleplan}, Funding: {c_funding:+.4f}%, Alpha: {c_alpha:+.2f}%, RSI: {rsi:.1f}, VolRatio: {vol_ratio:.2f}x, ATR-SL: {dynamic_sl_pct}%). Ordine dinamico ${dynamic_notional:,.0f}...")
-                        order_res = bybit_service.place_order(b_sym, side="Buy", notional_usd=dynamic_notional, take_profit_pct=dynamic_tp_pct, stop_loss_pct=dynamic_sl_pct)
+                        _gate_ok, _gate_scale = _meta_gate_check(b_sym, df, 1)
+                        if not _gate_ok:
+                            continue
+                        if _gate_scale < 1.0:
+                            dynamic_notional *= _gate_scale
+                        if _has_open_position(b_sym):
+                            print(f"[Race Guard] {b_sym}: posizione gia' aperta, ordine {'LONG' if True else 'SHORT'} saltato.")
+                            continue
+                        order_res = bybit_service.place_order(b_sym, side="Buy", notional_usd=dynamic_notional, take_profit_pct=dynamic_tp_pct, stop_loss_pct=dynamic_sl_pct, order_link_id=make_order_link_id(b_sym, "L", df.index[-1]))
+                        if order_res.get("duplicate"):
+                            print(f"[Idempotenza] {b_sym}: orderLinkId gia' usato per questa barra, ordine saltato.")
+                            continue
                         if "error" not in order_res:
                             # Registra nel Trade Journal
                             try:
@@ -3806,7 +3907,7 @@ def _sync_crypto_risk_and_screening():
                                     broker="BYBIT",
                                     symbol=b_sym,
                                     side="LONG",
-                                    entry_price=last_c,
+                                    entry_price=float(order_res.get("price") or last_c),
                                     notional_usd=dynamic_notional,
                                     context={
                                         "macro_bias": macro_bias,
@@ -3840,7 +3941,7 @@ def _sync_crypto_risk_and_screening():
                         if available_risk_budget_bybit < 3000.0:
                             break
                 except Exception as ex:
-                    pass
+                    print(f"[!] Errore screening {b_sym}: {ex}")
     except Exception as e:
         print(f"[!] Errore sync crypto worker: {e}")
 
@@ -3999,7 +4100,7 @@ async def crypto_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     target_msg = get_target_msg(update)
     status_msg = await target_msg.reply_text("🪙 *Interrogo i mercati Crypto 24/7 (Alpaca & Bybit Futures)...*", parse_mode="Markdown")
 
-    bars = alpaca_service.get_crypto_latest_bars(["BTC/USD", "ETH/USD", "SOL/USD"])
+    bars = alpaca_service.get_crypto_latest_bars(["BTC/USD", "ETH/USD", "SOL/USD"]) if alpaca_service is not None else {}
     bybit_wallet = bybit_service.get_wallet_summary()
     bybit_positions = bybit_service.get_open_positions()
     eur_usd = MarketDataService.get_eur_usd_rate() or 1.08
@@ -4190,6 +4291,9 @@ def build_alpaca_dashboard_text(summary: Dict[str, Any]) -> Tuple[str, InlineKey
 async def alpaca_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Comando per visualizzare lo stato di Alpaca Trading e gestire le posizioni."""
     target_msg = get_target_msg(update)
+    if alpaca_service is None:
+        await target_msg.reply_text("Alpaca non configurato.")
+        return
     try:
         summary = alpaca_service.get_account_summary()
         acc = summary.get("account", {})

@@ -61,6 +61,8 @@ def get_deep_trade_forecast(symbol: str, tf: str = "1d") -> Dict[str, Any]:
         if hasattr(df.columns, 'levels') and len(df.columns.levels) > 1:
             df.columns = df.columns.get_level_values(0)
 
+        from services.indicators_safe import drop_forming_bar
+        df = drop_forming_bar(df, 1440 if interval_str == "1d" else 60)
         clean_df = df.dropna(subset=["Close"]).copy()
         if tf_clean == "4h" and len(clean_df) >= 8:
             # Ricampiona a 4H se richiesto 4h
