@@ -3992,7 +3992,10 @@ async def post_init(application):
     # Avvio Server Web Dashboard in background (aiohttp su porta PORT/8080)
     try:
         web_port = int(os.getenv("PORT", 8080))
-        web_app = create_web_app(bybit_service, alpaca_service)
+        async def _trigger_briefing_cb(slot):
+            await send_scheduled_briefing(application, slot=slot, force=True)
+
+        web_app = create_web_app(bybit_service, alpaca_service, briefing_callback=_trigger_briefing_cb)
         runner = web.AppRunner(web_app)
         await runner.setup()
         site = web.TCPSite(runner, host="0.0.0.0", port=web_port)
