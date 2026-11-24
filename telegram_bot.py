@@ -2987,15 +2987,18 @@ def _get_btc_macro_bias():
     """
     try:
         # Candele 4 Ore (Strutturale)
-        res_4h = bybit_service.session.get_kline(category="linear", symbol="BTCUSDT", interval="240", limit=60)
+        res_4h = bybit_service.session.get_kline(category="linear", symbol="BTCUSDT", interval="240", limit=200)
         c_4h = res_4h.get("result", {}).get("list", [])
         if not c_4h or len(c_4h) < 30:
             return "NEUTRAL"
+        # Scarta la candela in formazione (Bybit restituisce per prima la piu' recente, ancora aperta)
+        c_4h = c_4h[1:]
         closes_4h = [float(c[4]) for c in reversed(c_4h)]
 
         # Candele 1 Ora (Tattico Intraday)
-        res_1h = bybit_service.session.get_kline(category="linear", symbol="BTCUSDT", interval="60", limit=60)
+        res_1h = bybit_service.session.get_kline(category="linear", symbol="BTCUSDT", interval="60", limit=200)
         c_1h = res_1h.get("result", {}).get("list", [])
+        c_1h = c_1h[1:] if c_1h else c_1h
         closes_1h = [float(c[4]) for c in reversed(c_1h)] if c_1h else closes_4h
 
         def _ema(vals, span):
@@ -3237,6 +3240,8 @@ def _sync_alpaca_risk_and_screening():
             # Scarica dati per ranking Alpha vs SPY
             try:
                 bulk_df = yf.download(universe_equities + ["SPY"], period="1mo", interval="1h", progress=False)
+                from services.indicators_safe import wilder_rsi, atr_wilder, drop_forming_bar
+                bulk_df = drop_forming_bar(bulk_df, 60)
                 spy_c = bulk_df["Close"]["SPY"].dropna()
                 spy_24h_ch = ((spy_c.iloc[-1] - spy_c.iloc[-7]) / spy_c.iloc[-7]) * 100 if len(spy_c) >= 8 else 0.0
 
@@ -3266,10 +3271,7 @@ def _sync_alpaca_risk_and_screening():
 
                     # Indicatori tecnici 1H
                     delta = sc.diff()
-                    gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
-                    loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
-                    rs = gain / (loss + 1e-9)
-                    rsi = float((100 - (100 / (1 + rs))).iloc[-1])
+                    rsi = float(wilder_rsi(sc, 14).iloc[-1])
                     ema20 = float(sc.ewm(span=20, adjust=False).mean().iloc[-1])
                     ema50 = float(sc.ewm(span=50, adjust=False).mean().iloc[-1])
 
@@ -3283,11 +3285,7 @@ def _sync_alpaca_risk_and_screening():
                     # Dynamic ATR 14
                     high_s = bulk_df["High"][sym].dropna()
                     low_s = bulk_df["Low"][sym].dropna()
-                    tr1 = high_s - low_s
-                    tr2 = (high_s - sc.shift(1)).abs()
-                    tr3 = (low_s - sc.shift(1)).abs()
-                    tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
-                    atr = float(tr.rolling(14).mean().iloc[-1] or (last_c * 0.015))
+                    atr = float(atr_wilder(high_s, low_s, sc, 14).iloc[-1] or (last_c * 0.015))
                     atr_pct = (atr / last_c) * 100.0
 
                     dynamic_sl_pct = round(max(0.90, min(2.50, atr_pct * 1.4)), 2)
@@ -3607,15 +3605,31 @@ def _sync_crypto_risk_and_screening():
                 try:
                     import yfinance as yf
                     import pandas as pd
-                    df = yf.download(b_yf, period="3d", interval="15m", progress=False)
+                    from services.indicators_safe import wilder_rsi, atr_wilder, drop_forming_bar
+                    df = None
+                    try:
+                        # Klines 15m dai perpetual Bybit (stessa fonte prezzi degli ordini)
+                        kl = bybit_service.session.get_kline(category="linear", symbol=b_sym, interval="15", limit=300)
+                        kl_list = kl.get("result", {}).get("list", [])
+                        if kl_list and len(kl_list) >= 40:
+                            df = pd.DataFrame(list(reversed(kl_list)), columns=["start", "Open", "High", "Low", "Close", "Volume", "turnover"])
+                            for _col in ["Open", "High", "Low", "Close", "Volume"]:
+                                df[_col] = df[_col].astype(float)
+                            df.index = pd.to_datetime(df["start"].astype("int64"), unit="ms", utc=True)
+                            df = drop_forming_bar(df, 15)
+                    except Exception as e_kl:
+                        print(f"[!] Warning klines Bybit {b_sym}, fallback yfinance: {e_kl}")
+                        df = None
+                    if df is None or df.empty:
+                        df = yf.download(b_yf, period="3d", interval="15m", progress=False)
+                        if not df.empty:
+                            if hasattr(df.columns, "levels") and len(df.columns.levels) > 1:
+                                df.columns = df.columns.get_level_values(0)
+                            df = drop_forming_bar(df, 15)
                     if df.empty or len(df) < 35:
                         continue
                     close = df["Close"].iloc[:, 0] if isinstance(df["Close"], pd.DataFrame) else df["Close"]
-                    delta = close.diff()
-                    gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
-                    loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
-                    rs = gain / (loss + 1e-9)
-                    rsi = float((100 - (100 / (1 + rs))).iloc[-1])
+                    rsi = float(wilder_rsi(close, 14).iloc[-1])
                     ema20 = float(close.ewm(span=20, adjust=False).mean().iloc[-1])
                     ema50 = float(close.ewm(span=50, adjust=False).mean().iloc[-1])
                     last_c = float(close.iloc[-1])
@@ -3636,11 +3650,7 @@ def _sync_crypto_risk_and_screening():
                     c_alpha = c_info.get("change_24h_pct", 0.0) - btc_24h_change
 
                     # Calcolo ATR Dinamico (Average True Range a 14 periodi) per tarare Stop Loss e Take Profit
-                    tr1 = high - low
-                    tr2 = (high - close.shift(1)).abs()
-                    tr3 = (low - close.shift(1)).abs()
-                    tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
-                    atr = float(tr.rolling(14).mean().iloc[-1] or (last_c * 0.01))
+                    atr = float(atr_wilder(high, low, close, 14).iloc[-1] or (last_c * 0.01))
                     atr_pct = (atr / last_c) * 100
                     
                     # Stop Loss calibrato su 1.4x ATR (minimo 0.90%, massimo 1.80%)
@@ -3711,6 +3721,7 @@ def _sync_crypto_risk_and_screening():
                             print(f"[!] Warning verifica OBI: {e_obi}")
 
                         # Se il ciclo è esplicitamente vincolato al rialzo o in spinta d'inizio ciclo (1° Quarto), proteggi il capitale
+                        # NB: "RIALZISTA FORZATO" non viene mai prodotto da HurstMigliorinoCycleService (ramo morto, lasciato per compatibilita')
                         if "RIALZISTA FORZATO" in vincolo_migliorino.upper() or "1° TEMPO" in tempo_battleplan.upper():
                             print(f"⚠️ [Filtro Ciclico Ignorato Short] {b_sym} in inizio ciclo/spinta rialzista ({tempo_battleplan}). Short evitato.")
                             continue
@@ -3730,7 +3741,7 @@ def _sync_crypto_risk_and_screening():
                                     broker="BYBIT",
                                     symbol=b_sym,
                                     side="SHORT",
-                                    entry_price=last_c,
+                                    entry_price=float(order_res.get("price") or last_c),
                                     notional_usd=dynamic_notional,
                                     context={
                                         "macro_bias": macro_bias,
@@ -3806,7 +3817,7 @@ def _sync_crypto_risk_and_screening():
                                     broker="BYBIT",
                                     symbol=b_sym,
                                     side="LONG",
-                                    entry_price=last_c,
+                                    entry_price=float(order_res.get("price") or last_c),
                                     notional_usd=dynamic_notional,
                                     context={
                                         "macro_bias": macro_bias,
@@ -3840,7 +3851,7 @@ def _sync_crypto_risk_and_screening():
                         if available_risk_budget_bybit < 3000.0:
                             break
                 except Exception as ex:
-                    pass
+                    print(f"[!] Errore screening {b_sym}: {ex}")
     except Exception as e:
         print(f"[!] Errore sync crypto worker: {e}")
 
