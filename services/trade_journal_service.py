@@ -5,9 +5,15 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 from typing import Dict, Any, List, Optional
 
-DB_DIR = Path(__file__).resolve().parent.parent / "data"
-DB_DIR.mkdir(parents=True, exist_ok=True)
-DB_PATH = DB_DIR / "market_sentinel.db"
+def get_trade_journal_db_path() -> Path:
+    """Determina il percorso persistente: volume Railway (/app/data) se disponibile, altrimenti data/market_sentinel.db."""
+    railway_vol = Path("/app/data")
+    if railway_vol.exists():
+        return railway_vol / "market_sentinel.db"
+    local_dir = Path(__file__).resolve().parent.parent / "data"
+    local_dir.mkdir(parents=True, exist_ok=True)
+    return local_dir / "market_sentinel.db"
+
 ROME_TZ = ZoneInfo("Europe/Rome")
 
 class TradeJournalService:
@@ -18,8 +24,8 @@ class TradeJournalService:
     3. Fornisce statistiche di apprendimento per auto-miglioramento del sistema quantitativo.
     """
 
-    def __init__(self, db_path: Path = DB_PATH):
-        self.db_path = db_path
+    def __init__(self, db_path: Optional[Path] = None):
+        self.db_path = db_path or get_trade_journal_db_path()
         self._init_tables()
 
     def _init_tables(self):
