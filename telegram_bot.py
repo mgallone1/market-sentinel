@@ -51,6 +51,7 @@ from services.advanced_predictive_system import AdvancedPredictiveSystem
 from services.alpaca_execution_service import AlpacaExecutionService
 from services.bybit_execution_service import BybitExecutionService, make_order_link_id, classify_btc_bias, hysteresis_bias
 from services.risk_budget_manager import RiskBudgetManager
+from services import risk_limits
 from services.dashboard_web_service import create_web_app
 from aiohttp import web
 
@@ -3166,6 +3167,7 @@ def _sync_alpaca_risk_and_screening():
                 print(f"🛑 [Alpaca Macro Shield] Chiusura posizione Long contro-trend su {sym} (Macro SPY: BEARISH).")
                 alpaca_service.close_position(sym)
                 try:
+                    _risk_closed("ALPACA", unrealized)
                     trade_journal_svc.record_exit(broker="ALPACA", symbol=sym, exit_price=float(p.get("current_price", 0.0) or 0.0), pnl_usd=unrealized, pnl_pct=plpc, close_reason="MACRO_SHIELD")
                 except Exception as e_j:
                     print(f"[!] Warning journal exit: {e_j}")
@@ -3209,6 +3211,7 @@ def _sync_alpaca_risk_and_screening():
                 is_tp = plpc >= 3.60
                 c_reason = "TAKE_PROFIT" if is_tp else "STOP_LOSS"
                 try:
+                    _risk_closed("ALPACA", unrealized)
                     trade_journal_svc.record_exit(broker="ALPACA", symbol=sym, exit_price=float(p.get("current_price", 0.0) or 0.0), pnl_usd=unrealized, pnl_pct=plpc, close_reason=c_reason)
                 except Exception as e_j:
                     print(f"[!] Warning journal exit: {e_j}")
@@ -3226,6 +3229,7 @@ def _sync_alpaca_risk_and_screening():
         equity_alpaca = float(acc_info.get("equity", 100000.0) or 100000.0) if isinstance(acc_info, dict) else 100000.0
         
         # Calcolo esposizione reale a mercato attuale
+        _risk_observe("ALPACA", equity_alpaca)
         current_invested_alpaca = sum(float(p.get("market_value", 0.0) or 0.0) for p in positions)
         max_allowed_exposure_alpaca = equity_alpaca * 0.70  # Fino al 70% del capitale
         available_risk_budget_alpaca = max(0.0, max_allowed_exposure_alpaca - current_invested_alpaca)
@@ -3325,8 +3329,13 @@ def _sync_alpaca_risk_and_screening():
                         stop_p = round(last_c * (1 - dynamic_sl_pct / 100.0), 2)
 
                         print(f"📈 [Setup A+ WALL STREET LONG] {sym} (Macro: {eq_bias}, Ciclo: {tempo_battleplan}, Alpha: {alpha:+.2f}%, RSI: {rsi:.1f}, ATR-SL: {dynamic_sl_pct}%). Ordine bracket {shares} azioni...")
+                        if not _risk_gate("ALPACA", sym, equity_alpaca,
+                                          [{"entry_price": float(pp.get("avg_entry_price", 0) or 0), "size": float(pp.get("qty", 0) or 0)} for pp in positions],
+                                          last_c, stop_p, target_p, shares, notification_events):
+                            continue
                         order_res = alpaca_service.place_bracket_order(sym, shares, "buy", target_p, stop_p)
                         if "error" not in order_res:
+                            _risk_opened("ALPACA", equity_alpaca)
                             # Registra nel Trade Journal con contesto analitico completo
                             try:
                                 trade_journal_svc.record_entry(
@@ -3417,6 +3426,54 @@ def _meta_gate_check(b_sym, df, side):
         return True, 1.0
 
 
+_RISK_CFG = risk_limits.RiskConfig.from_env()
+_RISK_STATE = risk_limits.RiskState(_RISK_CFG.state_path)
+
+
+def _risk_observe(broker, equity):
+    """Registra l'equity di inizio giornata (primo rilevamento del giorno UTC)."""
+    if not _RISK_CFG.enabled:
+        return
+    try:
+        _RISK_STATE.rec(broker, None, equity)
+    except Exception as e:
+        print(f"[!] Risk observe: {e}")
+
+
+def _risk_gate(broker, sym, equity, positions, entry, stop, tp, qty, notification_events, is_notional=False):
+    """Circuit breaker pre-trade (solo ingressi). True = ordine consentito. Mai usato per le uscite."""
+    if not _RISK_CFG.enabled:
+        return True
+    try:
+        ok, reason = risk_limits.check_entry(_RISK_CFG, _RISK_STATE, broker, equity, positions, entry, stop, tp, qty, None, is_notional)
+    except Exception as e:
+        print(f"[!] Risk check errore ({e}): ingresso consentito (fail-open).")
+        return True
+    if ok:
+        return True
+    print(f"🚧 [Risk Circuit Breaker {broker}] {sym}: ingresso bloccato -> {reason}")
+    try:
+        if _RISK_STATE.should_notify(broker, risk_limits.reason_key(reason)):
+            notification_events.append(f"🚧 *RISK CIRCUIT BREAKER ({broker})*\n• Ingressi bloccati: `{reason}`\n• Ultimo tentativo: `{sym}`. Le uscite restano sempre attive.")
+    except Exception as e:
+        print(f"[!] Risk notify: {e}")
+    return False
+
+
+def _risk_opened(broker, equity=None):
+    try:
+        risk_limits.record_open(_RISK_CFG, _RISK_STATE, broker, equity)
+    except Exception as e:
+        print(f"[!] Risk record_open: {e}")
+
+
+def _risk_closed(broker, pnl):
+    try:
+        risk_limits.record_close(_RISK_CFG, _RISK_STATE, broker, float(pnl or 0.0))
+    except Exception as e:
+        print(f"[!] Risk record_close: {e}")
+
+
 def _has_open_position(b_sym) -> bool:
     """Race guard: rilegge le posizioni Bybit prima di aprire. In caso di errore di lettura, blocca (fail-safe)."""
     try:
@@ -3490,6 +3547,7 @@ def _sync_crypto_risk_and_screening():
                     print(f"[!] Macro Shield: chiusura {bsym} non eseguita ({_cr['error']}), nessun journal/notifica.")
                     continue
                 try:
+                    _risk_closed("BYBIT", unrealized)
                     trade_journal_svc.record_exit(broker="BYBIT", symbol=bsym, exit_price=float(bp.get("current_price", 0.0) or entry_p), pnl_usd=unrealized, pnl_pct=pnl_pct, close_reason="MACRO_SHIELD")
                 except Exception as e_j:
                     print(f"[!] Warning journal exit: {e_j}")
@@ -3509,6 +3567,7 @@ def _sync_crypto_risk_and_screening():
                     print(f"[!] Macro Shield: chiusura {bsym} non eseguita ({_cr['error']}), nessun journal/notifica.")
                     continue
                 try:
+                    _risk_closed("BYBIT", unrealized)
                     trade_journal_svc.record_exit(broker="BYBIT", symbol=bsym, exit_price=float(bp.get("current_price", 0.0) or entry_p), pnl_usd=unrealized, pnl_pct=pnl_pct, close_reason="MACRO_SHIELD")
                 except Exception as e_j:
                     print(f"[!] Warning journal exit: {e_j}")
@@ -3600,6 +3659,7 @@ def _sync_crypto_risk_and_screening():
                 is_tp = pnl_pct >= 3.60
                 c_reason = "TAKE_PROFIT" if is_tp else "STOP_LOSS"
                 try:
+                    _risk_closed("BYBIT", unrealized)
                     trade_journal_svc.record_exit(broker="BYBIT", symbol=bsym, exit_price=float(bp.get("current_price", 0.0) or entry_p), pnl_usd=unrealized, pnl_pct=pnl_pct, close_reason=c_reason)
                 except Exception as e_j:
                     print(f"[!] Warning journal exit: {e_j}")
@@ -3616,6 +3676,7 @@ def _sync_crypto_risk_and_screening():
         wallet = bybit_service.get_wallet_summary()
         bybit_equity = float(wallet.get("total_equity", 160000.0) or 160000.0)
         
+        _risk_observe("BYBIT", bybit_equity)
         bybit_positions = bybit_service.get_open_positions()
         active_bybit_syms = {bp["symbol"] for bp in bybit_positions}
         
@@ -3809,11 +3870,16 @@ def _sync_crypto_risk_and_screening():
                         if _has_open_position(b_sym):
                             print(f"[Race Guard] {b_sym}: posizione gia' aperta, ordine {'LONG' if False else 'SHORT'} saltato.")
                             continue
+                        if not _risk_gate("BYBIT", b_sym, bybit_equity,
+                                          [{"entry_price": bp.get("entry_price"), "size": bp.get("size"), "stop_loss": bp.get("stop_loss")} for bp in bybit_positions],
+                                          last_c, last_c * (1 + dynamic_sl_pct / 100.0), last_c * (1 - dynamic_tp_pct / 100.0), dynamic_notional, notification_events, is_notional=True):
+                            continue
                         order_res = bybit_service.place_order(b_sym, side="Sell", notional_usd=dynamic_notional, take_profit_pct=dynamic_tp_pct, stop_loss_pct=dynamic_sl_pct, order_link_id=make_order_link_id(b_sym, "S", df.index[-1]))
                         if order_res.get("duplicate"):
                             print(f"[Idempotenza] {b_sym}: orderLinkId gia' usato per questa barra, ordine saltato.")
                             continue
                         if "error" not in order_res:
+                            _risk_opened("BYBIT", bybit_equity)
                             # Registra nel Trade Journal
                             try:
                                 trade_journal_svc.record_entry(
@@ -3896,11 +3962,16 @@ def _sync_crypto_risk_and_screening():
                         if _has_open_position(b_sym):
                             print(f"[Race Guard] {b_sym}: posizione gia' aperta, ordine {'LONG' if True else 'SHORT'} saltato.")
                             continue
+                        if not _risk_gate("BYBIT", b_sym, bybit_equity,
+                                          [{"entry_price": bp.get("entry_price"), "size": bp.get("size"), "stop_loss": bp.get("stop_loss")} for bp in bybit_positions],
+                                          last_c, last_c * (1 - dynamic_sl_pct / 100.0), last_c * (1 + dynamic_tp_pct / 100.0), dynamic_notional, notification_events, is_notional=True):
+                            continue
                         order_res = bybit_service.place_order(b_sym, side="Buy", notional_usd=dynamic_notional, take_profit_pct=dynamic_tp_pct, stop_loss_pct=dynamic_sl_pct, order_link_id=make_order_link_id(b_sym, "L", df.index[-1]))
                         if order_res.get("duplicate"):
                             print(f"[Idempotenza] {b_sym}: orderLinkId gia' usato per questa barra, ordine saltato.")
                             continue
                         if "error" not in order_res:
+                            _risk_opened("BYBIT", bybit_equity)
                             # Registra nel Trade Journal
                             try:
                                 trade_journal_svc.record_entry(
