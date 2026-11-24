@@ -3401,10 +3401,28 @@ def _sync_crypto_risk_and_screening():
                 ))
                 continue
 
-            # B. Break-Even Protettivo (scatta al +0.80% e protegge +0.20% netto)
-            if 0.80 <= pnl_pct < 1.60:
+            # B. RATCHET TRAILING STOP A SCALINI ISTITUZIONALE
+            # Scalino 1: +0.40% -> Stop stretto a -0.30% (riduzione perdita del 75%, anti-reversal precoce)
+            if 0.40 <= pnl_pct < 0.80:
+                tight_sl = round(entry_p * 0.9970, 4) if bside == "BUY" else round(entry_p * 1.0030, 4)
+                if (bside == "BUY" and curr_sl < tight_sl) or (bside == "SELL" and (curr_sl <= 0 or curr_sl > tight_sl)):
+                    bybit_service.update_stop_loss(bsym, tight_sl)
+                    print(f"🛡️ [Ratchet Stop Step 1] Spostato Stop Loss su {bsym} a -0.30% protettivo ({tight_sl})!")
+                    if _POSITION_RISK_STAGE.get(bsym) != "TIGHT_RISK":
+                        _POSITION_RISK_STAGE[bsym] = "TIGHT_RISK"
+                        notification_events.append((
+                            f"🛡️ *RATCHET STOP: RISCHIO TAGLIATO (-75%)*\n"
+                            f"────────────────────────\n"
+                            f"• *Contratto:* `{bsym}` [{bside}]\n"
+                            f"• *Ingresso:* `${entry_p:.4f}` &rarr; *Nuovo SL Protettivo:* `${tight_sl:.4f}` (-0.30%)\n"
+                            f"• *PnL Fluttuante:* `${unrealized:+.2f}` ({pnl_pct:+.2f}%)\n"
+                            f"• *Protezione:* Riduzione immediata del rischio sul primo impulso positivo."
+                        ))
+
+            # Scalino 2: +0.80% -> Break-Even Safe (+0.20% netto)
+            elif 0.80 <= pnl_pct < 1.20:
                 be_sl = round(entry_p * 1.0020, 4) if bside == "BUY" else round(entry_p * 0.9980, 4)
-                if (bside == "BUY" and curr_sl < entry_p) or (bside == "SELL" and (curr_sl <= 0 or curr_sl > entry_p)):
+                if (bside == "BUY" and curr_sl < be_sl) or (bside == "SELL" and (curr_sl <= 0 or curr_sl > be_sl)):
                     bybit_service.update_stop_loss(bsym, be_sl)
                     print(f"🛡️ [Day-Trader Break-Even] Spostato Stop Loss su {bsym} a BE protetto ({be_sl})!")
                     if _POSITION_RISK_STAGE.get(bsym) != "BE_SAFE":
@@ -3418,7 +3436,24 @@ def _sync_crypto_risk_and_screening():
                             f"• *Garanzia:* Stop alzato a +0.20% netto a totale copertura delle commissioni di exchange."
                         ))
 
-            # C. Trailing Lock (scatta al +1.60% e blocca +1.00% netto)
+            # Scalino 3: +1.20% -> Profit Lock Intermedio (+0.60% netto)
+            elif 1.20 <= pnl_pct < 1.60:
+                lock_mid_sl = round(entry_p * 1.0060, 4) if bside == "BUY" else round(entry_p * 0.9940, 4)
+                if (bside == "BUY" and curr_sl < lock_mid_sl) or (bside == "SELL" and (curr_sl <= 0 or curr_sl > lock_mid_sl)):
+                    bybit_service.update_stop_loss(bsym, lock_mid_sl)
+                    print(f"💰 [Ratchet Stop Step 3] Spostato Stop Loss su {bsym} a +0.60% netto ({lock_mid_sl})!")
+                    if _POSITION_RISK_STAGE.get(bsym) != "LOCK_MID":
+                        _POSITION_RISK_STAGE[bsym] = "LOCK_MID"
+                        notification_events.append((
+                            f"💰 *PROFITTO INTERMEDIO GARANTITO (+0.60%)*\n"
+                            f"────────────────────────\n"
+                            f"• *Contratto:* `{bsym}` [{bside}]\n"
+                            f"• *Nuovo Stop:* `${lock_mid_sl:.4f}` (+0.60% Netto)\n"
+                            f"• *PnL Attuale:* `${unrealized:+.2f}` ({pnl_pct:+.2f}%)\n"
+                            f"• *Avanzamento:* Il trade corre verso il Take Profit istituzionale."
+                        ))
+
+            # Scalino 4: >= +1.60% -> Trailing Lock Pieno (+1.00% netto)
             elif pnl_pct >= 1.60:
                 trail_sl = round(entry_p * 1.0100, 4) if bside == "BUY" else round(entry_p * 0.9900, 4)
                 if (bside == "BUY" and curr_sl < trail_sl) or (bside == "SELL" and (curr_sl <= 0 or curr_sl > trail_sl)):
@@ -3552,13 +3587,35 @@ def _sync_crypto_risk_and_screening():
                     tempo_battleplan = cycle_data.get("tempo_battleplan", "")
                     hurst_fld = float(cycle_data.get("hurst_fld_value", 0.0) or 0.0)
 
+                    # 1. KILL-ZONE SESSION FILTER (Fasce Orarie Istituzionali):
+                    # Europa (08:00 - 12:00 CET) e USA (14:30 - 21:30 CET) = Finestre ad alto volume
+                    # Notte (00:00 - 07:00 CET) = Finestra a bassa liquidità: selettività rigorosa
+                    from datetime import datetime
+                    from zoneinfo import ZoneInfo
+                    rome_hour = datetime.now(ZoneInfo("Europe/Rome")).hour
+                    is_overnight_low_vol = (0 <= rome_hour < 7)
+
+                    # Nella fascia notturna esigiamo volume ratio superiore (almeno 1.40x invece di 1.10x) per evitare fakeout
+                    min_vol_required = 1.40 if is_overnight_low_vol else 1.10
+                    if vol_ratio < min_vol_required:
+                        continue
+
+                    # 2. CUMULATIVE VOLUME DELTA (CVD) - Flusso Ordini Aggressivi
+                    cvd_info = bybit_service.get_cumulative_volume_delta(b_sym, limit=50)
+                    cvd_bias = cvd_info.get("bias", "NEUTRAL")
+                    cvd_ratio = cvd_info.get("ratio", 1.0)
+
                     # Regole di ammissibilità Direzionale con Filtro Ciclico di Hurst & Migliorino (Anti-Fakeout):
                     # Se il macro trend 4H non è esplicitamente rialzista, i LONG richiedono sia 1°/2° tempo ciclico SIA prezzo > FLD (congiunzione stretta AND, non OR)
                     allow_short = (macro_bias == "BEARISH") or (macro_bias == "NEUTRAL" and ("3° TEMPO" in tempo_battleplan.upper() or "4° TEMPO" in tempo_battleplan.upper()) and last_c < hurst_fld)
                     allow_long = (macro_bias == "BULLISH") or (macro_bias == "NEUTRAL" and ("1° TEMPO" in tempo_battleplan.upper() or "2° TEMPO" in tempo_battleplan.upper()) and last_c > hurst_fld)
 
-                    # INGRESSO SHORT (Ammesso se consentito dal Macro Bias e dalla Ciclica)
-                    if allow_short and (last_c < or_low) and (last_c < ema20 < ema50) and (rsi < 48) and (vol_ratio >= 1.10):
+                    # INGRESSO SHORT (Ammesso se consentito dal Macro Bias, Ciclica e Flusso CVD)
+                    if allow_short and (last_c < or_low) and (last_c < ema20 < ema50) and (rsi < 48) and (vol_ratio >= min_vol_required):
+                        # Filtro CVD: Se i compratori a mercato stanno assorbendo le vendite (CVD Bullish), non shortare
+                        if cvd_bias == "BULLISH" or cvd_ratio > 1.25:
+                            print(f"🛡️ [CVD Shield Short] {b_sym} presenta pressione compratori aggressivi a mercato (Ratio: {cvd_ratio:.2f}). Evitato short in trappola.")
+                            continue
                         # Filtro Squeeze Funding Rate: Evita di shortare asset con funding iper-negativo (rischio short squeeze violento)
                         if c_funding < -0.030:
                             print(f"🛡️ [Funding Shield Short] {b_sym} presenta Funding iper-negativo ({c_funding:+.4f}%). Rischio Short Squeeze, trade scartato.")
@@ -3593,8 +3650,12 @@ def _sync_crypto_risk_and_screening():
                             ))
                         break
 
-                    # INGRESSO LONG (Ammesso se consentito dal Macro Bias e dalla Ciclica)
-                    elif allow_long and (last_c > or_high) and (last_c > ema20 > ema50) and (rsi > 52) and (vol_ratio >= 1.10):
+                    # INGRESSO LONG (Ammesso se consentito dal Macro Bias, Ciclica e Flusso CVD)
+                    elif allow_long and (last_c > or_high) and (last_c > ema20 > ema50) and (rsi > 52) and (vol_ratio >= min_vol_required):
+                        # Filtro CVD: Se i venditori a mercato stanno scaricando aggressivamente (CVD Bearish), non comprare
+                        if cvd_bias == "BEARISH" or cvd_ratio < 0.75:
+                            print(f"🛡️ [CVD Shield Long] {b_sym} presenta pressione venditori aggressivi a mercato (Ratio: {cvd_ratio:.2f}). Evitato long su trappola per tori.")
+                            continue
                         # Filtro Squeeze Funding Rate: Evita di comprare asset con funding iper-positivo (rischio long squeeze/flush)
                         if c_funding > 0.035:
                             print(f"🛡️ [Funding Shield Long] {b_sym} presenta Funding iper-positivo ({c_funding:+.4f}%). Rischio Long Squeeze, trade scartato.")

@@ -152,6 +152,35 @@ class BybitExecutionService:
             print(f"[!] Errore tickers Bybit: {e}")
             return {}
 
+
+    def get_cumulative_volume_delta(self, symbol: str, limit: int = 50) -> Dict[str, Any]:
+        """
+        Calcola il Cumulative Volume Delta (CVD) sui trade eseguiti a mercato più recenti.
+        Restituisce buy_vol, sell_vol, delta (CVD) e ratio tra compratori e venditori aggressivi.
+        """
+        try:
+            res = self.session.get_public_trade_history(category="linear", symbol=symbol, limit=limit)
+            trades = res.get("result", {}).get("list", [])
+            if not trades:
+                return {"cvd": 0.0, "ratio": 1.0, "bias": "NEUTRAL"}
+            
+            buy_vol = sum(float(t.get("size", 0.0)) for t in trades if t.get("side") == "Buy")
+            sell_vol = sum(float(t.get("size", 0.0)) for t in trades if t.get("side") == "Sell")
+            cvd = buy_vol - sell_vol
+            total = buy_vol + sell_vol
+            ratio = (buy_vol / (sell_vol + 1e-6)) if total > 0 else 1.0
+            
+            bias = "BULLISH" if ratio > 1.35 else ("BEARISH" if ratio < 0.70 else "NEUTRAL")
+            return {
+                "cvd": round(cvd, 4),
+                "buy_vol": round(buy_vol, 4),
+                "sell_vol": round(sell_vol, 4),
+                "ratio": round(ratio, 2),
+                "bias": bias
+            }
+        except Exception as e:
+            return {"cvd": 0.0, "ratio": 1.0, "bias": "NEUTRAL", "error": str(e)}
+
     def get_orderbook_imbalance(self, symbol: str, limit: int = 15) -> Dict[str, Any]:
         """
         Calcola l'Order Book Imbalance (OBI) sui primi N livelli del book.

@@ -1428,12 +1428,15 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                     Ogni riga di trade contiene le informazioni essenziali per monitorare il rischio al centesimo:
                 </div>
                 <div style="background: var(--surface-elevated); padding: 10px; border-radius: 6px; border: 1px solid var(--border); display: flex; flex-direction: column; gap: 8px; font-size: 11px;">
-                    <div><strong>• Sizing Dinamico (10% Equity):</strong> La dimensione di ogni posizione viene ricalcolata automaticamente sull'equity totale Bybit (~$16,000 per trade con compounding esponenziale sui guadagni).</div>
-                    <div><strong>• PnL Dollari (es. <code>$-1.62</code>):</strong> Il guadagno o la perdita se chiudessi la posizione adesso. Su una size di ~$16,000, un importo di $1.62 è solo rumore di mercato microscopico (0.01%).</div>
-                    <div><strong>• PnL Percentuale (es. <code>-0.01%</code>):</strong> La percentuale esatta di scostamento dal tuo prezzo d'ingresso. Verde = in profitto, Rosso = sotto il prezzo d'ingresso.</div>
-                    <div><strong>• Badge <code>SL -1.20%</code>:</strong> Il paracadute di sicurezza. Se il trade scende a -1.20% (~-$190), il bot chiude all'istante la posizione impedendo perdite più grandi. Notifica push immediata su Telegram.</div>
-                    <div><strong>• Badge <code>BE SAFE +0.20%</code>:</strong> Scatta appena il trade guadagna +0.80%. Lo stop viene alzato a +0.20%: il rischio è azzerato e le commissioni coperte. Notifica push su Telegram.</div>
-                    <div><strong>• Badge <code>LOCK +1.00%</code>:</strong> Scatta al +1.60%. Blocca un profitto netto di +1.00% lasciando correre il trade verso il Take Profit (+3.60%). Notifica push su Telegram.</div>
+                    <div><strong>• Sizing Dinamico (10% Equity):</strong> Dimensione automatica calcolata sull'equity totale Bybit (~$16,000 per trade con compounding esponenziale).</div>
+                    <div><strong>• Ratchet Trailing Stop a 4 Scalini:</strong>
+                        <br>&nbsp;&nbsp;1. <code>TIGHT -0.30%</code> (a +0.40% gain): taglia il rischio del 75% impedendo ritracciamenti precoci in perdita piena.
+                        <br>&nbsp;&nbsp;2. <code>BE SAFE +0.20%</code> (a +0.80% gain): rischio zero, commissioni coperte.
+                        <br>&nbsp;&nbsp;3. <code>LOCK MID +0.60%</code> (a +1.20% gain): garantisce oltre metà target intermedio.
+                        <br>&nbsp;&nbsp;4. <code>LOCK MAX +1.00%</code> (a +1.60% gain): profitto pieno garantito in corsa verso il TP +3.60%.
+                    </div>
+                    <div><strong>• Kill-Zones Istituzionali:</strong> Europa (08:00 - 12:00 CET) e USA (14:30 - 21:30 CET) a massima liquidità. Fascia notturna (00:00 - 07:00 CET) a iper-selettività (volume minimo 1.40x per bloccare fakeout).</div>
+                    <div><strong>• CVD Flow Shield (Cumulative Volume Delta):</strong> Misura gli ordini a mercato aggressivi. Rifiuta categoricamente acquisti se i venditori scaricano a mercato e rifiuta short se i compratori assorbono liquidità.</div>
                 </div>
             </div>
 
