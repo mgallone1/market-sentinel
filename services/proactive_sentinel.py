@@ -262,6 +262,25 @@ class ProactiveSentinelService:
             if weekend_mode and not is_crypto:
                 continue
 
+            # Se è un titolo azionario/ETF tradizionale, NON scansionarlo prima dell'apertura reale dei mercati
+            # Borse Europee (.DE, .MI): aperte dalle 09:00 alle 17:35 CET
+            # Borse USA e OTC (BYDDF, NVDA, AAPL, ecc.): aperte dalle 15:30 alle 22:00 CET
+            # Prima dell'apertura, i dati mostrano solo la chiusura di ieri (falso alert su variazione vecchia)
+            now_rome = datetime.now(ROME_TZ)
+            current_hour = now_rome.hour
+            current_minute = now_rome.minute
+            
+            if not is_crypto:
+                is_us_or_otc = any(ticker.endswith(sfx) for sfx in [".US", "DF", "Y"]) or "." not in ticker
+                if is_us_or_otc:
+                    # Mercati USA: attivi solo tra le 15:30 e le 22:00 CET
+                    if current_hour < 15 or (current_hour == 15 and current_minute < 30) or current_hour >= 22:
+                        continue
+                else:
+                    # Mercati Europei: attivi tra le 09:00 e le 17:35 CET
+                    if current_hour < 9 or (current_hour >= 18):
+                        continue
+
             # Cooldown per asset
             last_alert = self.ticker_cooldowns.get(ticker, 0.0)
             if now_ts - last_alert < self.cooldown_seconds:
