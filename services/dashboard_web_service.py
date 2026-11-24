@@ -96,25 +96,30 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         [data-theme="light"] {
             --bg-canvas: #F2F2F7;
             --bg-secondary: #E5E5EA;
-            --surface: rgba(255, 255, 255, 0.85);
-            --surface-elevated: rgba(255, 255, 255, 0.95);
-            --surface-card: rgba(255, 255, 255, 0.75);
-            --surface-glass: rgba(0, 0, 0, 0.03);
-            --border: rgba(60, 60, 67, 0.14);
-            --border-subtle: rgba(60, 60, 67, 0.08);
-            --border-focus: rgba(0, 122, 255, 0.4);
+            --surface: #FFFFFF;
+            --surface-elevated: #FFFFFF;
+            --surface-card: #FFFFFF;
+            --surface-glass: rgba(0, 0, 0, 0.04);
+            --border: rgba(60, 60, 67, 0.18);
+            --border-subtle: rgba(60, 60, 67, 0.12);
+            --border-focus: rgba(0, 122, 255, 0.5);
 
-            --apple-blue: #007AFF;
-            --apple-green: #34C759;
-            --apple-green-bg: rgba(52, 199, 89, 0.12);
-            --apple-red: #FF3B30;
-            --apple-red-bg: rgba(255, 59, 48, 0.12);
-            --apple-amber: #FF9500;
-            --apple-amber-bg: rgba(255, 149, 0, 0.12);
+            /* Contrasto rinforzato per perfetta leggibilità in Light Mode (WCAG AAA) */
+            --apple-blue: #0062D2;
+            --apple-green: #248A3D;
+            --apple-green-bg: rgba(36, 138, 61, 0.14);
+            --apple-red: #D70015;
+            --apple-red-bg: rgba(215, 0, 21, 0.12);
+            --apple-amber: #B25000;
+            --apple-amber-bg: rgba(178, 80, 0, 0.14);
+            --apple-purple: #8944AB;
 
-            --text-primary: #000000;
-            --text-secondary: rgba(60, 60, 67, 0.65);
-            --text-tertiary: rgba(60, 60, 67, 0.35);
+            --text-primary: #1C1C1E;
+            --text-secondary: #48484A;
+            --text-tertiary: #6C6C70;
+            --text-main: var(--text-primary);
+            --text-muted: var(--text-secondary);
+            --text-dim: var(--text-tertiary);
         }
 
         * {
@@ -541,12 +546,12 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             -webkit-overflow-scrolling: touch;
         }
         .layer-btn {
-            background: var(--surface-subtle);
+            background: var(--surface-elevated);
             border: 0.5px solid var(--border);
             color: var(--text-secondary);
             font-size: 10px;
             font-weight: 600;
-            padding: 5px 10px;
+            padding: 5px 11px;
             border-radius: 999px;
             cursor: pointer;
             white-space: nowrap;
@@ -555,11 +560,35 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             align-items: center;
             gap: 5px;
         }
+        .layer-btn:hover {
+            color: var(--text-primary);
+            border-color: var(--border-focus);
+        }
         .layer-btn.active {
-            background: var(--text-main);
-            color: var(--surface-bg);
-            border-color: var(--text-main);
-            box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+            background: var(--apple-blue);
+            color: #FFFFFF !important;
+            border-color: var(--apple-blue);
+            font-weight: 700;
+            box-shadow: 0 2px 10px rgba(10, 132, 255, 0.35);
+        }
+
+        .tf-btn {
+            background: var(--surface-elevated);
+            border: 0.5px solid var(--border);
+            color: var(--text-secondary);
+            cursor: pointer;
+            border-radius: 6px;
+            font-weight: 600;
+            transition: all 0.15s ease;
+        }
+        .tf-btn:hover {
+            color: var(--text-primary);
+        }
+        .tf-btn.active {
+            background: var(--apple-blue);
+            color: #FFFFFF !important;
+            border-color: var(--apple-blue);
+            font-weight: 700;
         }
         .tactical-decision-box {
             background: linear-gradient(135deg, rgba(48, 209, 88, 0.08) 0%, rgba(10, 132, 255, 0.06) 100%);
