@@ -7,7 +7,9 @@ Design: Professional Dual-Theme Financial Terminal (Light Mode & Dark Mode switc
 - 100% ottimizzato per iPhone e Desktop con grafici Chart.js che adattano colori assi e griglia al tema.
 """
 
+import os
 import json
+import hmac
 from aiohttp import web
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -3632,8 +3634,6 @@ async def handle_trigger_briefing_api(request):
     - Rifiuta categoricamente qualsiasi token o secret passato via query string nell'URL.
     - Accetta solo l'header HTTP 'X-Trigger-Key' confrontato con timing-safe compare rispetto a TRIGGER_SECRET o BRIEFING_SECRET.
     """
-    import hmac
-    
     # Rifiuto categorico del secret in query param per prevenire leak nei log proxy o access log
     if "key" in request.query or "secret" in request.query:
         return web.json_response(
