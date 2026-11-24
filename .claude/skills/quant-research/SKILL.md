@@ -17,7 +17,8 @@ Read this file instead of exploring `quant/`; open source files only for the mod
 - `AssetSpec` helpers: `crypto_perp(sym, venue)`, `equity(sym)`, `index(sym)`; cost presets in `COST_PRESETS` (fees, slippage, stop slippage, funding, borrow).
 - `quant/data`: `load_bars(spec, interval, start, end)`; Bybit (production) -> falls back to Binance Vision perps when geo-blocked; Yahoo for equities/indices; cache in `data/cache/`.
 - `quant/features`: `build_features` (families trend_, rev_, vol_, volu_, deriv_, xs_, cal_, struct_), `GaussianHMM`, `TrendRegime` (hysteresis).
-- `quant/strategies`: `STRATEGIES` registry; signature `fn(bars, spec, interval, context) -> Series{-1,0,1}`. `legacy` = replica of the live bot crypto entries (15m), `legacy_equity`, baselines `tsmom`, `donchian_breakout`, `meanrev_z`, `ema_cross`, `always_long`, `random`.
+- `quant/strategies`: `STRATEGIES` registry; signature `fn(bars, spec, interval, context) -> Series{-1,0,1}`. `legacy` = replica of the live bot crypto entries (15m), `legacy_equity`, baselines `tsmom`, `donchian_breakout`, `meanrev_z`, `ema_cross`, `always_long`, `random`, `xs_momentum`, day-trader setups (`breakout_20d_close_high`, `bull_flag`, `reclaim_20d_ma`, `oversold`, `oversold_bounce`, `orb`); `quant/strategies/cct.py` (rejected CCT experiment). Funding carry: `quant/backtest/carry.py`.
+- Results so far: `reports/HORIZON_SUMMARY.md`, `reports/SETUPS_SUMMARY.md`, `reports/cct_4h/`. No configuration is deployable yet; do not re-test the same ideas without counting trials.
 - `quant/backtest`: `run_backtest(bars, signals_df_with_side, spec, rules, interval)`, `run_portfolio`, `ExitRules`, `LEGACY_BOT_RULES`, `triple_barrier_labels` (same exit engine as backtest).
 - `quant/models` + `quant/research`: meta-labeling, kinds `base_rate, gbm_montecarlo, logit, hgb, rf, ensemble`; purged walk-forward; DSR + PBO verdict.
 - `quant/live/gate.py`: `MetaGate.load(path).decide(bars, spec, interval, side)`.
@@ -36,7 +37,7 @@ python -m quant.cli train-gate --strategy donchian_breakout --kind logit \
 Universes: `crypto` (10 USDT perps, benchmark BTCUSDT), `equities` (10 US large caps, SPY), `indices` (^GSPC, ^NDX, ^STOXX50E, daily) or a comma list. `--synthetic` runs offline.
 
 ## Reading results
-`reports/<name>/report.md`: ranking by OOS log-loss vs base rate, AUC, IC, expectancy after costs, DSR, PBO, verdict. A config is deployable only if: log-loss < base_rate, DSR > 0.95, PBO < 0.2, expectancy > 0, n_trades >= 200. Otherwise "NO EDGE — do not deploy": report it as is, never tune thresholds on the test set to flip it (each extra configuration tried is an extra trial in the DSR).
+`reports/<name>/report.md`: ranking by OOS log-loss vs base rate, AUC, IC, expectancy after costs, DSR, PBO, verdict. A config is deployable only if: log-loss < base_rate, DSR > 0.95, PBO < 0.2, expectancy > 0, n_trades >= 200, AUC > 0.52, and expectancy above BOTH `primary_only` and `random@<kind>` (incremental edge, not market beta). Otherwise "NO EDGE — do not deploy": report it as is, never tune thresholds on the test set to flip it (each extra configuration tried is an extra trial in the DSR).
 
 ## Rules when extending
 - New feature: add to a family in `quant/features/families.py`, keep it causal (test_features causality test must pass).
