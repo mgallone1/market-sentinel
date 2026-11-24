@@ -3078,21 +3078,30 @@ def _get_equities_macro_bias():
             prev_vix = float(v_close.iloc[-2]) if len(v_close) >= 2 else vix_val
             vix_delta_pct = ((vix_val - prev_vix) / prev_vix) * 100.0 if prev_vix > 0 else 0.0
 
-        # Shock VIX: impennata improvvisa della paura (+12% con VIX > 28) o VIX estremo > 40
-        is_vix_shock = (vix_delta_pct > 12.0 and vix_val > 28.0) or (vix_val > 40.0)
-        # Cooling VIX: rientro della volatilità / distensione
-        is_vix_cooling = (vix_delta_pct < -5.0) or (vix_val < 22.0)
+        # Regole di Volatilità VIX Istituzionali:
+        # 1. VIX in Aumento / Turbolenza Avversa: se il VIX sale (+3.0% o oltre) o quota sopra 24.0 con variazione positiva,
+        #    la volatilità implicita cresce comprimendo i multipli azionari: VIETATO qualsiasi bias BULLISH o LONG.
+        is_vix_rising = (vix_delta_pct >= 3.0) or (vix_val >= 24.0 and vix_delta_pct > 0.0)
+        # 2. VIX Shock / Panico Confermato: VIX sopra 26 con delta positivo o picco assoluto > 35
+        is_vix_shock = (vix_val >= 26.0 and vix_delta_pct > 0.0) or (vix_delta_pct >= 8.0) or (vix_val > 35.0)
+        # 3. Cooling VIX: distensione effettiva della volatilità (VIX in calo deciso < -3% oppure livello tranquillo < 20)
+        is_vix_cooling = (vix_delta_pct <= -3.0 and vix_val < 26.0) or (vix_val < 19.0)
 
-        # 1. BULLISH PURO: Trend forte su Daily e 1H senza shock VIX
-        if last_1d > ema50_1d and ema20_1d >= ema50_1d and not is_vix_shock:
+        # SE IL VIX È IN FORTE RIALZO O IN STATO DI SHOCK:
+        # Il regime passa categoricamente a BEARISH (se sotto medie o rottura 1H) o al massimo NEUTRAL DIFENSIVO senza Long.
+        if is_vix_shock or (is_vix_rising and (last_1h < ema20_1h or last_1d < ema50_1d)):
+            return "BEARISH", vix_val, vix_delta_pct
+
+        # 1. BULLISH PURO: Trend strutturale Daily e 1H positivo, ma TASSATIVAMENTE con VIX disteso o in calo (mai in ascesa)
+        if last_1d > ema50_1d and ema20_1d >= ema50_1d and last_1h > ema20_1h and not is_vix_rising and not is_vix_shock:
             return "BULLISH", vix_val, vix_delta_pct
 
-        # 2. NEUTRAL (REBOUND / ACCUMULO): Prezzo 1H sopra EMA20 con VIX in distensione o non in shock
-        elif last_1h > ema20_1h and (is_vix_cooling or not is_vix_shock):
+        # 2. NEUTRAL (REBOUND / ACCUMULO SELETTIVO): Prezzo 1H sopra EMA20 ma ESCLUSIVAMENTE se la volatilità è in ritracciamento (cooling)
+        elif last_1h > ema20_1h and is_vix_cooling and not is_vix_rising:
             return "NEUTRAL", vix_val, vix_delta_pct
 
-        # 3. BEARISH PURO: Prezzo sotto medie 1D e 1H con VIX in ascesa o shock attivo
-        elif last_1d < ema50_1d and last_1h < ema20_1h and (is_vix_shock or vix_delta_pct >= 0):
+        # 3. BEARISH: Prezzo sotto le medie o VIX in salita
+        elif last_1d < ema50_1d or last_1h < ema20_1h or is_vix_rising:
             return "BEARISH", vix_val, vix_delta_pct
 
         else:
@@ -3316,11 +3325,22 @@ def _sync_alpaca_risk_and_screening():
                     # Regole di ammissibilità direzionale (BULLISH o NEUTRAL con confluenza ciclica 1H o Prezzo > FLD)
                     allow_long = (eq_bias == "BULLISH") or (eq_bias == "NEUTRAL" and ("1° TEMPO" in tempo_battleplan.upper() or "2° TEMPO" in tempo_battleplan.upper() or last_c > hurst_fld))
 
-                    # Dynamic VIX Shock Filter: blocco breakout solo in caso di shock violento in salita (+12% con VIX > 28) o VIX estremo > 40
-                    is_vix_shock_active = (vix_delta_pct > 12.0 and vix_val > 28.0) or (vix_val > 40.0)
-                    if is_vix_shock_active and allow_long:
-                        print(f"🛡️ [VIX Shield Wall Street] VIX Shock in corso (+{vix_delta_pct:.1f}%, valore: {vix_val:.1f}). Ingressi Long sospesi per picco di turbolenza avversa.")
+                    # Dynamic VIX Shield: Divieto categorico di acquisto se il VIX è in ascesa, sopra 24 con variazione positiva, o in shock
+                    is_vix_unfavorable = (vix_delta_pct > 2.0) or (vix_val >= 24.0 and vix_delta_pct >= 0.0) or (vix_val >= 28.0)
+                    if is_vix_unfavorable:
+                        print(f"🛡️ [VIX Shield Wall Street] VIX avverso/in salita (Livello: {vix_val:.1f}, Delta: {vix_delta_pct:+.1f}%). Ingressi Long TASSATIVAMENTE sospesi.")
                         continue
+
+                    # Filtro Apertura Mercato (Primi 15 minuti 15:30-15:45 CET): Protezione da spike e fake breakout
+                    try:
+                        import datetime
+                        import zoneinfo
+                        now_cet = datetime.datetime.now(zoneinfo.ZoneInfo("Europe/Rome"))
+                        if now_cet.hour == 15 and now_cet.minute < 45:
+                            print(f"⏱️ [Open Bell Filter] Primi 15 minuti di Wall Street ({now_cet.strftime('%H:%M')}). Attesa stabilizzazione spread, ingressi sospesi.")
+                            continue
+                    except Exception as e_time:
+                        print(f"[!] Warning verifica orario apertura: {e_time}")
 
                     # INGRESSO LONG: trend 1H positivo (Prezzo sopra EMA20 o EMA50), RSI di spinta e ciclo libero
                     is_uptrend_1h = (last_c > ema20 and last_c > ema50) or (last_c > ema20 and ema20 > ema50)
