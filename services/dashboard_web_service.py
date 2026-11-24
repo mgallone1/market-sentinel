@@ -2432,7 +2432,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         async function fetchData() {
             try {
                 const controller = new AbortController();
-                const timeoutId = setTimeout(() => controller.abort(), 4000);
+                const timeoutId = setTimeout(() => controller.abort(), 8000);
                 const res = await fetch(`/api/dashboard?tf=${currentTimeframe}`, { cache: 'no-store', signal: controller.signal });
                 clearTimeout(timeoutId);
                 
@@ -2447,6 +2447,12 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 console.error("Dashboard sync error:", e);
                 consecutiveErrors++;
                 (document.querySelector('.nav-pulse-dot') || document.querySelector('.status-dot')).style.background = 'var(--red)';
+                // Se abbiamo dati in cache per questo timeframe o l'ultimo snapshot, renderizziamolo comunque per non lasciare il grafico vuoto
+                if (window.timeframeDataCache[currentTimeframe]) {
+                    renderUI(window.timeframeDataCache[currentTimeframe]);
+                } else if (window.lastDashboardData) {
+                    renderUI(window.lastDashboardData);
+                }
                 if (consecutiveErrors <= 3) {
                     setTimeout(fetchData, 1500);
                 }
