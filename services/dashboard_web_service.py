@@ -3625,7 +3625,43 @@ async def handle_trade_forecast_api(request):
     data = await asyncio.to_thread(get_deep_trade_forecast, symbol, tf)
     return web.json_response(data)
 
-def create_web_app(bybit_svc=None, alpaca_svc=None):
+async def handle_trigger_briefing_api(request):
+    """
+    Endpoint protetto per triggerare briefing o watchdog remoto.
+    Sicurezza Pre-Launch Check 02 & Check 07:
+    - Rifiuta categoricamente qualsiasi token o secret passato via query string nell'URL.
+    - Accetta solo l'header HTTP 'X-Trigger-Key' confrontato con timing-safe compare rispetto a TRIGGER_SECRET o BRIEFING_SECRET.
+    """
+    import hmac
+    
+    # Rifiuto categorico del secret in query param per prevenire leak nei log proxy o access log
+    if "key" in request.query or "secret" in request.query:
+        return web.json_response(
+            {"error": "Forbidden: Passing secrets via query parameter is strictly prohibited. Use 'X-Trigger-Key' header."},
+            status=403
+        )
+    
+    expected_secret = os.getenv("TRIGGER_SECRET") or os.getenv("BRIEFING_SECRET")
+    if not expected_secret:
+        return web.json_response({"error": "Service Unavailable: TRIGGER_SECRET not configured on server."}, status=503)
+        
+    provided_key = request.headers.get("X-Trigger-Key", "")
+    if not provided_key or not hmac.compare_digest(provided_key, expected_secret):
+        return web.json_response({"error": "Unauthorized: Invalid or missing X-Trigger-Key header."}, status=401)
+        
+    slot = request.query.get("slot", "morning")
+    callback = request.app.get("briefing_callback")
+    if not callback:
+        return web.json_response({"status": "acknowledged", "message": "No briefing callback registered, endpoint active.", "slot": slot})
+        
+    try:
+        # Esegui il callback asincrono del briefing
+        asyncio.create_task(callback(slot))
+        return web.json_response({"status": "success", "message": f"Briefing trigger scheduled for slot '{slot}'."})
+    except Exception as e:
+        return web.json_response({"error": f"Failed to trigger briefing: {e}"}, status=500)
+
+def create_web_app(bybit_svc=None, alpaca_svc=None, briefing_callback=None):
     global _bybit_service, _alpaca_service
     if bybit_svc:
         _bybit_service = bybit_svc
@@ -3633,8 +3669,14 @@ def create_web_app(bybit_svc=None, alpaca_svc=None):
         _alpaca_service = alpaca_svc
 
     app = web.Application()
+    if briefing_callback:
+        app["briefing_callback"] = briefing_callback
+        
     app.router.add_get("/", handle_dashboard_page)
     app.router.add_get("/api/dashboard", handle_dashboard_api)
     app.router.add_get("/api/trade-forecast", handle_trade_forecast_api)
     app.router.add_get("/health", lambda r: web.Response(text="OK"))
+    app.router.add_get("/healthz", lambda r: web.Response(text="OK"))
+    app.router.add_post("/api/trigger-briefing", handle_trigger_briefing_api)
+    app.router.add_get("/api/trigger-briefing", handle_trigger_briefing_api)
     return app
