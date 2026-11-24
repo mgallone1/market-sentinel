@@ -2925,8 +2925,13 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 
             // Previsioni caricate on-demand al tocco dell'asset
 
-            // 7. History Table & Mobile Cards (Ordinamento Rigoroso: Più Recente in Alto)
-            const sortedClosed = [...bClosed].sort((a, b) => parseInt(b.updatedTime || 0) - parseInt(a.updatedTime || 0));
+            // 7. History Table & Mobile Cards (Ordinamento Rigoroso: Più Recente in Alto, Bybit + Alpaca unificati)
+            const aClosed = (data.alpaca && Array.isArray(data.alpaca.closed)) ? data.alpaca.closed : [];
+            const combinedClosed = [
+                ...bClosed.map(c => ({ ...c, broker: c.broker || 'BYBIT' })),
+                ...aClosed.map(c => ({ ...c, broker: c.broker || 'ALPACA' }))
+            ];
+            const sortedClosed = combinedClosed.sort((a, b) => parseInt(b.updatedTime || 0) - parseInt(a.updatedTime || 0));
             document.getElementById('closed-count-label').innerText = `${sortedClosed.length} eseguiti`;
             const hBody = document.getElementById('history-tbody');
             const hCards = document.getElementById('history-cards-list');
@@ -2987,15 +2992,19 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                         const sideBadge = c.side.toLowerCase() === 'buy' ? 
                             '<span class="badge mono" style="font-size: 9px; padding: 1px 5px; background: var(--green-bg); color: var(--green); border-radius: 4px;">LONG</span>' : 
                             '<span class="badge mono" style="font-size: 9px; padding: 1px 5px; background: var(--red-bg); color: var(--red); border-radius: 4px;">SHORT</span>';
+                        const brokerBadge = c.broker === 'ALPACA' ?
+                            '<span class="badge mono" style="font-size: 9px; padding: 1px 5px; background: rgba(255, 159, 10, 0.14); color: #FF9F0A; border-radius: 4px;">ALPACA</span>' :
+                            '<span class="badge mono" style="font-size: 9px; padding: 1px 5px; background: rgba(10, 132, 255, 0.14); color: var(--apple-blue); border-radius: 4px;">BYBIT</span>';
 
                         return `
                             <div class="wallet-item" onclick="openTradeModal('${c.symbol}', '${c.side.toUpperCase()}', ${parseFloat(c.avgEntryPrice || 0)}, ${parseFloat(c.avgExitPrice || 0)})">
                                 ${avatar}
                                 <div class="wallet-item-content">
                                     <div class="wallet-title-row">
-                                        <div style="display: flex; align-items: center; gap: 6px;">
+                                        <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
                                             <span class="wallet-symbol">${c.symbol}</span>
                                             ${sideBadge}
+                                            ${brokerBadge}
                                             <span style="font-size: 11px; color: var(--text-secondary);">${timeStr}</span>
                                         </div>
                                         <div style="text-align: right;">
@@ -3518,6 +3527,37 @@ def _fetch_shared_live_state_sync():
     except Exception:
         a_summary = {}
 
+    a_closed = []
+    if _alpaca_service is not None:
+        try:
+            raw_a_closed = _alpaca_service.get_recent_closed_trades(limit_days=7) or []
+            from datetime import datetime
+            for ac in raw_a_closed:
+                ts_ms = 0
+                raw_t = ac.get("timestamp")
+                if raw_t:
+                    try:
+                        ts_ms = int(datetime.fromisoformat(str(raw_t).replace("Z", "+00:00")).timestamp() * 1000)
+                    except Exception:
+                        ts_ms = 0
+                qty = float(ac.get("qty", 0.0) or 0.0)
+                ep = float(ac.get("entry_price", 0.0) or 0.0)
+                a_closed.append({
+                    "symbol": ac.get("symbol", ""),
+                    "side": "Buy" if str(ac.get("side", "LONG")).upper() == "LONG" else "Sell",
+                    "closedPnl": float(ac.get("pnl", 0.0) or 0.0),
+                    "cumEntryValue": qty * ep,
+                    "closedSize": qty,
+                    "avgEntryPrice": ep,
+                    "avgExitPrice": float(ac.get("exit_price", 0.0) or 0.0),
+                    "openFee": 0.0,
+                    "closeFee": 0.0,
+                    "updatedTime": ts_ms,
+                    "broker": "ALPACA",
+                })
+        except Exception:
+            a_closed = []
+
     b_eq = float(b_wallet.get("total_equity", 0.0) or 0.0)
     a_eq = float(a_summary.get("account", {}).get("portfolio_value", 0.0) or 0.0)
     tot_eq = b_eq + a_eq
@@ -3547,6 +3587,7 @@ def _fetch_shared_live_state_sync():
         "b_pos": b_pos,
         "b_closed": b_closed,
         "a_summary": a_summary,
+        "a_closed": a_closed,
         "tot_eq": tot_eq,
         "b_eq": b_eq,
         "a_eq": a_eq,
@@ -3592,7 +3633,8 @@ def _build_dashboard_payload_sync(tf: str):
         },
         "alpaca": {
             "account": s["a_summary"].get("account", {}),
-            "positions": s["a_summary"].get("positions", [])
+            "positions": s["a_summary"].get("positions", []),
+            "closed": s.get("a_closed", [])
         },
         "journal": {
             "insights": journal_insights,
