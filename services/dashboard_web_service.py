@@ -1423,22 +1423,6 @@ DASHBOARD_HTML = """<!DOCTYPE html>
              TAB 3: STORICO OPERAZIONI E TRADE CHIUSI
              ==================================================================== -->
         <div id="view-history" class="hidden">
-            <!-- ==========================================
-                 TRADE JOURNAL & POST-MORTEM INTELLIGENCE
-                 ========================================== -->
-            <div id="journal-intelligence-card" class="apple-group-card" style="margin-bottom: 20px; border-left: 3px solid var(--apple-blue); padding: 14px 16px;">
-                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
-                    <div style="display: flex; align-items: center; gap: 6px;">
-                        <span style="font-size: 13px; font-weight: 700; color: var(--text-primary); letter-spacing: 0.2px;">REGISTRO ESECUZIONI &amp; STATISTICHE</span>
-                        <span class="badge mono" style="font-size: 9px; padding: 1px 6px; background: rgba(255, 255, 255, 0.08); color: var(--text-secondary); border-radius: 4px; font-weight: 600;">STATISTICA ESEGUITI</span>
-                    </div>
-                    <span id="journal-stats-badge" class="mono" style="font-size: 11px; color: var(--text-secondary);">Capitale allocabile: fino a 70%</span>
-                </div>
-                <div id="journal-insights-list" style="display: flex; flex-direction: column; gap: 8px; font-size: 11px;">
-                    <div style="color: var(--text-secondary); font-style: italic;">Caricamento archivio esecuzioni...</div>
-                </div>
-            </div>
-
             <div class="section-header-apple">
                 <span>Storico Trade Eseguiti</span>
                 <div style="display: flex; gap: 8px; align-items: center;">
@@ -3012,50 +2996,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 }
             }
 
-            // 7. Render Post-Mortem Journal & Learned Lessons
-            const jList = document.getElementById('journal-insights-list');
-            const jBadge = document.getElementById('journal-stats-badge');
-            const jData = data.journal || {};
-            const insights = jData.insights || [];
-            const jStats = jData.stats || {};
-
-            if (jBadge && jStats.total_trades > 0) {
-                jBadge.innerHTML = `Win Rate: <b style="color: var(--apple-green);">${jStats.win_rate}%</b> (${jStats.wins_count}V / ${jStats.losses_count}P) &bull; Cap: 70%`;
-            }
-
-            if (jList) {
-                if (insights.length === 0) {
-                    jList.innerHTML = `
-                        <div style="background: rgba(255,255,255,0.03); border-radius: 8px; padding: 10px 12px; border: 1px solid rgba(255,255,255,0.05);">
-                            <div style="color: var(--text-primary); font-weight: 600; margin-bottom: 2px;">Registro Esecuzioni</div>
-                            <div style="color: var(--text-secondary); line-height: 1.4;">Ogni posizione chiusa registra i parametri di esecuzione e la motivazione tecnica di uscita.</div>
-                        </div>
-                    `;
-                } else {
-                    jList.innerHTML = insights.slice(0, 4).map(ins => {
-                        const isWin = (ins.pnl_pct || 0) >= 0;
-                        const badgeColor = isWin ? 'var(--apple-green)' : 'var(--apple-red)';
-                        const badgeBg = isWin ? 'rgba(48, 209, 88, 0.15)' : 'rgba(255, 69, 58, 0.15)';
-                        const pSign = isWin ? '+' : '';
-                        const tagLabel = isWin ? 'WIN' : 'PROTETTO';
-                        return `
-                            <div style="background: rgba(255,255,255,0.03); border-radius: 8px; padding: 9px 11px; border: 1px solid rgba(255,255,255,0.06);">
-                                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px;">
-                                    <div style="display: flex; align-items: center; gap: 6px;">
-                                        <b style="color: var(--text-primary); font-size: 12px;">${ins.symbol}</b>
-                                        <span class="badge mono" style="font-size: 8px; padding: 1px 5px; background: rgba(255,255,255,0.06); color: var(--text-secondary); border-radius: 4px;">${tagLabel}</span>
-                                        <span class="badge mono" style="font-size: 9px; padding: 1px 5px; background: ${badgeBg}; color: ${badgeColor}; border-radius: 4px;">${ins.close_reason || 'CHIUSO'}</span>
-                                    </div>
-                                    <span class="mono" style="font-weight: 700; color: ${badgeColor}; font-size: 12px;">${pSign}${parseFloat(ins.pnl_pct || 0).toFixed(2)}% ($${parseFloat(ins.pnl_usd || 0).toFixed(2)})</span>
-                                </div>
-                                <div style="color: var(--text-secondary); line-height: 1.35; font-size: 11px;">
-                                    ${ins.post_mortem_analysis || ins.learned_lesson || 'Diagnostica quantitativa registrata.'}
-                                </div>
-                            </div>
-                        `;
-                    }).join('');
-                }
-            }
+            // 7. Statistiche storiche salvate in safe-mode
         }
 
 
