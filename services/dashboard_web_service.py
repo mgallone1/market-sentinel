@@ -1419,6 +1419,67 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                     </div>
                 </div>
             </div>
+
+            <!-- METRICHE PORTAFOGLIO & SETUP PRE-TRADE (ALPACA WALL STREET) -->
+            <div class="section-header-apple">
+                <span>Metriche di Portafoglio &amp; Setup Pre-Trade</span>
+            </div>
+            <div class="apple-group-card">
+                <div class="apple-cell" style="padding: 12px 14px;">
+                    <div class="cell-leading">
+                        <span class="cell-title">Health &amp; Alignment Score</span>
+                        <span class="cell-subtitle" id="alpaca-compass-verdict-desc">Analisi strutturale Wall Street (SPY/VIX).</span>
+                    </div>
+                    <div class="cell-trailing">
+                        <span class="cell-value mono" id="alpaca-compass-score-val" style="color: var(--apple-blue); font-size: 20px;">--</span>
+                        <span class="badge mono" id="alpaca-compass-verdict-badge" style="font-size: 9px; padding: 2px 6px; border-radius: 4px; background: rgba(10,132,255,0.14); color: var(--apple-blue);">CARICAMENTO</span>
+                    </div>
+                </div>
+                <div class="apple-cell" style="padding: 12px 14px; flex-direction: column; align-items: stretch; gap: 8px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <div>
+                            <div class="cell-title">Indice di Confluenza Pre-Trade</div>
+                            <div style="font-size: 11px; color: var(--text-secondary);" id="alpaca-readiness-movement">Verifica SPY, Ciclica 1H e VIX Shield...</div>
+                        </div>
+                        <div style="text-align: right;">
+                            <span class="cell-value mono" id="alpaca-readiness-score-val" style="font-size: 18px; color: var(--apple-amber);">--</span>
+                            <div class="badge mono" id="alpaca-readiness-verdict-badge" style="font-size: 9px; padding: 2px 6px; border-radius: 4px; background: rgba(255,159,10,0.14); color: var(--apple-amber); margin-top: 2px;">ANALISI</div>
+                        </div>
+                    </div>
+                    <div class="progress-track" style="height: 4px; background: var(--fill-tertiary); border-radius: 2px; overflow: hidden;">
+                        <div id="alpaca-readiness-progress-bar" style="width: 0%; height: 100%; background: var(--apple-amber); transition: width 0.4s ease;"></div>
+                    </div>
+                </div>
+                <div class="apple-cell" style="padding: 10px 14px;">
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; width: 100%; font-size: 11px;">
+                        <div><span style="color: var(--text-secondary);">Macro SPY:</span> <b class="mono" id="alpaca-bd-macro">--/25</b></div>
+                        <div><span style="color: var(--text-secondary);">Ciclica 1H:</span> <b class="mono" id="alpaca-bd-cycle">--/25</b></div>
+                        <div><span style="color: var(--text-secondary);">RSI:</span> <b class="mono" id="alpaca-bd-rsi">--/25</b></div>
+                        <div><span style="color: var(--text-secondary);">VIX Shield:</span> <b class="mono" id="alpaca-bd-book">--/25</b></div>
+                    </div>
+                </div>
+                <div class="apple-cell" style="padding: 12px 14px;">
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; width: 100%;">
+                        <div>
+                            <div style="font-size: 10px; color: var(--text-secondary); text-transform: uppercase;">Expected Value</div>
+                            <div class="mono" id="alpaca-diag-ev-val" style="font-size: 15px; font-weight: 700;">$0.00</div>
+                        </div>
+                        <div>
+                            <div style="font-size: 10px; color: var(--text-secondary); text-transform: uppercase;">R:R Reale vs Target</div>
+                            <div class="mono" id="alpaca-diag-rr-val" style="font-size: 15px; font-weight: 700;">1:0.0</div>
+                        </div>
+                        <div>
+                            <div style="font-size: 10px; color: var(--text-secondary); text-transform: uppercase;">Posizioni in Gain</div>
+                            <div class="mono" id="alpaca-diag-win-val" style="font-size: 15px; font-weight: 700;">0%</div>
+                            <div style="font-size: 10px; color: var(--text-tertiary);" id="alpaca-diag-be-sub">0 a Break-Even</div>
+                        </div>
+                        <div>
+                            <div style="font-size: 10px; color: var(--text-secondary); text-transform: uppercase;">Profit Factor</div>
+                            <div class="mono" id="alpaca-diag-pf-val" style="font-size: 15px; font-weight: 700;">0.00</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <!-- ====================================================================
@@ -2564,6 +2625,68 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 console.error("Compass render error:", errCompass);
             }
 
+            // 1b. Alpaca Trading Compass & Setup Readiness (SPY + VIX)
+            try {
+                const aComp = (data.alpaca && data.alpaca.compass) ? data.alpaca.compass : {};
+                const aRead = (data.alpaca && data.alpaca.setup_readiness) ? data.alpaca.setup_readiness : {};
+                const aScoreEl = document.getElementById('alpaca-compass-score-val');
+                const aBadgeEl = document.getElementById('alpaca-compass-verdict-badge');
+                const aDescEl = document.getElementById('alpaca-compass-verdict-desc');
+                if (aScoreEl) aScoreEl.innerText = typeof aComp.health_score === 'number' ? aComp.health_score : 50;
+                if (aBadgeEl) {
+                    aBadgeEl.innerText = aComp.verdict || 'ALLINEATO';
+                    const col = aComp.verdict_color || 'amber';
+                    aBadgeEl.className = 'badge mono badge-' + col;
+                    if (aScoreEl) aScoreEl.style.color = (col === 'green' ? 'var(--green)' : (col === 'red' ? 'var(--red)' : 'var(--amber)'));
+                }
+                if (aDescEl) aDescEl.innerText = aComp.verdict_desc || 'Parametri quantitativi Wall Street monitorati.';
+
+                const aEvEl = document.getElementById('alpaca-diag-ev-val');
+                if (aEvEl) {
+                    const ev = aComp.expected_value_usd || 0;
+                    aEvEl.innerText = `${ev >= 0 ? '+' : ''}$${ev.toFixed(2)}`;
+                    aEvEl.style.color = ev >= 0 ? 'var(--green)' : 'var(--red)';
+                }
+                const aRrEl = document.getElementById('alpaca-diag-rr-val');
+                if (aRrEl) aRrEl.innerText = `1:${(aComp.realized_rr || 0).toFixed(1)}`;
+                const aWinEl = document.getElementById('alpaca-diag-win-val');
+                if (aWinEl) aWinEl.innerText = `${aComp.open_itm_ratio || 0}%`;
+                const aBeEl = document.getElementById('alpaca-diag-be-sub');
+                if (aBeEl) aBeEl.innerText = `${aComp.protected_positions_count || 0} a Break-Even`;
+                const aPfEl = document.getElementById('alpaca-diag-pf-val');
+                if (aPfEl) aPfEl.innerText = (aComp.profit_factor || 0).toFixed(2);
+
+                const arScore = aRead.readiness_score || 50;
+                const arScoreEl = document.getElementById('alpaca-readiness-score-val');
+                const arBadgeEl = document.getElementById('alpaca-readiness-verdict-badge');
+                const arBarEl = document.getElementById('alpaca-readiness-progress-bar');
+                const arDescEl = document.getElementById('alpaca-readiness-movement');
+                if (arScoreEl) arScoreEl.innerText = arScore;
+                if (arBarEl) {
+                    arBarEl.style.width = arScore + '%';
+                    const bCol = arScore >= 75 ? 'var(--green)' : (arScore >= 55 ? 'var(--amber)' : 'var(--red)');
+                    arBarEl.style.background = bCol;
+                    if (arScoreEl) arScoreEl.style.color = bCol;
+                }
+                if (arBadgeEl) {
+                    arBadgeEl.innerText = aRead.readiness_verdict || 'STAND-BY';
+                    arBadgeEl.className = `badge mono badge-${aRead.readiness_color || 'amber'}`;
+                }
+                if (arDescEl) arDescEl.innerHTML = `<strong>Movimento Atteso:</strong> ${aRead.expected_movement || 'Monitoraggio SPY/VIX in corso.'}`;
+
+                const abk = aRead.breakdown || {};
+                const apMacro = document.getElementById('alpaca-bd-macro');
+                if (apMacro && abk.macro) apMacro.innerText = `${abk.macro.score}/25`;
+                const apCycle = document.getElementById('alpaca-bd-cycle');
+                if (apCycle && abk.cycle) apCycle.innerText = `${abk.cycle.score}/25`;
+                const apRsi = document.getElementById('alpaca-bd-rsi');
+                if (apRsi && abk.rsi) apRsi.innerText = `${abk.rsi.score}/25`;
+                const apBook = document.getElementById('alpaca-bd-book');
+                if (apBook && abk.book) apBook.innerText = `${abk.book.score}/25`;
+            } catch (errAlpacaCompass) {
+                console.error("Alpaca compass render error:", errAlpacaCompass);
+            }
+
             // 2. Acc Summary & Divisione Conti Distinti
             const bEq = bWallet.total_equity || 0;
             const aEq = parseFloat(aAcc.portfolio_value || 0);
@@ -3581,6 +3704,8 @@ def _fetch_shared_live_state_sync():
     variations = perf_tracker.get_variations(tot_eq, cum_real, bybit_eq=b_eq, alpaca_eq=a_eq, current_unrealized_pnl=unreal_pnl)
     compass_metrics = trading_compass.compute_edge_metrics(b_closed, b_pos, tot_eq)
     setup_readiness = trading_compass.compute_setup_readiness(_bybit_service)
+    alpaca_compass_metrics = trading_compass.compute_edge_metrics(a_closed, a_summary.get("positions", []), a_eq)
+    alpaca_setup_readiness = trading_compass.compute_alpaca_setup_readiness()
 
     return {
         "b_wallet": b_wallet,
@@ -3595,7 +3720,9 @@ def _fetch_shared_live_state_sync():
         "unreal_pnl": unreal_pnl,
         "variations": variations,
         "compass_metrics": compass_metrics,
-        "setup_readiness": setup_readiness
+        "setup_readiness": setup_readiness,
+        "alpaca_compass_metrics": alpaca_compass_metrics,
+        "alpaca_setup_readiness": alpaca_setup_readiness
     }
 
 def _build_dashboard_payload_sync(tf: str):
@@ -3634,7 +3761,9 @@ def _build_dashboard_payload_sync(tf: str):
         "alpaca": {
             "account": s["a_summary"].get("account", {}),
             "positions": s["a_summary"].get("positions", []),
-            "closed": s.get("a_closed", [])
+            "closed": s.get("a_closed", []),
+            "compass": s.get("alpaca_compass_metrics", {}),
+            "setup_readiness": s.get("alpaca_setup_readiness", {})
         },
         "journal": {
             "insights": journal_insights,

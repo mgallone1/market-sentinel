@@ -280,4 +280,130 @@ class TradingCompassService:
         _CACHED_READINESS_TIME = now_t
         return res
 
+    @staticmethod
+    def compute_alpaca_setup_readiness() -> Dict[str, Any]:
+        """
+        Calcola l'Indice di Confluenza Pre-Trade per Wall Street (Alpaca):
+        1. Macro SPY (EMA20 vs EMA50 1H)
+        2. Ciclica 1H (Hurst FLD & Battleplan su SPY)
+        3. RSI Momentum (SPY 1H)
+        4. VIX Volatility Shield (livello e delta giornaliero ^VIX)
+        """
+        global _CACHED_ALPACA_READINESS, _CACHED_ALPACA_READINESS_TIME
+        now_t = time.time()
+        if "_CACHED_ALPACA_READINESS" in globals() and _CACHED_ALPACA_READINESS is not None and (now_t - _CACHED_ALPACA_READINESS_TIME) < 45.0:
+            return _CACHED_ALPACA_READINESS
+
+        macro_score, cycle_score, rsi_score, vix_score = 10, 12, 12, 12
+        macro_text = "SPY in fase neutra"
+        cycle_text = "Ciclo 1H in consolidamento"
+        rsi_text = "Momentum RSI neutro"
+        vix_text = "VIX in fascia normale"
+
+        try:
+            import yfinance as yf
+            import pandas as pd
+            from services.hurst_migliorino_cycles import HurstMigliorinoCycleService
+            from services.indicators_safe import wilder_rsi, drop_forming_bar
+
+            df_spy = yf.download("SPY", period="1mo", interval="1h", progress=False)
+            if not df_spy.empty and len(df_spy) >= 35:
+                if isinstance(df_spy.columns, pd.MultiIndex):
+                    df_spy.columns = df_spy.columns.get_level_values(0)
+                df_spy = drop_forming_bar(df_spy, 60)
+                c = df_spy["Close"].dropna()
+                last_c = float(c.iloc[-1])
+                ema20 = float(c.ewm(span=20, adjust=False).mean().iloc[-1])
+                ema50 = float(c.ewm(span=50, adjust=False).mean().iloc[-1])
+
+                if last_c > ema20 and ema20 >= ema50:
+                    macro_score = 25
+                    macro_text = "SPY rialzista sopra EMA20/50 1H"
+                elif last_c > ema20:
+                    macro_score = 16
+                    macro_text = "SPY sopra EMA20 1H (rimbalzo)"
+                else:
+                    macro_score = 5
+                    macro_text = "SPY sotto EMA20 1H (debolezza)"
+
+                rsi = float(wilder_rsi(c, 14).iloc[-1])
+                if 50 <= rsi <= 68:
+                    rsi_score = 24
+                    rsi_text = f"RSI {rsi:.1f} (spinta ottimale)"
+                elif rsi > 68:
+                    rsi_score = 12
+                    rsi_text = f"RSI {rsi:.1f} (ipercomprato)"
+                else:
+                    rsi_score = 8
+                    rsi_text = f"RSI {rsi:.1f} (momentum debole)"
+
+                cycle = HurstMigliorinoCycleService.calculate_cycle_metrics(pd.DataFrame({"Close": c}))
+                tempo = str(cycle.get("tempo_battleplan", "")).upper()
+                fld = float(cycle.get("hurst_fld_value", 0.0) or 0.0)
+                if ("1° TEMPO" in tempo or "2° TEMPO" in tempo) and last_c > fld:
+                    cycle_score = 25
+                    cycle_text = f"Ciclo favorevole ({tempo})"
+                elif last_c > fld:
+                    cycle_score = 16
+                    cycle_text = "Prezzo sopra FLD Hurst"
+                else:
+                    cycle_score = 6
+                    cycle_text = f"Ciclo sfavorevole ({tempo or 'sotto FLD'})"
+
+            vix_df = yf.download("^VIX", period="10d", interval="1d", progress=False)
+            if not vix_df.empty:
+                v_c = vix_df["Close"].iloc[:, 0] if isinstance(vix_df["Close"], pd.DataFrame) else vix_df["Close"]
+                vix_val = float(v_c.iloc[-1])
+                prev_vix = float(v_c.iloc[-2]) if len(v_c) >= 2 else vix_val
+                vix_delta = ((vix_val - prev_vix) / prev_vix) * 100.0 if prev_vix > 0 else 0.0
+
+                if vix_delta > 2.0 or (vix_val >= 24.0 and vix_delta >= 0.0) or vix_val >= 28.0:
+                    vix_score = 0
+                    vix_text = f"VIX Shield ATTIVO ({vix_val:.1f}, {vix_delta:+.1f}%)"
+                elif vix_val < 20.0:
+                    vix_score = 25
+                    vix_text = f"VIX disteso ({vix_val:.1f}, {vix_delta:+.1f}%)"
+                else:
+                    vix_score = 15
+                    vix_text = f"VIX moderato ({vix_val:.1f}, {vix_delta:+.1f}%)"
+        except Exception as e_alp:
+            print(f"[!] Errore calcolo Alpaca setup readiness: {e_alp}")
+
+        total_readiness = max(5, min(98, macro_score + cycle_score + rsi_score + vix_score))
+        if vix_score == 0:
+            readiness_verdict = "VIX SHIELD ATTIVO"
+            readiness_color = "red"
+            expected_movement = "Volatilità VIX in aumento: ingressi Long su Wall Street sospesi per protezione capitale"
+        elif total_readiness >= 75:
+            readiness_verdict = "TRIGGER IMMINENTE"
+            readiness_color = "green"
+            expected_movement = "Confluenza SPY/VIX e Ciclica 1H favorevole su Wall Street"
+        elif total_readiness >= 55:
+            readiness_verdict = "SET-UP IN MATURAZIONE"
+            readiness_color = "amber"
+            expected_movement = "Mercato USA in consolidamento; attesa conferma su SPY e VIX"
+        else:
+            readiness_verdict = "STAND-BY RIGIDO"
+            readiness_color = "red"
+            expected_movement = "Condizioni macro USA sfavorevoli; capitale protetto in liquidità"
+
+        res = {
+            "readiness_score": total_readiness,
+            "readiness_verdict": readiness_verdict,
+            "readiness_color": readiness_color,
+            "expected_movement": expected_movement,
+            "breakdown": {
+                "macro": {"score": macro_score, "max": 25, "text": macro_text},
+                "cycle": {"score": cycle_score, "max": 25, "text": cycle_text},
+                "rsi": {"score": rsi_score, "max": 25, "text": rsi_text},
+                "book": {"score": vix_score, "max": 25, "text": vix_text}
+            }
+        }
+        _CACHED_ALPACA_READINESS = res
+        _CACHED_ALPACA_READINESS_TIME = now_t
+        return res
+
+_CACHED_ALPACA_READINESS = None
+_CACHED_ALPACA_READINESS_TIME = 0.0
+
 trading_compass = TradingCompassService()
