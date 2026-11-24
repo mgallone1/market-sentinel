@@ -1510,7 +1510,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             <div class="acc-cell" style="padding: 14px; text-align: left;">
                 <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
                     <strong style="color: var(--text-main); font-size: 13px;">2. Metriche di Rischio &amp; Indice di Confluenza (Pre-Trade)</strong>
-                    <span class="badge mono" style="background: var(--green); color: #fff; font-size: 9px; padding: 2px 6px; border-radius: 3px;">STATISTICA &amp; RADAR</span>
+                    <span class="badge mono" style="background: var(--green); color: #fff; font-size: 9px; padding: 2px 6px; border-radius: 3px;">STATISTICA OPERATIVA</span>
                 </div>
                 <div style="display: flex; flex-direction: column; gap: 8px; font-size: 11px; line-height: 1.45;">
                     <div><strong>• Health &amp; Alignment Score (0-100):</strong> Misura la salute dei <em>trade già aperti a mercato</em> (convergenza di win rate, profit factor, posizioni a break-even e PnL fluttuante). A mercato flat rimane giustamente sul benchmark neutro di 50.</div>
