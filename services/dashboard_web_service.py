@@ -1269,10 +1269,10 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 
             <!-- Segmented Control Modalità Grafico: Patrimonio vs PnL & Valuta vs Percentuale -->
             <div class="apple-segmented mono" style="margin-top: 10px; margin-bottom: 4px;">
-                <button class="apple-segment-item active" id="btn-view-wallet" onclick="setChartMetric('wallet')">Patrimonio</button>
-                <button class="apple-segment-item" id="btn-view-pnl" onclick="setChartMetric('pnl')">PnL Operativo</button>
-                <button class="apple-segment-item active" id="btn-mode-usd" onclick="setChartMode('usd')">$ Dollari</button>
-                <button class="apple-segment-item" id="btn-mode-pct" onclick="setChartMode('pct')">% Percentuale</button>
+                <button class="apple-segment-item active" id="btn-view-pnl" onclick="setChartMetric('pnl')">PnL Operativo</button>
+                <button class="apple-segment-item" id="btn-view-wallet" onclick="setChartMetric('wallet')">Patrimonio</button>
+                <button class="apple-segment-item active" id="btn-mode-pct" onclick="setChartMode('pct')">% Percentuale</button>
+                <button class="apple-segment-item" id="btn-mode-usd" onclick="setChartMode('usd')">$ Dollari</button>
             </div>
 
             <!-- Quick Metrics Grid (Dinamico per Mercato Selezionato) -->
@@ -1834,8 +1834,8 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         let chartInstance = null;
         let currentTimeframe = '3s';
         let currentInstance = 'bybit'; // 'bybit' | 'alpaca' | 'total'
-        let chartMode = 'usd'; // 'usd' | 'pct'
-        let chartMetric = 'wallet'; // 'wallet' | 'pnl'
+        let chartMode = 'pct'; // 'pct' | 'usd' (default: Percentuale)
+        let chartMetric = 'pnl'; // 'pnl' | 'wallet' (default: PnL Operativo)
 
         function setChartMetric(metric) {
             chartMetric = metric;
