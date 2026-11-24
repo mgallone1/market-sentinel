@@ -25,6 +25,11 @@ se il sistema sta generando un reale vantaggio statistico (EDGE) o se sta andand
 
 from typing import Dict, Any, List
 import math
+import time
+
+_CACHED_READINESS = None
+_CACHED_READINESS_TIME = 0
+_READINESS_TTL = 45.0  # Cache 45s per azzerare chiamate esterne yfinance e garantire latenza API < 10ms
 
 class TradingCompassService:
     @staticmethod
@@ -138,6 +143,11 @@ class TradingCompassService:
         3. Momentum & Compressione Volatilità RSI [0-25 pt]
         4. Microstruttura Order Book Imbalance (OBI) [0-25 pt]
         """
+        global _CACHED_READINESS, _CACHED_READINESS_TIME
+        now_t = time.time()
+        if _CACHED_READINESS is not None and (now_t - _CACHED_READINESS_TIME) < _READINESS_TTL:
+            return _CACHED_READINESS
+
         import yfinance as yf
         import pandas as pd
         from services.hurst_migliorino_cycles import HurstMigliorinoCycleService
@@ -254,7 +264,7 @@ class TradingCompassService:
             readiness_color = "red"
             expected_movement = "Mercato incerto o contro-trend; il capitale resta protetto al 100% in liquidità"
 
-        return {
+        res = {
             "readiness_score": total_readiness,
             "readiness_verdict": readiness_verdict,
             "readiness_color": readiness_color,
@@ -266,5 +276,8 @@ class TradingCompassService:
                 "book": {"score": obi_score, "max": 25, "text": obi_text}
             }
         }
+        _CACHED_READINESS = res
+        _CACHED_READINESS_TIME = now_t
+        return res
 
 trading_compass = TradingCompassService()

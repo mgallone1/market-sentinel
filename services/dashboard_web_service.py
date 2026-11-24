@@ -1429,8 +1429,8 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             <div id="journal-intelligence-card" class="apple-group-card" style="margin-bottom: 20px; border-left: 3px solid var(--apple-blue); padding: 14px 16px;">
                 <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
                     <div style="display: flex; align-items: center; gap: 6px;">
-                        <span style="font-size: 13px; font-weight: 700; color: var(--text-primary); letter-spacing: 0.2px;">POST-MORTEM & APPRENDIMENTO ATTIVO</span>
-                        <span class="badge mono" style="font-size: 9px; padding: 1px 6px; background: rgba(10, 132, 255, 0.15); color: var(--apple-blue); border-radius: 4px; font-weight: 700;">AI SENTINEL</span>
+                        <span style="font-size: 13px; font-weight: 700; color: var(--text-primary); letter-spacing: 0.2px;">DIAGNOSTICA STORICA & LEARNING ENGINE</span>
+                        <span class="badge mono" style="font-size: 9px; padding: 1px 6px; background: rgba(10, 132, 255, 0.15); color: var(--apple-blue); border-radius: 4px; font-weight: 700;">AUDIT QUANTITATIVO</span>
                     </div>
                     <span id="journal-stats-badge" class="mono" style="font-size: 11px; color: var(--text-secondary);">Capitale allocabile: fino a 70%</span>
                 </div>
@@ -3028,19 +3028,19 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 } else {
                     jList.innerHTML = insights.slice(0, 4).map(ins => {
                         const isWin = (ins.pnl_pct || 0) >= 0;
-                        const icon = isWin ? '🎓' : '🛡️';
                         const badgeColor = isWin ? 'var(--apple-green)' : 'var(--apple-red)';
                         const badgeBg = isWin ? 'rgba(48, 209, 88, 0.15)' : 'rgba(255, 69, 58, 0.15)';
                         const pSign = isWin ? '+' : '';
+                        const tagLabel = isWin ? 'WIN' : 'PROTETTO';
                         return `
                             <div style="background: rgba(255,255,255,0.03); border-radius: 8px; padding: 9px 11px; border: 1px solid rgba(255,255,255,0.06);">
                                 <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px;">
                                     <div style="display: flex; align-items: center; gap: 6px;">
-                                        <span>${icon}</span>
-                                        <b style="color: var(--text-primary);">${ins.symbol}</b>
+                                        <b style="color: var(--text-primary); font-size: 12px;">${ins.symbol}</b>
+                                        <span class="badge mono" style="font-size: 8px; padding: 1px 5px; background: rgba(255,255,255,0.06); color: var(--text-secondary); border-radius: 4px;">${tagLabel}</span>
                                         <span class="badge mono" style="font-size: 9px; padding: 1px 5px; background: ${badgeBg}; color: ${badgeColor}; border-radius: 4px;">${ins.close_reason || 'CHIUSO'}</span>
                                     </div>
-                                    <span class="mono" style="font-weight: 700; color: ${badgeColor};">${pSign}${parseFloat(ins.pnl_pct || 0).toFixed(2)}% ($${parseFloat(ins.pnl_usd || 0).toFixed(2)})</span>
+                                    <span class="mono" style="font-weight: 700; color: ${badgeColor}; font-size: 12px;">${pSign}${parseFloat(ins.pnl_pct || 0).toFixed(2)}% ($${parseFloat(ins.pnl_usd || 0).toFixed(2)})</span>
                                 </div>
                                 <div style="color: var(--text-secondary); line-height: 1.35; font-size: 11px;">
                                     ${ins.post_mortem_analysis || ins.learned_lesson || 'Diagnostica quantitativa registrata.'}
