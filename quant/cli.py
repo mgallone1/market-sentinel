@@ -36,10 +36,13 @@ def resolve_universe(name: str) -> tuple[list[AssetSpec], str | None]:
     return specs, specs[0].benchmark if specs else None
 
 
+DEFAULT_HOLD = {"1h": 48, "4h": 30, "1d": 20}   # max_hold_bars di default per intervallo
+
+
 def make_rules(name: str, interval: str, flatten_eod: bool = False) -> ExitRules:
     if name == "legacy":
         return LEGACY_BOT_RULES
-    hold = 20 if interval == "1d" else 48
+    hold = DEFAULT_HOLD.get(interval, 48)
     return ExitRules(sl_atr=1.5, tp_atr=3.0, max_hold_bars=hold, flatten_eod=flatten_eod)
 
 
@@ -123,7 +126,9 @@ def main(argv=None) -> int:
     p.add_argument("--report", help="report.json della ricerca da cui ereditare il verdetto")
     p.add_argument("--out")
     a = ap.parse_args(argv)
-    logging.basicConfig(level=logging.WARNING)
+    logging.basicConfig(level=logging.WARNING, stream=sys.stderr,
+                        format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    logging.getLogger("quant.research.walkforward").setLevel(logging.INFO)
     uni, bench = load_universe(a)
 
     if a.cmd == "fetch":
@@ -133,6 +138,7 @@ def main(argv=None) -> int:
 
     from quant.research.dataset import primary_side
     rules = make_rules(a.rules, a.interval, a.flatten_eod)
+    print(f"ExitRules effettive ({a.rules}, {a.interval}): {rules!r}", file=sys.stderr, flush=True)
 
     if a.cmd == "backtest":
         port = {}

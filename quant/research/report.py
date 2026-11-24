@@ -7,7 +7,10 @@ from pathlib import Path
 
 NO_EDGE = "NO EDGE — do not deploy"
 RULES = {"oos_logloss_vs_base": "< 0", "dsr": "> 0.95 (p-value < 0.05)", "pbo": "< 0.2",
-         "expectancy_ret": "> 0 (dopo costi)", "n_trades": ">= 200"}
+         "expectancy_ret": "> 0 (dopo costi)", "n_trades": ">= 200", "auc": "> 0.52",
+         "beats_primary_only": "expectancy > primary_only (il filtro deve aggiungere valore, non solo beta)",
+         "beats_random_control": "expectancy > random@<kind> con la stessa accettazione"}
+MIN_AUC = 0.52
 
 
 def _f(x):
@@ -18,14 +21,20 @@ def _f(x):
     return x
 
 
-def evaluate_config(row: dict, pbo: float) -> dict:
-    """Controlla i 5 criteri; NaN = fallito. Restituisce {criterio: bool, 'deployable': bool}."""
+def evaluate_config(row: dict, pbo: float, primary: dict | None = None, random_ctrl: dict | None = None) -> dict:
+    """Controlla gli 8 criteri; NaN = fallito. Restituisce {criterio: bool, 'deployable': bool}.
+    Oltre a edge assoluto richiede edge INCREMENTALE: il modello deve battere la strategia primaria
+    senza filtro e un filtro casuale con la stessa accettazione (altrimenti cattura solo beta/timing)."""
+    e = _f(row.get("expectancy_ret"))
     ok = dict(
         logloss=_f(row.get("logloss_vs_base")) < 0,
         dsr=_f(row.get("dsr")) > 0.95,
         pbo=_f(pbo) < 0.2,
-        expectancy=_f(row.get("expectancy_ret")) > 0,
+        expectancy=e > 0,
         n_trades=(_f(row.get("n_trades")) >= 200),
+        auc=_f(row.get("auc")) > MIN_AUC,
+        beats_primary_only=e > _f((primary or {}).get("expectancy_ret")),
+        beats_random_control=e > _f((random_ctrl or {}).get("expectancy_ret")),
     )
     ok["deployable"] = all(ok.values()) and row.get("role") == "model"
     return ok
@@ -33,7 +42,9 @@ def evaluate_config(row: dict, pbo: float) -> dict:
 
 def verdict(summary_rows: dict, pbo: float) -> dict:
     """summary_rows: config -> dict di metriche. Verdetto globale + elenco configurazioni deployable."""
-    checks = {n: evaluate_config(r, pbo) for n, r in summary_rows.items() if r.get("role") == "model"}
+    prim = summary_rows.get("primary_only")
+    checks = {n: evaluate_config(r, pbo, prim, summary_rows.get(f"random@{n}"))
+              for n, r in summary_rows.items() if r.get("role") == "model"}
     dep = [n for n, c in checks.items() if c["deployable"]]
     if dep:
         best = max(dep, key=lambda n: _f(summary_rows[n].get("dsr")))
@@ -66,7 +77,7 @@ def write_report(result, out_dir, name: str = "research", extra: dict | None = N
          f"- Eventi: {result.config['n_events']} | fold OOS: {result.config['n_folds']} | "
          f"configurazioni (n_trials DSR): {result.n_trials} | PBO (CSCV): {_fmt(result.pbo)}",
          f"- Criteri di deploy: log-loss OOS < base_rate; DSR > 0.95; PBO < 0.2; expectancy netta > 0; "
-         f"n_trades >= 200. Fallire un criterio = NO EDGE.", "",
+         f"n_trades >= 200; AUC > 0.52; expectancy > primary_only e > filtro casuale. Fallire un criterio = NO EDGE.", "",
          "## Classifica modelli (OOS, dopo costi)", "",
          "| config | n_trades | win% | expectancy | PF | Sharpe | maxDD | accept% | logloss | Δ vs base | AUC | IC | "
          "Brier | DSR | deploy |",

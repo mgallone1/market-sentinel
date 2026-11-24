@@ -26,9 +26,11 @@ class Ctx:
     def __init__(self, bars: pd.DataFrame, spec: AssetSpec, interval: str):
         self.bars, self.spec = bars, spec
         self.o, self.h, self.l, self.c = (bars[k].to_numpy(float) for k in ("open", "high", "low", "close"))
+        self.o = np.array(self.o)   # copia scrivibile (fix open barra di fill)
         self.atr = wilder_atr(self.h, self.l, self.c, 14)
         n = len(bars)
         self.hours = interval_to_hours(interval)
+        self.n_orders = self.n_fills = 0
         self.last_mask = None
         self.in_sess = np.ones(n, bool)
         if spec.session == "rth":
@@ -40,26 +42,82 @@ class Ctx:
                 self.in_sess = (mins >= 570) & (mins < 960)
 
 
-def plan_trade(ctx: Ctx, t: int, side: int, rules: ExitRules):
-    """Simula l'uscita di un ingresso all'open di t+1. None se non eseguibile. Indipendente dal size."""
-    ei = t + 1
-    if ei >= len(ctx.c) or not ctx.in_sess[ei] or (side < 0 and not ctx.spec.allow_short):
+@dataclass(frozen=True)
+class EntryModel:
+    """taker: open t+1 + slippage. maker: post-only limit a close_t*(1 - s*offset), fill solo se il prezzo
+    ATTRAVERSA il limite entro max_wait_bars (fill al limite, fee maker, nessuno slippage in ingresso)."""
+    mode: str = "taker"
+    offset_bps: float = 0.0
+    max_wait_bars: int = 2
+    through_bps: float = 1.0
+
+    @property
+    def maker(self) -> bool:
+        return self.mode == "maker"
+
+
+def resolve_entry(entry_mode: str = "taker", maker_entry: bool = False, offset_bps: float = 0.0,
+                  max_wait_bars: int = 2, through_bps: float = 1.0) -> EntryModel:
+    mode = "maker" if (maker_entry or entry_mode == "maker") else entry_mode
+    if mode not in ("taker", "maker"):
+        raise ValueError(f"entry_mode sconosciuto: {entry_mode}")
+    return EntryModel(mode, offset_bps, max_wait_bars, through_bps)
+
+
+def plan_trade(ctx: Ctx, t: int, side: int, rules: ExitRules, em: EntryModel = EntryModel()):
+    """Simula ingresso+uscita di un segnale a close t. None se non eseguibile / limite non riempito."""
+    n = len(ctx.c)
+    if t + 1 >= n or (side < 0 and not ctx.spec.allow_short):
         return None
-    entry = float(ctx.o[ei])
-    lv = rules.levels(side, entry, ctx.atr[t])
+    if not em.maker:
+        ei = t + 1
+        if not ctx.in_sess[ei]:
+            return None
+        entry = float(ctx.o[ei])
+        atr, open_fix = ctx.atr[t], None
+    else:
+        limit = float(ctx.c[t]) * (1.0 - side * em.offset_bps / 1e4)
+        ei = -1
+        for j in range(t + 1, min(n - 1, t + em.max_wait_bars) + 1):
+            if not ctx.in_sess[j]:
+                continue
+            if side > 0 and ctx.l[j] < limit * (1 - em.through_bps / 1e4):
+                ei = j
+                break
+            if side < 0 and ctx.h[j] > limit * (1 + em.through_bps / 1e4):
+                ei = j
+                break
+        ctx.n_orders += 1
+        if ei < 0:
+            return None
+        ctx.n_fills += 1
+        entry, atr, open_fix = limit, ctx.atr[t], limit
+    lv = rules.levels(side, entry, atr)
     if lv is None:
         return None
     sl, tp, risk = lv
-    xi, xp, reason = simulate_trade(ctx.o, ctx.h, ctx.l, ctx.c, ei, side, entry, sl, tp, rules,
-                                    ctx.atr[t], ctx.last_mask)
-    return dict(t=t, ei=ei, xi=xi, entry=entry, exit=xp, reason=reason, risk=risk, side=side)
+    if open_fix is not None:      # il fill avviene intra-barra: niente gap-check sull'open della barra di fill
+        saved = ctx.o[ei]
+        ctx.o[ei] = open_fix
+    try:
+        xi, xp, reason = simulate_trade(ctx.o, ctx.h, ctx.l, ctx.c, ei, side, entry, sl, tp, rules, atr,
+                                        ctx.last_mask)
+    finally:
+        if open_fix is not None:
+            ctx.o[ei] = saved
+    return dict(t=t, ei=ei, xi=xi, entry=entry, exit=xp, reason=reason, risk=risk, side=side, maker=em.maker)
 
 
 def finish_trade(ctx: Ctx, pl: dict, qty: float, maker_entry: bool = False) -> dict:
     idx = ctx.bars.index
     side, entry, xp = pl["side"], pl["entry"], pl["exit"]
-    cs = trade_costs(ctx.spec, side, entry, xp, qty, idx[pl["ei"]], idx[pl["xi"]], ctx.bars, maker_entry,
+    maker = bool(pl.get("maker", False)) or maker_entry
+    cs = trade_costs(ctx.spec, side, entry, xp, qty, idx[pl["ei"]], idx[pl["xi"]], ctx.bars, maker,
                      stop_exit=pl["reason"] == "SL")
+    if pl.get("maker", False):    # fill al limite: nessuno slippage in ingresso
+        ent_slip = ctx.spec.costs.slippage_bps / 1e4 * qty * entry
+        cs["slippage"] -= ent_slip
+        cs["total"] -= ent_slip
     gross = side * qty * (xp - entry)
     net = gross - cs["total"]
     notional = qty * entry
@@ -76,7 +134,7 @@ def periods_per_year(spec: AssetSpec, hours: float) -> float:
     return spec.bars_per_year_factor / hours
 
 
-def _run(universe, rules, interval, initial_equity, risk_per_trade, size_frac, maker_entry,
+def _run(universe, rules, interval, initial_equity, risk_per_trade, size_frac, em,
          allow_overlap, max_gross) -> BacktestResult:
     cands, ctxs = [], {}
     for order, (sym, (bars, sig, spec)) in enumerate(universe.items()):
@@ -88,7 +146,7 @@ def _run(universe, rules, interval, initial_equity, risk_per_trade, size_frac, m
         for t in np.flatnonzero(side != 0):
             if not allow_overlap and t < busy:
                 continue
-            pl = plan_trade(ctx, int(t), 1 if side[t] > 0 else -1, rules)
+            pl = plan_trade(ctx, int(t), 1 if side[t] > 0 else -1, rules, em)
             if pl is None:
                 continue
             busy = pl["xi"]
@@ -115,7 +173,7 @@ def _run(universe, rules, interval, initial_equity, risk_per_trade, size_frac, m
             notional = min(notional, max_gross * eq - sum(r["notional"] for r in open_))
         if notional <= 1e-9 * eq:
             continue
-        r = finish_trade(ctxs[sym], pl, notional / pl["entry"], maker_entry)
+        r = finish_trade(ctxs[sym], pl, notional / pl["entry"])
         r["symbol"] = sym
         rows.append(r)
         open_.append(r)
@@ -138,17 +196,26 @@ def _run(universe, rules, interval, initial_equity, risk_per_trade, size_frac, m
     equity = pd.Series(eqv, index=union, name="equity")
     spec0 = next(iter(universe.values()))[2]
     ppy = periods_per_year(spec0, interval_to_hours(interval))
-    return BacktestResult(trades, equity, compute_metrics(trades, equity, ppy))
+    metrics = compute_metrics(trades, equity, ppy)
+    no = sum(c.n_orders for c in ctxs.values())
+    nf = sum(c.n_fills for c in ctxs.values())
+    metrics["maker_fill_rate"] = nf / no if (em.maker and no) else (float("nan") if em.maker else 1.0)
+    metrics["maker_orders"], metrics["maker_missed"] = (no, no - nf) if em.maker else (0, 0)
+    return BacktestResult(trades, equity, metrics)
 
 
 def run_backtest(bars, signals, spec, rules, interval, initial_equity=100_000, risk_per_trade=None,
-                 size_frac=0.10, maker_entry=False, allow_overlap=False) -> BacktestResult:
+                 size_frac=0.10, maker_entry=False, allow_overlap=False, entry_mode="taker",
+                 offset_bps=0.0, max_wait_bars=2, through_bps=1.0) -> BacktestResult:
+    em = resolve_entry(entry_mode, maker_entry, offset_bps, max_wait_bars, through_bps)
     return _run({spec.symbol: (bars, signals, spec)}, rules, interval, initial_equity, risk_per_trade,
-                size_frac, maker_entry, allow_overlap, None)
+                size_frac, em, allow_overlap, None)
 
 
 def run_portfolio(universe: Dict[str, Tuple[pd.DataFrame, pd.DataFrame, AssetSpec]], rules, interval,
                   initial_equity=100_000, risk_per_trade=None, size_frac=0.10, maker_entry=False,
-                  max_gross_exposure=0.7) -> BacktestResult:
-    return _run(universe, rules, interval, initial_equity, risk_per_trade, size_frac, maker_entry,
-                False, max_gross_exposure)
+                  max_gross_exposure=0.7, entry_mode="taker", offset_bps=0.0, max_wait_bars=2,
+                  through_bps=1.0) -> BacktestResult:
+    em = resolve_entry(entry_mode, maker_entry, offset_bps, max_wait_bars, through_bps)
+    return _run(universe, rules, interval, initial_equity, risk_per_trade, size_frac, em, False,
+                max_gross_exposure)

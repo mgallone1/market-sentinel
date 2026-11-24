@@ -85,3 +85,15 @@ def test_overnight_threshold_dst():
     assert rome_overnight(s, "15m").tolist() == [True, False]    # 06:15 Roma (CEST) notte, 07:15 giorno
     # a pari ora UTC (05:00) l'esito differisce tra inverno e estate
     assert rome_overnight(w[:1], "15m").iloc[0] and not rome_overnight(s[1:], "15m").iloc[0]
+
+
+def test_cct_family_causal():
+    from quant.core import crypto_perp
+    from quant.data.synthetic import generate_bars
+    from quant.strategies.cct import cct, flow_only, funding_contrarian, trend_only
+    b = generate_bars(n=1500, interval="4h", seed=7)
+    spec = crypto_perp("XUSDT", "bybit")
+    for fn in (cct, trend_only, funding_contrarian, flow_only):
+        full = fn(b, spec, "4h")
+        for k in (600, 1000, 1499):
+            assert fn(b.iloc[:k], spec, "4h").equals(full.iloc[:k]), fn.__name__

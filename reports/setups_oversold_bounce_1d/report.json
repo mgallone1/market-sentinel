@@ -1,0 +1,731 @@
+{
+  "config": {
+    "interval": "1d",
+    "kinds": [
+      "base_rate",
+      "logit",
+      "rf"
+    ],
+    "thresholds": [
+      "breakeven"
+    ],
+    "sizing": "kelly",
+    "train_bars": 1257,
+    "test_bars": 251,
+    "embargo_bars": 20,
+    "expanding": false,
+    "symbols": [
+      "SPY",
+      "QQQ",
+      "AAPL",
+      "MSFT",
+      "NVDA",
+      "AMZN",
+      "GOOGL",
+      "META",
+      "TSLA",
+      "JPM"
+    ],
+    "rules": "ExitRules(sl_atr=2.0, tp_atr=4.0, sl_pct=None, tp_pct=None, sl_clamp_pct=None, tp_rr=None, max_hold_bars=20, ratchets=(), pct_ratchets=(), breakeven_R=None, trailing_atr=None, flatten_eod=False, hard_close_loss_pct=None, hard_close_gain_pct=None)",
+    "n_events": 455,
+    "n_folds": 1,
+    "kelly_lam": 0.25,
+    "kelly_cap": 0.25,
+    "vol_target": 0.3,
+    "data_start": "2010-01-04 00:00:00+00:00",
+    "data_end": "2026-11-23 00:00:00+00:00",
+    "seed": 0
+  },
+  "pbo": 0.7873348873348873,
+  "n_trials": 3,
+  "best_kind": "logit",
+  "summary": [
+    {
+      "config": "base_rate",
+      "kind": "base_rate",
+      "threshold": "breakeven",
+      "role": "model",
+      "n_trades": 10,
+      "win_rate": 0.7,
+      "expectancy_ret": 0.04436070991529694,
+      "profit_factor": 3.6342607139792915,
+      "avg_win": 0.08742945516464963,
+      "avg_loss": 0.056133028999859357,
+      "sharpe": 1.6017177061423746,
+      "max_dd": -0.0017382949625102118,
+      "total_return": 0.006489573569351759,
+      "acceptance_rate": 1.0,
+      "sr_daily": 0.10089873145194181,
+      "dsr": 0.9837078652652496,
+      "oos_logloss": 0.780676628441388,
+      "logloss_vs_base": 0.0,
+      "brier": 0.2935196559711686,
+      "auc": 0.5,
+      "ic": null
+    },
+    {
+      "config": "logit",
+      "kind": "logit",
+      "threshold": "breakeven",
+      "role": "model",
+      "n_trades": 10,
+      "win_rate": 0.7,
+      "expectancy_ret": 0.04436070991529694,
+      "profit_factor": 3.6342607139792915,
+      "avg_win": 0.08742945516464963,
+      "avg_loss": 0.056133028999859357,
+      "sharpe": 1.6050860989357438,
+      "max_dd": -0.001921441467074736,
+      "total_return": 0.00693044591225811,
+      "acceptance_rate": 1.0,
+      "sr_daily": 0.10111092025311412,
+      "dsr": 0.9837260609106756,
+      "oos_logloss": 0.7736270825533025,
+      "logloss_vs_base": -0.0070495458880854844,
+      "brier": 0.2900472245640521,
+      "auc": 0.5,
+      "ic": null
+    },
+    {
+      "config": "rf",
+      "kind": "rf",
+      "threshold": "breakeven",
+      "role": "model",
+      "n_trades": 10,
+      "win_rate": 0.7,
+      "expectancy_ret": 0.044360709915296954,
+      "profit_factor": 3.634260713979293,
+      "avg_win": 0.08742945516464964,
+      "avg_loss": 0.05613302899985934,
+      "sharpe": 1.605453525845999,
+      "max_dd": -0.0018829193891687357,
+      "total_return": 0.006842537903505752,
+      "acceptance_rate": 1.0,
+      "sr_daily": 0.10113406597286478,
+      "dsr": 0.9837845871301514,
+      "oos_logloss": 0.7749699557235128,
+      "logloss_vs_base": -0.005706672717875172,
+      "brier": 0.29070930240838333,
+      "auc": 0.5,
+      "ic": null
+    },
+    {
+      "config": "primary_only",
+      "kind": "primary_only",
+      "threshold": null,
+      "role": "control",
+      "n_trades": 10,
+      "win_rate": 0.7,
+      "expectancy_ret": 0.04436070991529694,
+      "profit_factor": 3.6342607139792924,
+      "avg_win": 0.08742945516464964,
+      "avg_loss": 0.056133028999859357,
+      "sharpe": 1.4836236983453444,
+      "max_dd": -0.015090273698435297,
+      "total_return": 0.05303624485471348,
+      "acceptance_rate": 1.0,
+      "sr_daily": 0.09345950821484979,
+      "dsr": null,
+      "oos_logloss": null,
+      "logloss_vs_base": null,
+      "brier": null,
+      "auc": null,
+      "ic": null
+    },
+    {
+      "config": "random@base_rate",
+      "kind": "base_rate",
+      "threshold": "breakeven",
+      "role": "control",
+      "n_trades": 10,
+      "win_rate": 0.7,
+      "expectancy_ret": 0.044360709915296954,
+      "profit_factor": 3.6342607139792924,
+      "avg_win": 0.08742945516464964,
+      "avg_loss": 0.056133028999859357,
+      "sharpe": 1.4657521876594373,
+      "max_dd": -0.0023116600595712855,
+      "total_return": 0.006830754489189461,
+      "acceptance_rate": 1.0,
+      "sr_daily": 0.09233370886180352,
+      "dsr": null,
+      "oos_logloss": null,
+      "logloss_vs_base": null,
+      "brier": null,
+      "auc": null,
+      "ic": null
+    },
+    {
+      "config": "random@logit",
+      "kind": "logit",
+      "threshold": "breakeven",
+      "role": "control",
+      "n_trades": 10,
+      "win_rate": 0.7,
+      "expectancy_ret": 0.044360709915296954,
+      "profit_factor": 3.6342607139792924,
+      "avg_win": 0.08742945516464964,
+      "avg_loss": 0.056133028999859357,
+      "sharpe": 1.2487199182220885,
+      "max_dd": -0.002055117063445633,
+      "total_return": 0.006479702419653455,
+      "acceptance_rate": 1.0,
+      "sr_daily": 0.07866196097115616,
+      "dsr": null,
+      "oos_logloss": null,
+      "logloss_vs_base": null,
+      "brier": null,
+      "auc": null,
+      "ic": null
+    },
+    {
+      "config": "random@rf",
+      "kind": "rf",
+      "threshold": "breakeven",
+      "role": "control",
+      "n_trades": 10,
+      "win_rate": 0.7,
+      "expectancy_ret": 0.04436070991529694,
+      "profit_factor": 3.6342607139792924,
+      "avg_win": 0.08742945516464964,
+      "avg_loss": 0.056133028999859357,
+      "sharpe": 1.3964793542335843,
+      "max_dd": -0.002742944540223946,
+      "total_return": 0.008329644154628335,
+      "acceptance_rate": 1.0,
+      "sr_daily": 0.08796993053186043,
+      "dsr": null,
+      "oos_logloss": null,
+      "logloss_vs_base": null,
+      "brier": null,
+      "auc": null,
+      "ic": null
+    }
+  ],
+  "folds": [
+    {
+      "train_start": "2017-12-22 00:00:00+00:00",
+      "train_end": "2022-12-20 00:00:00+00:00",
+      "test_start": "2023-01-23 00:00:00+00:00",
+      "test_end": "2024-01-22 00:00:00+00:00",
+      "n_train": "159",
+      "n_test": "16",
+      "n_purged": "0",
+      "max_train_t1": "2022-12-16 00:00:00+00:00",
+      "p_star": "0.39699544497161926",
+      "payoff": "1.5189205888029491"
+    }
+  ],
+  "ablation": [
+    {
+      "family_dropped": "struct_",
+      "n_cols": 16.0,
+      "logloss_without": 0.7575523481931239,
+      "delta_logloss": -0.01607473436017859
+    },
+    {
+      "family_dropped": "vol_",
+      "n_cols": 7.0,
+      "logloss_without": 0.7537762162790489,
+      "delta_logloss": -0.019850866274253587
+    },
+    {
+      "family_dropped": "xs_",
+      "n_cols": 6.0,
+      "logloss_without": 0.750428217779396,
+      "delta_logloss": -0.023198864773906536
+    },
+    {
+      "family_dropped": "rev_",
+      "n_cols": 8.0,
+      "logloss_without": 0.7492352107005165,
+      "delta_logloss": -0.024391871852786018
+    },
+    {
+      "family_dropped": "meta_",
+      "n_cols": 1.0,
+      "logloss_without": 0.7473679032960929,
+      "delta_logloss": -0.026259179257209553
+    },
+    {
+      "family_dropped": "volu_",
+      "n_cols": 2.0,
+      "logloss_without": 0.7473679032960929,
+      "delta_logloss": -0.026259179257209553
+    },
+    {
+      "family_dropped": "trend_",
+      "n_cols": 10.0,
+      "logloss_without": 0.7456043222015993,
+      "delta_logloss": -0.028022760351703146
+    },
+    {
+      "family_dropped": "cal_",
+      "n_cols": 2.0,
+      "logloss_without": 0.7434518409346325,
+      "delta_logloss": -0.030175241618670023
+    },
+    {
+      "family_dropped": "reg_",
+      "n_cols": 4.0,
+      "logloss_without": 0.7404830464109717,
+      "delta_logloss": -0.033144036142330746
+    }
+  ],
+  "importance": {
+    "xs_": 0.02113131329195017,
+    "reg_": 0.004149113651679248,
+    "volu_": 0.0,
+    "meta_": 0.0,
+    "vol_": -0.0009338703590864306,
+    "struct_": -0.010166670643106576,
+    "cal_": -0.02255121121529961,
+    "trend_": -0.039510749732890336,
+    "rev_": -0.04175016036579419
+  },
+  "details": {
+    "base_rate": {
+      "kind": "base_rate",
+      "threshold": "breakeven",
+      "role": "model",
+      "n_trades": 10,
+      "win_rate": 0.7,
+      "expectancy_ret": 0.04436070991529694,
+      "profit_factor": 3.6342607139792915,
+      "avg_win": 0.08742945516464963,
+      "avg_loss": 0.056133028999859357,
+      "sharpe": 1.6017177061423746,
+      "max_dd": -0.0017382949625102118,
+      "total_return": 0.006489573569351759,
+      "acceptance_rate": 1.0,
+      "sr_daily": 0.10089873145194181,
+      "dsr": 0.9837078652652496,
+      "oos_logloss": 0.780676628441388,
+      "logloss_vs_base": 0.0,
+      "brier": 0.2935196559711686,
+      "auc": 0.5,
+      "ic": null,
+      "calibration": [
+        {
+          "bin": 0,
+          "lo": 0.0,
+          "hi": 0.1,
+          "n": 0,
+          "mean_p": null,
+          "frac_pos": null
+        },
+        {
+          "bin": 1,
+          "lo": 0.1,
+          "hi": 0.2,
+          "n": 0,
+          "mean_p": null,
+          "frac_pos": null
+        },
+        {
+          "bin": 2,
+          "lo": 0.2,
+          "hi": 0.3,
+          "n": 0,
+          "mean_p": null,
+          "frac_pos": null
+        },
+        {
+          "bin": 3,
+          "lo": 0.3,
+          "hi": 0.4,
+          "n": 0,
+          "mean_p": null,
+          "frac_pos": null
+        },
+        {
+          "bin": 4,
+          "lo": 0.4,
+          "hi": 0.5,
+          "n": 16,
+          "mean_p": 0.4367661767006215,
+          "frac_pos": 0.8125
+        },
+        {
+          "bin": 5,
+          "lo": 0.5,
+          "hi": 0.6,
+          "n": 0,
+          "mean_p": null,
+          "frac_pos": null
+        },
+        {
+          "bin": 6,
+          "lo": 0.6,
+          "hi": 0.7,
+          "n": 0,
+          "mean_p": null,
+          "frac_pos": null
+        },
+        {
+          "bin": 7,
+          "lo": 0.7,
+          "hi": 0.8,
+          "n": 0,
+          "mean_p": null,
+          "frac_pos": null
+        },
+        {
+          "bin": 8,
+          "lo": 0.8,
+          "hi": 0.9,
+          "n": 0,
+          "mean_p": null,
+          "frac_pos": null
+        },
+        {
+          "bin": 9,
+          "lo": 0.9,
+          "hi": 1.0,
+          "n": 0,
+          "mean_p": null,
+          "frac_pos": null
+        }
+      ]
+    },
+    "logit": {
+      "kind": "logit",
+      "threshold": "breakeven",
+      "role": "model",
+      "n_trades": 10,
+      "win_rate": 0.7,
+      "expectancy_ret": 0.04436070991529694,
+      "profit_factor": 3.6342607139792915,
+      "avg_win": 0.08742945516464963,
+      "avg_loss": 0.056133028999859357,
+      "sharpe": 1.6050860989357438,
+      "max_dd": -0.001921441467074736,
+      "total_return": 0.00693044591225811,
+      "acceptance_rate": 1.0,
+      "sr_daily": 0.10111092025311412,
+      "dsr": 0.9837260609106756,
+      "oos_logloss": 0.7736270825533025,
+      "logloss_vs_base": -0.0070495458880854844,
+      "brier": 0.2900472245640521,
+      "auc": 0.5,
+      "ic": null,
+      "calibration": [
+        {
+          "bin": 0,
+          "lo": 0.0,
+          "hi": 0.1,
+          "n": 0,
+          "mean_p": null,
+          "frac_pos": null
+        },
+        {
+          "bin": 1,
+          "lo": 0.1,
+          "hi": 0.2,
+          "n": 0,
+          "mean_p": null,
+          "frac_pos": null
+        },
+        {
+          "bin": 2,
+          "lo": 0.2,
+          "hi": 0.3,
+          "n": 0,
+          "mean_p": null,
+          "frac_pos": null
+        },
+        {
+          "bin": 3,
+          "lo": 0.3,
+          "hi": 0.4,
+          "n": 0,
+          "mean_p": null,
+          "frac_pos": null
+        },
+        {
+          "bin": 4,
+          "lo": 0.4,
+          "hi": 0.5,
+          "n": 16,
+          "mean_p": 0.44141581202636504,
+          "frac_pos": 0.8125
+        },
+        {
+          "bin": 5,
+          "lo": 0.5,
+          "hi": 0.6,
+          "n": 0,
+          "mean_p": null,
+          "frac_pos": null
+        },
+        {
+          "bin": 6,
+          "lo": 0.6,
+          "hi": 0.7,
+          "n": 0,
+          "mean_p": null,
+          "frac_pos": null
+        },
+        {
+          "bin": 7,
+          "lo": 0.7,
+          "hi": 0.8,
+          "n": 0,
+          "mean_p": null,
+          "frac_pos": null
+        },
+        {
+          "bin": 8,
+          "lo": 0.8,
+          "hi": 0.9,
+          "n": 0,
+          "mean_p": null,
+          "frac_pos": null
+        },
+        {
+          "bin": 9,
+          "lo": 0.9,
+          "hi": 1.0,
+          "n": 0,
+          "mean_p": null,
+          "frac_pos": null
+        }
+      ]
+    },
+    "rf": {
+      "kind": "rf",
+      "threshold": "breakeven",
+      "role": "model",
+      "n_trades": 10,
+      "win_rate": 0.7,
+      "expectancy_ret": 0.044360709915296954,
+      "profit_factor": 3.634260713979293,
+      "avg_win": 0.08742945516464964,
+      "avg_loss": 0.05613302899985934,
+      "sharpe": 1.605453525845999,
+      "max_dd": -0.0018829193891687357,
+      "total_return": 0.006842537903505752,
+      "acceptance_rate": 1.0,
+      "sr_daily": 0.10113406597286478,
+      "dsr": 0.9837845871301514,
+      "oos_logloss": 0.7749699557235128,
+      "logloss_vs_base": -0.005706672717875172,
+      "brier": 0.29070930240838333,
+      "auc": 0.5,
+      "ic": null,
+      "calibration": [
+        {
+          "bin": 0,
+          "lo": 0.0,
+          "hi": 0.1,
+          "n": 0,
+          "mean_p": null,
+          "frac_pos": null
+        },
+        {
+          "bin": 1,
+          "lo": 0.1,
+          "hi": 0.2,
+          "n": 0,
+          "mean_p": null,
+          "frac_pos": null
+        },
+        {
+          "bin": 2,
+          "lo": 0.2,
+          "hi": 0.3,
+          "n": 0,
+          "mean_p": null,
+          "frac_pos": null
+        },
+        {
+          "bin": 3,
+          "lo": 0.3,
+          "hi": 0.4,
+          "n": 0,
+          "mean_p": null,
+          "frac_pos": null
+        },
+        {
+          "bin": 4,
+          "lo": 0.4,
+          "hi": 0.5,
+          "n": 16,
+          "mean_p": 0.4405247959764208,
+          "frac_pos": 0.8125
+        },
+        {
+          "bin": 5,
+          "lo": 0.5,
+          "hi": 0.6,
+          "n": 0,
+          "mean_p": null,
+          "frac_pos": null
+        },
+        {
+          "bin": 6,
+          "lo": 0.6,
+          "hi": 0.7,
+          "n": 0,
+          "mean_p": null,
+          "frac_pos": null
+        },
+        {
+          "bin": 7,
+          "lo": 0.7,
+          "hi": 0.8,
+          "n": 0,
+          "mean_p": null,
+          "frac_pos": null
+        },
+        {
+          "bin": 8,
+          "lo": 0.8,
+          "hi": 0.9,
+          "n": 0,
+          "mean_p": null,
+          "frac_pos": null
+        },
+        {
+          "bin": 9,
+          "lo": 0.9,
+          "hi": 1.0,
+          "n": 0,
+          "mean_p": null,
+          "frac_pos": null
+        }
+      ]
+    },
+    "primary_only": {
+      "kind": "primary_only",
+      "threshold": null,
+      "role": "control",
+      "n_trades": 10,
+      "win_rate": 0.7,
+      "expectancy_ret": 0.04436070991529694,
+      "profit_factor": 3.6342607139792924,
+      "avg_win": 0.08742945516464964,
+      "avg_loss": 0.056133028999859357,
+      "sharpe": 1.4836236983453444,
+      "max_dd": -0.015090273698435297,
+      "total_return": 0.05303624485471348,
+      "acceptance_rate": 1.0,
+      "sr_daily": 0.09345950821484979,
+      "dsr": null,
+      "oos_logloss": null,
+      "logloss_vs_base": null,
+      "brier": null,
+      "auc": null,
+      "ic": null,
+      "calibration": []
+    },
+    "random@base_rate": {
+      "kind": "base_rate",
+      "threshold": "breakeven",
+      "role": "control",
+      "n_trades": 10,
+      "win_rate": 0.7,
+      "expectancy_ret": 0.044360709915296954,
+      "profit_factor": 3.6342607139792924,
+      "avg_win": 0.08742945516464964,
+      "avg_loss": 0.056133028999859357,
+      "sharpe": 1.4657521876594373,
+      "max_dd": -0.0023116600595712855,
+      "total_return": 0.006830754489189461,
+      "acceptance_rate": 1.0,
+      "sr_daily": 0.09233370886180352,
+      "dsr": null,
+      "oos_logloss": null,
+      "logloss_vs_base": null,
+      "brier": null,
+      "auc": null,
+      "ic": null,
+      "calibration": []
+    },
+    "random@logit": {
+      "kind": "logit",
+      "threshold": "breakeven",
+      "role": "control",
+      "n_trades": 10,
+      "win_rate": 0.7,
+      "expectancy_ret": 0.044360709915296954,
+      "profit_factor": 3.6342607139792924,
+      "avg_win": 0.08742945516464964,
+      "avg_loss": 0.056133028999859357,
+      "sharpe": 1.2487199182220885,
+      "max_dd": -0.002055117063445633,
+      "total_return": 0.006479702419653455,
+      "acceptance_rate": 1.0,
+      "sr_daily": 0.07866196097115616,
+      "dsr": null,
+      "oos_logloss": null,
+      "logloss_vs_base": null,
+      "brier": null,
+      "auc": null,
+      "ic": null,
+      "calibration": []
+    },
+    "random@rf": {
+      "kind": "rf",
+      "threshold": "breakeven",
+      "role": "control",
+      "n_trades": 10,
+      "win_rate": 0.7,
+      "expectancy_ret": 0.04436070991529694,
+      "profit_factor": 3.6342607139792924,
+      "avg_win": 0.08742945516464964,
+      "avg_loss": 0.056133028999859357,
+      "sharpe": 1.3964793542335843,
+      "max_dd": -0.002742944540223946,
+      "total_return": 0.008329644154628335,
+      "acceptance_rate": 1.0,
+      "sr_daily": 0.08796993053186043,
+      "dsr": null,
+      "oos_logloss": null,
+      "logloss_vs_base": null,
+      "brier": null,
+      "auc": null,
+      "ic": null,
+      "calibration": []
+    }
+  },
+  "name": "oversold_bounce",
+  "verdict": "NO EDGE \u2014 do not deploy",
+  "deployable": false,
+  "deployable_configs": [],
+  "deployable_kinds": [],
+  "checks": {
+    "base_rate": {
+      "logloss": false,
+      "dsr": true,
+      "pbo": false,
+      "expectancy": true,
+      "n_trades": false,
+      "deployable": false
+    },
+    "logit": {
+      "logloss": true,
+      "dsr": true,
+      "pbo": false,
+      "expectancy": true,
+      "n_trades": false,
+      "deployable": false
+    },
+    "rf": {
+      "logloss": true,
+      "dsr": true,
+      "pbo": false,
+      "expectancy": true,
+      "n_trades": false,
+      "deployable": false
+    }
+  },
+  "rules": {
+    "oos_logloss_vs_base": "< 0",
+    "dsr": "> 0.95 (p-value < 0.05)",
+    "pbo": "< 0.2",
+    "expectancy_ret": "> 0 (dopo costi)",
+    "n_trades": ">= 200"
+  },
+  "extra": {}
+}

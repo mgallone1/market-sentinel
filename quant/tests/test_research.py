@@ -107,3 +107,41 @@ def test_metagate_roundtrip_and_refusal(tmp_path):
     r = g3.decide(bars, spec, "1h", side)
     assert r["reason"] != "model not deployable"
     assert r["allow"] == (r["p"] > r["p_star"]) and (r["size_frac"] > 0) == r["allow"]
+
+
+def test_progress_logging_does_not_change_results(wf, caplog):
+    import logging
+    uni, res, _, _ = wf
+    kw = dict(kinds=("base_rate", "gbm_montecarlo", "logit"), train_bars=TRAIN, test_bars=TEST, embargo_bars=EMB,
+              ablation=False, importance=False, hmm_kwargs=dict(n_init=1, n_iter=15), model_params=FAST,
+              extra_cols=("planted_signal",))
+    lg = logging.getLogger("quant.research.walkforward")
+    old = lg.level
+    try:
+        lg.setLevel(logging.CRITICAL)
+        quiet = run_walkforward(uni, "1h", prim, RULES, **kw)
+        lg.setLevel(logging.INFO)
+        with caplog.at_level(logging.INFO, logger="quant.research.walkforward"):
+            loud = run_walkforward(uni, "1h", prim, RULES, **kw)
+    finally:
+        lg.setLevel(old)
+    msgs = [r.getMessage() for r in caplog.records]
+    assert any(m.startswith(f"fold 1/{len(loud.folds)}") for m in msgs) and any(" fit logit" in m for m in msgs)
+    cols = ["n_trades", "expectancy_ret", "profit_factor", "auc", "oos_logloss", "dsr"]
+    pd.testing.assert_frame_equal(quiet.summary[cols], loud.summary[cols])
+    pd.testing.assert_frame_equal(quiet.summary[cols], res.summary.loc[quiet.summary.index, cols])
+
+
+def test_verdict_requires_incremental_edge_over_primary_and_random():
+    """Un modello con expectancy > 0 ma che non batte primary_only / il filtro casuale (solo beta) non e' deployable."""
+    from quant.research.report import verdict
+    good = dict(kind="rf", role="model", logloss_vs_base=-0.01, dsr=0.99, expectancy_ret=0.012, n_trades=500, auc=0.60)
+    rows = {"rf": good,
+            "primary_only": dict(kind="primary", role="control", expectancy_ret=0.010),
+            "random@rf": dict(kind="rf", role="control", expectancy_ret=0.008)}
+    assert verdict(rows, 0.1)["deployable"]
+    rows["primary_only"]["expectancy_ret"] = 0.013          # il filtro non aggiunge valore
+    assert not verdict(rows, 0.1)["deployable"]
+    rows["primary_only"]["expectancy_ret"] = 0.010
+    rows["rf"] = dict(good, auc=0.45)                        # AUC sotto la soglia
+    assert not verdict(rows, 0.1)["deployable"]

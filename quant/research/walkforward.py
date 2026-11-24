@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 import math
+import time
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -147,7 +148,11 @@ def run_walkforward(universe: dict, interval: str, primary, rules: ExitRules, ki
     preds = {k: [] for k in kinds}                  # DataFrame(p, y, ret_net)
     fold_rows, fold_cache = [], []
 
-    for tr_i, te_i in walk_forward_splits(union, train_bars, test_bars, step_bars, embargo_bars, expanding):
+    splits = list(walk_forward_splits(union, train_bars, test_bars, step_bars, embargo_bars, expanding))
+    n_splits, t_run = len(splits), time.monotonic()
+    log.info("walk-forward: %d fold, %d eventi, %d kinds", n_splits, len(events), len(kinds))
+    for fi, (tr_i, te_i) in enumerate(splits, 1):
+        t_fold = time.monotonic()
         tr_s, tr_e = union[tr_i[0]], union[tr_i[-1]]
         te_s, te_e = union[te_i[0]], union[te_i[-1]]
         t1v = pd.DatetimeIndex(events["t1"].to_numpy())
@@ -171,6 +176,8 @@ def run_walkforward(universe: dict, interval: str, primary, rules: ExitRules, ki
                               n_train=len(trn), n_test=len(tst), n_purged=n_purged,
                               max_train_t1=trn["t1"].max(), p_star=ps["p_star"], payoff=ps["payoff"]))
         fold_cache.append((trn, tst, y_tr, y_te, w, t1tr))
+        log.info("fold %d/%d train %s..%s test %s..%s n_train=%d n_test=%d", fi, n_splits, tr_s.date(), tr_e.date(),
+                 te_s.date(), te_e.date(), len(trn), len(tst))
         sig_ann = tst["aux_sigma_ann"].to_numpy(float)
         tsym = np.asarray(tst.index.get_level_values("symbol"))
         tts = tst.index.get_level_values("ts")
@@ -200,7 +207,9 @@ def run_walkforward(universe: dict, interval: str, primary, rules: ExitRules, ki
         allm = np.ones(len(tst), bool)
         record("primary_only", allm, np.full(len(tst), fixed_frac))
         for kind in kinds:
+            t_fit = time.monotonic()
             m = MetaModel(kind, seed=seed, **mp).fit(trn, y_tr, t1tr, w)
+            log.info("fold %d/%d fit %s: %.1fs", fi, n_splits, kind, time.monotonic() - t_fit)
             p = m.predict_proba(tst)
             preds[kind].append(pd.DataFrame({"p": p, "y": y_te, "ret_net": tst["ret_net"].to_numpy(float)}))
             for thr in thresholds:
@@ -217,6 +226,8 @@ def run_walkforward(universe: dict, interval: str, primary, rules: ExitRules, ki
                     racc[pick] = True
                     rsize[pick] = rng.permutation(size[acc])
                 record("random@" + nm, racc, rsize)
+        log.info("fold %d/%d completato in %.1fs (totale %.1fs)", fi, n_splits, time.monotonic() - t_fold,
+                 time.monotonic() - t_run)
 
     if not fold_rows:
         raise ValueError("nessun fold valido: riduci train_bars/min_train_events o allunga lo storico")
@@ -291,7 +302,10 @@ def run_walkforward(universe: dict, interval: str, primary, rules: ExitRules, ki
             abl.index.name = "family_dropped"
         if importance:
             trn, tst, y_tr, y_te, w, t1tr = fold_cache[-1]
-            imp = MetaModel(best, seed=seed, **mp).family_importance(trn, y_tr, t1tr, w, seed=seed)
+            try:
+                imp = MetaModel(best, seed=seed, **mp).family_importance(trn, y_tr, t1tr, w, seed=seed)
+            except ValueError as e:  # campioni troppo piccoli per il refit interno: l'importanza e' solo diagnostica
+                log.warning("family_importance saltata: %s", e)
 
     cfg = dict(interval=interval, kinds=list(kinds), thresholds=[str(t) for t in thresholds], sizing=sizing,
                train_bars=train_bars, test_bars=test_bars, embargo_bars=embargo_bars, expanding=expanding,
