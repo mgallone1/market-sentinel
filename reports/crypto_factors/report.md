@@ -38,3 +38,14 @@ Costi 7.5 bps per lato sul turnover; funding incluso. Prove pre-registrate: 3; D
 | COMBO | True | True | True | False | True |
 
 Note: pesi costanti nella settimana (nessun drift), turnover = somma |dw|; funding sommato sulle barre lun..dom; BTCUSDT incluso nell'universo; COMBO = pesi inverso-vol 52 settimane causali (equal-weight finche' < 13 settimane).
+
+## Replica pre-registrata di F2 su universo disgiunto (aggiunta dall'orchestratore)
+Stesse regole, 40 perpetual diversi (`quant/research/experiments/f2_replication.py`): ICP HBAR VET GRT SNX COMP YFI SUSHI 1INCH ZEC DASH KSM CHZ ENJ BAT ZIL IOTA ONT QTUM NEO WAVES KAVA BAND STORJ IMX STX FLOW EGLD ROSE AR APE GMT BLUR 1000PEPE WLD SEI TIA ORDI ENS LRC.
+Criterio di conferma fissato prima: Sharpe > 0,5, limite inferiore bootstrap > 0, almeno 4/6 anni positivi.
+
+| | Sharpe | IC95% bootstrap | anni positivi | CAGR | maxDD | Sharpe 2023+ |
+|---|---|---|---|---|---|---|
+| F2 universo originale | 1,71 | [0,88; 2,49] | 6/6 | 51,2% | −26,5% | 1,70 |
+| **F2 universo disgiunto** | **0,25** | **[−0,60; 1,08]** | **2/6** | 3,1% | −52,8% | 0,36 |
+
+**Non confermato.** Il risultato del primo universo non si ripete su monete diverse: va considerato specifico del campione (grandi capitalizzazioni sopravvissute, 2021 dominante).
