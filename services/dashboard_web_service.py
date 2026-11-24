@@ -18,9 +18,11 @@ from services.alpaca_execution_service import AlpacaExecutionService
 from services.perf_metrics_tracker import perf_tracker
 from services.trading_compass_service import trading_compass
 from services.deep_trade_analysis_service import get_deep_trade_forecast
+from services.trade_journal_service import TradeJournalService
 
 _bybit_service: BybitExecutionService = None
 _alpaca_service: AlpacaExecutionService = None
+_trade_journal_service: TradeJournalService = TradeJournalService()
 
 DASHBOARD_HTML = """<!DOCTYPE html>
 <html lang="it" data-theme="dark">
