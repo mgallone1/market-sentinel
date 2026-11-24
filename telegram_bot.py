@@ -3164,7 +3164,10 @@ def _sync_alpaca_risk_and_screening():
             # Chiusura se la posizione è in conflitto totale col bias macro ed è in perdita
             if eq_bias == "BEARISH" and side == "long" and plpc < -0.15:
                 print(f"🛑 [Alpaca Macro Shield] Chiusura posizione Long contro-trend su {sym} (Macro SPY: BEARISH).")
-                alpaca_service.close_position(sym)
+                c_res = alpaca_service.close_position(sym)
+                if isinstance(c_res, dict) and "error" in c_res:
+                    print(f"[!] Warning chiusura Alpaca {sym} fallita: {c_res.get('error')}")
+                    continue
                 try:
                     trade_journal_svc.record_exit(broker="ALPACA", symbol=sym, exit_price=float(p.get("current_price", 0.0) or 0.0), pnl_usd=unrealized, pnl_pct=plpc, close_reason="MACRO_SHIELD")
                 except Exception as e_j:
@@ -3181,31 +3184,42 @@ def _sync_alpaca_risk_and_screening():
 
             # Break-Even Safe (+0.80% gain)
             if plpc >= 0.80 and _ALPACA_RISK_STAGE[sym] == "INITIAL":
-                _ALPACA_RISK_STAGE[sym] = "BE_SAFE"
-                notification_events.append((
-                    f"🛡️ *BREAK-EVEN SAFE ATTIVATO (RISCHIO ZERO)*\n"
-                    f"────────────────────────\n"
-                    f"• *Azione:* `{sym}` [{side.upper()}]\n"
-                    f"• *Guadagno Raggiunto:* `+{plpc:.2f}%` (+${unrealized:.2f})\n"
-                    f"• *Azione Protettiva:* Stop loss spostato sopra l'ingresso a pareggio.\n"
-                    f"💡 _Operazione a rischio zero certificata._"
-                ))
+                entry_p = float(p.get("avg_entry_price", 0.0) or 0.0)
+                be_price = round(entry_p * 1.0020, 2) if side == "long" else round(entry_p * 0.9980, 2)
+                sl_res = alpaca_service.update_stop_loss(sym, be_price)
+                if isinstance(sl_res, dict) and "error" not in sl_res:
+                    _ALPACA_RISK_STAGE[sym] = "BE_SAFE"
+                    notification_events.append((
+                        f"🛡️ *BREAK-EVEN SAFE ATTIVATO (RISCHIO ZERO)*\n"
+                        f"────────────────────────\n"
+                        f"• *Azione:* `{sym}` [{side.upper()}]\n"
+                        f"• *Guadagno Raggiunto:* `+{plpc:.2f}%` (+${unrealized:.2f})\n"
+                        f"• *Azione Protettiva:* Stop loss alzato a pareggio (${be_price:.2f}).\n"
+                        f"💡 _Operazione a rischio zero certificata._"
+                    ))
 
             # Trailing Lock (+1.60% gain)
             elif plpc >= 1.60 and _ALPACA_RISK_STAGE[sym] in ["INITIAL", "BE_SAFE"]:
-                _ALPACA_RISK_STAGE[sym] = "LOCK_PROFIT"
-                notification_events.append((
-                    f"🔒 *TRAILING PROFIT LOCK ATTIVATO*\n"
-                    f"────────────────────────\n"
-                    f"• *Azione:* `{sym}` [{side.upper()}]\n"
-                    f"• *Guadagno Raggiunto:* `+{plpc:.2f}%` (+${unrealized:.2f})\n"
-                    f"• *Azione Protettiva:* Minimo utile garantito bloccato al +1.00% netto.\n"
-                    f"💡 _Vincita blindata in cassa._"
-                ))
+                entry_p = float(p.get("avg_entry_price", 0.0) or 0.0)
+                lock_price = round(entry_p * 1.0100, 2) if side == "long" else round(entry_p * 0.9900, 2)
+                sl_res = alpaca_service.update_stop_loss(sym, lock_price)
+                if isinstance(sl_res, dict) and "error" not in sl_res:
+                    _ALPACA_RISK_STAGE[sym] = "LOCK_PROFIT"
+                    notification_events.append((
+                        f"🔒 *TRAILING PROFIT LOCK ATTIVATO*\n"
+                        f"────────────────────────\n"
+                        f"• *Azione:* `{sym}` [{side.upper()}]\n"
+                        f"• *Guadagno Raggiunto:* `+{plpc:.2f}%` (+${unrealized:.2f})\n"
+                        f"• *Azione Protettiva:* Minimo utile garantito bloccato al +1.00% netto (${lock_price:.2f}).\n"
+                        f"💡 _Vincita blindata in cassa._"
+                    ))
 
             # Target Istituzionale (+3.60% TP / -1.20% SL)
             if plpc >= 3.60 or plpc <= -1.20:
-                alpaca_service.close_position(sym)
+                c_res = alpaca_service.close_position(sym)
+                if isinstance(c_res, dict) and "error" in c_res:
+                    print(f"[!] Warning chiusura Alpaca target {sym} fallita: {c_res.get('error')}")
+                    continue
                 is_tp = plpc >= 3.60
                 c_reason = "TAKE_PROFIT" if is_tp else "STOP_LOSS"
                 try:
@@ -3486,7 +3500,7 @@ def _sync_crypto_risk_and_screening():
             if macro_bias == "BEARISH" and bside == "BUY" and pnl_pct < -0.10:
                 print(f"🛑 [Macro Shield] Chiusura posizione Long contro-trend su {bsym} (Macro: BEARISH).")
                 _cr = bybit_service.close_position(bsym)
-                if "error" in _cr:
+                if isinstance(_cr, dict) and "error" in _cr:
                     print(f"[!] Macro Shield: chiusura {bsym} non eseguita ({_cr['error']}), nessun journal/notifica.")
                     continue
                 try:
@@ -3505,7 +3519,7 @@ def _sync_crypto_risk_and_screening():
             elif macro_bias == "BULLISH" and bside == "SELL" and pnl_pct < -0.10:
                 print(f"🛑 [Macro Shield] Chiusura posizione Short contro-trend su {bsym} (Macro: BULLISH).")
                 _cr = bybit_service.close_position(bsym)
-                if "error" in _cr:
+                if isinstance(_cr, dict) and "error" in _cr:
                     print(f"[!] Macro Shield: chiusura {bsym} non eseguita ({_cr['error']}), nessun journal/notifica.")
                     continue
                 try:
@@ -3527,74 +3541,78 @@ def _sync_crypto_risk_and_screening():
             if 0.40 <= pnl_pct < 0.80:
                 tight_sl = round(entry_p * 0.9970, 4) if bside == "BUY" else round(entry_p * 1.0030, 4)
                 if (bside == "BUY" and curr_sl < tight_sl) or (bside == "SELL" and (curr_sl <= 0 or curr_sl > tight_sl)):
-                    bybit_service.update_stop_loss(bsym, tight_sl)
-                    print(f"🛡️ [Ratchet Stop Step 1] Spostato Stop Loss su {bsym} a -0.30% protettivo ({tight_sl})!")
-                    if _POSITION_RISK_STAGE.get(bsym) != "TIGHT_RISK":
-                        _POSITION_RISK_STAGE[bsym] = "TIGHT_RISK"
-                        notification_events.append((
-                            f"🛡️ *RATCHET STOP: RISCHIO TAGLIATO (-75%)*\n"
-                            f"────────────────────────\n"
-                            f"• *Contratto:* `{bsym}` [{bside}]\n"
-                            f"• *Ingresso:* `${entry_p:.4f}` &rarr; *Nuovo SL Protettivo:* `${tight_sl:.4f}` (-0.30%)\n"
-                            f"• *PnL Fluttuante:* `${unrealized:+.2f}` ({pnl_pct:+.2f}%)\n"
-                            f"• *Protezione:* Riduzione immediata del rischio sul primo impulso positivo."
-                        ))
+                    sl_res = bybit_service.update_stop_loss(bsym, tight_sl)
+                    if isinstance(sl_res, dict) and "error" not in sl_res:
+                        print(f"🛡️ [Ratchet Stop Step 1] Spostato Stop Loss su {bsym} a -0.30% protettivo ({tight_sl})!")
+                        if _POSITION_RISK_STAGE.get(bsym) != "TIGHT_RISK":
+                            _POSITION_RISK_STAGE[bsym] = "TIGHT_RISK"
+                            notification_events.append((
+                                f"🛡️ *RATCHET STOP: RISCHIO TAGLIATO (-75%)*\n"
+                                f"────────────────────────\n"
+                                f"• *Contratto:* `{bsym}` [{bside}]\n"
+                                f"• *Ingresso:* `${entry_p:.4f}` &rarr; *Nuovo SL Protettivo:* `${tight_sl:.4f}` (-0.30%)\n"
+                                f"• *PnL Fluttuante:* `${unrealized:+.2f}` ({pnl_pct:+.2f}%)\n"
+                                f"• *Protezione:* Riduzione immediata del rischio sul primo impulso positivo."
+                            ))
 
             # Scalino 2: +0.80% -> Break-Even Safe (+0.20% netto)
             elif 0.80 <= pnl_pct < 1.20:
                 be_sl = round(entry_p * 1.0020, 4) if bside == "BUY" else round(entry_p * 0.9980, 4)
                 if (bside == "BUY" and curr_sl < be_sl) or (bside == "SELL" and (curr_sl <= 0 or curr_sl > be_sl)):
-                    bybit_service.update_stop_loss(bsym, be_sl)
-                    print(f"🛡️ [Day-Trader Break-Even] Spostato Stop Loss su {bsym} a BE protetto ({be_sl})!")
-                    if _POSITION_RISK_STAGE.get(bsym) != "BE_SAFE":
-                        _POSITION_RISK_STAGE[bsym] = "BE_SAFE"
-                        notification_events.append((
-                            f"🛡️ *BREAK-EVEN ATTIVATO: RISCHIO AZZERATO*\n"
-                            f"────────────────────────\n"
-                            f"• *Contratto:* `{bsym}` [{bside}]\n"
-                            f"• *Ingresso:* `${entry_p:.4f}` &rarr; *Nuovo SL:* `${be_sl:.4f}`\n"
-                            f"• *Guadagno Fluttuante:* `${unrealized:+.2f}` ({pnl_pct:+.2f}%)\n"
-                            f"• *Garanzia:* Stop alzato a +0.20% netto a totale copertura delle commissioni di exchange."
-                        ))
+                    sl_res = bybit_service.update_stop_loss(bsym, be_sl)
+                    if isinstance(sl_res, dict) and "error" not in sl_res:
+                        print(f"🛡️ [Day-Trader Break-Even] Spostato Stop Loss su {bsym} a BE protetto ({be_sl})!")
+                        if _POSITION_RISK_STAGE.get(bsym) != "BE_SAFE":
+                            _POSITION_RISK_STAGE[bsym] = "BE_SAFE"
+                            notification_events.append((
+                                f"🛡️ *BREAK-EVEN ATTIVATO: RISCHIO AZZERATO*\n"
+                                f"────────────────────────\n"
+                                f"• *Contratto:* `{bsym}` [{bside}]\n"
+                                f"• *Ingresso:* `${entry_p:.4f}` &rarr; *Nuovo SL:* `${be_sl:.4f}`\n"
+                                f"• *Guadagno Fluttuante:* `${unrealized:+.2f}` ({pnl_pct:+.2f}%)\n"
+                                f"• *Garanzia:* Stop alzato a +0.20% netto a totale copertura delle commissioni di exchange."
+                            ))
 
             # Scalino 3: +1.20% -> Profit Lock Intermedio (+0.60% netto)
             elif 1.20 <= pnl_pct < 1.60:
                 lock_mid_sl = round(entry_p * 1.0060, 4) if bside == "BUY" else round(entry_p * 0.9940, 4)
                 if (bside == "BUY" and curr_sl < lock_mid_sl) or (bside == "SELL" and (curr_sl <= 0 or curr_sl > lock_mid_sl)):
-                    bybit_service.update_stop_loss(bsym, lock_mid_sl)
-                    print(f"💰 [Ratchet Stop Step 3] Spostato Stop Loss su {bsym} a +0.60% netto ({lock_mid_sl})!")
-                    if _POSITION_RISK_STAGE.get(bsym) != "LOCK_MID":
-                        _POSITION_RISK_STAGE[bsym] = "LOCK_MID"
-                        notification_events.append((
-                            f"💰 *PROFITTO INTERMEDIO GARANTITO (+0.60%)*\n"
-                            f"────────────────────────\n"
-                            f"• *Contratto:* `{bsym}` [{bside}]\n"
-                            f"• *Nuovo Stop:* `${lock_mid_sl:.4f}` (+0.60% Netto)\n"
-                            f"• *PnL Attuale:* `${unrealized:+.2f}` ({pnl_pct:+.2f}%)\n"
-                            f"• *Avanzamento:* Il trade corre verso il Take Profit istituzionale."
-                        ))
+                    sl_res = bybit_service.update_stop_loss(bsym, lock_mid_sl)
+                    if isinstance(sl_res, dict) and "error" not in sl_res:
+                        print(f"💰 [Ratchet Stop Step 3] Spostato Stop Loss su {bsym} a +0.60% netto ({lock_mid_sl})!")
+                        if _POSITION_RISK_STAGE.get(bsym) != "LOCK_MID":
+                            _POSITION_RISK_STAGE[bsym] = "LOCK_MID"
+                            notification_events.append((
+                                f"💰 *PROFITTO INTERMEDIO GARANTITO (+0.60%)*\n"
+                                f"────────────────────────\n"
+                                f"• *Contratto:* `{bsym}` [{bside}]\n"
+                                f"• *Nuovo Stop:* `${lock_mid_sl:.4f}` (+0.60% Netto)\n"
+                                f"• *PnL Attuale:* `${unrealized:+.2f}` ({pnl_pct:+.2f}%)\n"
+                                f"• *Avanzamento:* Il trade corre verso il Take Profit istituzionale."
+                            ))
 
             # Scalino 4: >= +1.60% -> Trailing Lock Pieno (+1.00% netto)
             elif pnl_pct >= 1.60:
                 trail_sl = round(entry_p * 1.0100, 4) if bside == "BUY" else round(entry_p * 0.9900, 4)
                 if (bside == "BUY" and curr_sl < trail_sl) or (bside == "SELL" and (curr_sl <= 0 or curr_sl > trail_sl)):
-                    bybit_service.update_stop_loss(bsym, trail_sl)
-                    print(f"🚀 [Trailing Lock] Spostato Stop Loss su {bsym} a +1.00% netto ({trail_sl})!")
-                    if _POSITION_RISK_STAGE.get(bsym) != "LOCK_PROFIT":
-                        _POSITION_RISK_STAGE[bsym] = "LOCK_PROFIT"
-                        notification_events.append((
-                            f"🚀 *TRAILING PROFIT LOCK ATTIVATO*\n"
-                            f"────────────────────────\n"
-                            f"• *Contratto:* `{bsym}` [{bside}]\n"
-                            f"• *Nuovo Stop Garantito:* `${trail_sl:.4f}` (+1.00% Netto)\n"
-                            f"• *PnL Attuale:* `${unrealized:+.2f}` ({pnl_pct:+.2f}%)\n"
-                            f"• *Target R:R 1:3:* In corsa libera verso il Take Profit (+3.60%)."
-                        ))
+                    sl_res = bybit_service.update_stop_loss(bsym, trail_sl)
+                    if isinstance(sl_res, dict) and "error" not in sl_res:
+                        print(f"🚀 [Trailing Lock] Spostato Stop Loss su {bsym} a +1.00% netto ({trail_sl})!")
+                        if _POSITION_RISK_STAGE.get(bsym) != "LOCK_PROFIT":
+                            _POSITION_RISK_STAGE[bsym] = "LOCK_PROFIT"
+                            notification_events.append((
+                                f"🚀 *TRAILING PROFIT LOCK ATTIVATO*\n"
+                                f"────────────────────────\n"
+                                f"• *Contratto:* `{bsym}` [{bside}]\n"
+                                f"• *Nuovo Stop Garantito:* `${trail_sl:.4f}` (+1.00% Netto)\n"
+                                f"• *PnL Attuale:* `${unrealized:+.2f}` ({pnl_pct:+.2f}%)\n"
+                                f"• *Target R:R 1:3:* In corsa libera verso il Take Profit (+3.60%)."
+                            ))
 
             # D. Target Istituzionale 1:3 (+3.60% TP / -1.20% SL)
             if pnl_pct >= 3.60 or pnl_pct <= -1.20:
                 _cr = bybit_service.close_position(bsym)
-                if "error" in _cr:
+                if isinstance(_cr, dict) and "error" in _cr:
                     print(f"[!] TP/SL: chiusura {bsym} non eseguita ({_cr['error']}), nessun journal/notifica.")
                     continue
                 is_tp = pnl_pct >= 3.60

@@ -280,4 +280,28 @@ class AlpacaExecutionService:
         return self._api_request("positions", method="DELETE")
 
     def close_position(self, symbol: str) -> Dict[str, Any]:
-        return self._api_request(f"positions/{symbol.upper()}", method="DELETE")
+        """
+        Chiude a mercato qualsiasi posizione aperta su un titolo Alpaca.
+        Passa cancel_orders=true per cancellare automaticamente gli ordini bracket pendenti
+        (Stop Loss e Take Profit) che altrimenti bloccherebbero la chiusura (errore 403: held_for_orders).
+        """
+        return self._api_request(f"positions/{symbol.upper()}?cancel_orders=true", method="DELETE")
+
+    def update_stop_loss(self, symbol: str, new_stop_price: float) -> Dict[str, Any]:
+        """
+        Aggiorna il prezzo di Stop Loss di una posizione aperta Alpaca.
+        Trova l'ordine stop pendente associato al simbolo e ne fa il replace/patch.
+        """
+        clean_sym = symbol.upper().strip()
+        open_orders = self._api_request("orders?status=open")
+        if not isinstance(open_orders, list):
+            return {"error": "Impossibile recuperare ordini aperti Alpaca"}
+
+        stop_order = next((o for o in open_orders if o.get("symbol") == clean_sym and o.get("type") == "stop"), None)
+        if not stop_order:
+            return {"error": f"Nessun ordine stop pendente trovato per {clean_sym}"}
+
+        order_id = stop_order.get("id")
+        payload = {"stop_price": str(round(new_stop_price, 2))}
+        res = self._api_request(f"orders/{order_id}", method="PATCH", payload=payload)
+        return res
