@@ -1396,6 +1396,25 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 <span class="mono" style="font-size: 11px; color: var(--apple-amber);">NYSE / NASDAQ</span>
             </div>
             <div id="alpaca-cards-list" class="mobile-card-list mono"></div>
+
+            <!-- SELETTORE RAPIDO WALL STREET: APRE LA SCHEDA PREVISIONI/CICLICA AL TOCCO -->
+            <div class="section-header-apple">
+                <span>Analisi &amp; Previsioni al Tocco</span>
+                <span class="mono" style="font-size: 10px; color: var(--text-secondary);">Tocca un titolo</span>
+            </div>
+            <div class="apple-group-card" style="padding: 10px 14px; margin-bottom: 16px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
+                    <div class="mono" style="font-size: 11px; color: var(--text-secondary);">Equities Watchlist:</div>
+                    <div style="display: flex; gap: 6px; flex-wrap: wrap;">
+                        <button class="tf-pill" onclick="openTradeModal('NVDA', 'LONG', 0, 0)" style="padding: 4px 10px; font-size: 11px; font-weight: 700; color: var(--apple-amber);">NVDA</button>
+                        <button class="tf-pill" onclick="openTradeModal('AAPL', 'LONG', 0, 0)" style="padding: 4px 10px; font-size: 11px; font-weight: 700; color: var(--apple-amber);">AAPL</button>
+                        <button class="tf-pill" onclick="openTradeModal('MSFT', 'LONG', 0, 0)" style="padding: 4px 10px; font-size: 11px; font-weight: 700; color: var(--apple-amber);">MSFT</button>
+                        <button class="tf-pill" onclick="openTradeModal('TSLA', 'LONG', 0, 0)" style="padding: 4px 10px; font-size: 11px; font-weight: 700; color: var(--apple-amber);">TSLA</button>
+                        <button class="tf-pill" onclick="openTradeModal('AMZN', 'LONG', 0, 0)" style="padding: 4px 10px; font-size: 11px; font-weight: 700; color: var(--apple-amber);">AMZN</button>
+                        <button class="tf-pill" onclick="openTradeModal('GOOGL', 'LONG', 0, 0)" style="padding: 4px 10px; font-size: 11px; font-weight: 700; color: var(--apple-amber);">GOOGL</button>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <!-- ====================================================================
@@ -2814,22 +2833,60 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                         const u = parseFloat(ap.unrealized_pl || 0);
                         const uClass = u >= 0 ? 'val-up' : 'val-down';
                         const uSign = u >= 0 ? '+' : '';
+                        
+                        const entry = parseFloat(ap.avg_entry_price || 0);
+                        const current = parseFloat(ap.current_price || entry);
+                        const marketVal = parseFloat(ap.market_value || 0);
+                        const qty = parseFloat(ap.qty || 0);
+                        
+                        // Calcolo PnL Percentuale esatto
+                        const pnlPct = parseFloat(ap.unrealized_plpc ? (ap.unrealized_plpc * 100) : (entry > 0 ? ((current - entry) / entry * 100) : 0));
+                        
+                        // Badge dinamico di protezione / risk management armonizzato con Bybit
+                        let guardHtml = `<span class="trade-guard" data-tip-pos="right" data-tip="Stop Loss dinamico Wall Street: protezione automatica calibrata su 1.4x ATR">SL -1.20%</span>`;
+                        if (pnlPct >= 1.60) {
+                            guardHtml = `<span class="trade-guard guard-lock" data-tip-pos="right" data-tip="Trailing Profit Lock: stop alzato per garantire +1.00% netto di guadagno">LOCK +1.00%</span>`;
+                        } else if (pnlPct >= 1.20) {
+                            guardHtml = `<span class="trade-guard guard-lock" style="background: rgba(48, 209, 88, 0.2); color: var(--apple-green);" data-tip-pos="right" data-tip="Profit Lock Intermedio: stop alzato a +0.60% netto">LOCK +0.60%</span>`;
+                        } else if (pnlPct >= 0.80) {
+                            guardHtml = `<span class="trade-guard guard-be" data-tip-pos="right" data-tip="Break-Even Safe attivo: rischio azzerato e stop a +0.20% netto">BE SAFE +0.20%</span>`;
+                        } else if (pnlPct >= 0.40) {
+                            guardHtml = `<span class="trade-guard" style="border-color: rgba(48, 209, 88, 0.4); color: var(--apple-green);" data-tip-pos="right" data-tip="Ratchet Stop Step 1: rischio tagliato del 75% con stop stretto a -0.30%">TIGHT -0.30%</span>`;
+                        }
+
+                        // Target Istituzionale R:R 1:3 (+3.60% TP / -1.20% SL)
+                        const tpPrice = entry * 1.0360;
+                        const slPrice = entry * 0.9880;
+                        const tpProgress = Math.max(0, Math.min(100, (pnlPct / 3.60) * 100));
+                        const progressColor = pnlPct >= 1.60 ? 'var(--apple-amber)' : (pnlPct > 0 ? 'var(--apple-green)' : 'var(--apple-red)');
 
                         const avatar = getAssetAvatarHtml(ap.symbol);
                         return `
-                            <div class="wallet-item" onclick="openTradeModal('${ap.symbol}', 'LONG', ${parseFloat(ap.avg_entry_price || 0)}, ${parseFloat(ap.current_price || 0)})">
+                            <div class="wallet-item" onclick="openTradeModal('${ap.symbol}', 'LONG', ${entry}, ${current})" title="Tocca per visualizzare la diagnostica ciclica (Hurst/Migliorino), Elliott e Monte Carlo">
                                 ${avatar}
                                 <div class="wallet-item-content">
                                     <div class="wallet-title-row">
                                         <div style="display: flex; align-items: center; gap: 6px;">
                                             <span class="wallet-symbol">${ap.symbol}</span>
-                                            <span class="badge mono" style="background: rgba(255, 159, 10, 0.15); color: var(--apple-amber); font-size: 9px; padding: 1px 5px; border-radius: 4px;">USA</span>
+                                            <span class="badge mono" style="background: rgba(255, 159, 10, 0.15); color: var(--apple-amber); font-size: 9px; padding: 1px 5px; border-radius: 4px; font-weight: 700;">LONG</span>
+                                            ${guardHtml}
                                         </div>
-                                        <span class="${uClass} wallet-val">${uSign}$${u.toFixed(2)}</span>
+                                        <div style="text-align: right;">
+                                            <div class="trade-pnl ${uClass} wallet-val">${uSign}$${u.toFixed(2)}</div>
+                                            <div style="font-size: 11px; font-weight: 600;" class="${uClass}">${uSign}${pnlPct.toFixed(2)}%</div>
+                                        </div>
                                     </div>
-                                    <div class="wallet-sub-row">
-                                        <span>${ap.qty} azioni • In $${parseFloat(ap.avg_entry_price || 0).toFixed(2)}</span>
-                                        <span style="font-weight: 600; color: var(--text-primary);">$${parseFloat(ap.market_value || 0).toFixed(2)}</span>
+                                    <div class="wallet-sub-row" style="margin-top: 4px;">
+                                        <span>In $${entry.toFixed(2)} &rarr; Mark $${current.toFixed(2)}</span>
+                                        <span>Size: ${qty} az. ($${marketVal.toLocaleString('en-US', {maximumFractionDigits: 0})})</span>
+                                    </div>
+                                    <!-- Target Take Profit, Stop Loss & Progress Bar Armonizzata -->
+                                    <div style="display: flex; align-items: center; justify-content: space-between; margin-top: 8px; font-size: 10px; color: var(--text-tertiary);">
+                                        <span>TP: <b style="color: var(--apple-green);">$${tpPrice.toFixed(2)}</b> (+3.6%)</span>
+                                        <span>SL: <b style="color: var(--apple-red);">$${slPrice.toFixed(2)}</b> (-1.2%)</span>
+                                    </div>
+                                    <div class="trade-target-progress-bar" style="height: 3px; border-radius: 1.5px; background: rgba(255,255,255,0.08); margin-top: 4px;">
+                                        <div class="trade-target-fill" style="width: ${tpProgress.toFixed(0)}%; background: ${progressColor};"></div>
                                     </div>
                                 </div>
                             </div>
