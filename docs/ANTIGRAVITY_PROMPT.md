@@ -13,7 +13,7 @@ non inserire mai chiavi o segreti nei file del repository e non fare commit di f
 PASSO 1 — Verifica del codice prima del merge
 1. git fetch origin && git checkout feature/quant-crypto-alpha && git pull
 2. pip install -r requirements.txt
-3. python -m pytest quant/tests tests -q -p no:cacheprovider   -> devono passare tutti (attesi 224).
+3. python -m pytest quant/tests tests -q -p no:cacheprovider   -> devono passare tutti (attesi 256).
 4. python -m quant.lab.runner --once --synthetic               -> deve completare senza errori per le 4 strategie.
 5. Se tutto è verde, fai il merge della PR #3 su main (o dimmi di farlo da GitHub). Non modificare la logica delle
    strategie, dei limiti di rischio o del bot: questa operazione è solo di messa in produzione.
@@ -50,11 +50,16 @@ Elencami le variabili attuali del servizio (senza mostrarmi i valori dei segreti
 Opzionale: LAB_STRATEGIES per attivare solo alcune strategie
 (tsmom_monthly, brent_wti_grid, funding_carry, crypto_breakout_4h).
 
-PASSO 4 — Persistenza dello stato del circuit breaker [AZIONE MANUALE guidata]
-Il circuit breaker salva il suo stato giornaliero (perdite, operazioni, pause) in data/risk_state.json
-(variabile RISK_STATE_PATH). Su Railway quel file si perde a ogni deploy, azzerando i limiti a metà giornata.
+PASSO 4 — Volume persistente /app/data (journal, operazioni virtuali, circuit breaker) [AZIONE MANUALE guidata]
+Tre componenti scrivono su file in /app/data e senza volume perdono tutto a ogni deploy:
+- services/trade_journal_service.py -> /app/data/market_sentinel.db: journal delle operazioni reali (trade_journal),
+  operazioni virtuali dei segnali scartati (signal_shadows) e audit settimanale del learning (learning_audit).
+  Senza volume il motore di apprendimento riparte da zero a ogni rilascio.
+- services/risk_limits.py -> /app/data/risk_state.json (RISK_STATE_PATH): stato giornaliero del circuit breaker.
+- quant/lab -> /app/data/lab.db solo se Supabase non è configurato (vedi passo 2).
 Guidami a creare un Volume su Railway montato su /app/data per il servizio del bot. Dopo il deploy verifica dai log
-che il file /app/data/risk_state.json venga creato e sopravviva a un secondo deploy.
+che market_sentinel.db e risk_state.json esistano in /app/data e sopravvivano a un secondo deploy (il numero di
+righe di trade_journal e signal_shadows non deve azzerarsi).
 
 PASSO 5 — Una sola istanza del bot [AZIONE MANUALE guidata]
 Verifica su Railway che il servizio abbia 1 sola replica e controlla nei log del deploy che non ci siano due
