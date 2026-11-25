@@ -90,10 +90,11 @@ class LiveMarketData:
 
     # --- sorgenti ---
     def _crypto(self, source: str, symbol: str, interval: str, start, end) -> pd.DataFrame:
-        if source == "bybit":
+        if source in ("bybit", "bybit_spot"):
             try:
                 from quant.data import bybit
-                df = bybit.fetch_klines(symbol, interval, start, end)
+                df = bybit.fetch_klines(symbol, interval, start, end,
+                                        category="spot" if source == "bybit_spot" else "linear")
                 if not df.empty:
                     return df
             except Exception:  # noqa: BLE001 - geo-block ecc.: fallback Binance
@@ -121,7 +122,7 @@ class LiveMarketData:
         start = (now - pd.Timedelta(days=lookback_days)).floor("D")
 
         def fetch():
-            if source in ("bybit", "binance_proxy"):
+            if source in ("bybit", "bybit_spot", "binance_proxy"):
                 return self._crypto(source, symbol, interval, start, now)
             if source == "yahoo":
                 return self._yahoo(symbol, interval, start, now, now)
@@ -133,7 +134,7 @@ class LiveMarketData:
         return _closed(df, interval, now)
 
     def last_price(self, source: str, symbol: str, now_utc) -> float:
-        if source in ("bybit", "binance_proxy"):
+        if source in ("bybit", "bybit_spot", "binance_proxy"):
             df = self.bars(source, symbol, "1m", 1, now_utc)
             if df.empty:
                 df = self.bars(source, symbol, "1h", 3, now_utc)

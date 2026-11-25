@@ -4099,6 +4099,110 @@ async def sentinel_watchdog_job(application):
     except Exception as e:
         print(f"[!] Errore sentinel_watchdog_job: {e}")
 
+
+# ---------------------------------------------------------------- LAB (paper trading, nessun ordine reale)
+LAB_RUNNER = None
+LAB_STORAGE = None
+LAB_STRATEGIES = []
+
+
+def _lab_build():
+    """Costruisce il lab in modo lazy; se i moduli mancano o falliscono il lab resta disabilitato."""
+    global LAB_RUNNER, LAB_STORAGE, LAB_STRATEGIES
+    if os.getenv("LAB_ENABLED", "true").strip().lower() not in ("1", "true", "yes", "on"):
+        return None
+    try:
+        from quant.lab.runner import LabRunner
+        from quant.lab.storage import make_storage
+        from quant.lab.marketdata import LiveMarketData
+        from quant.lab.broker import PaperBroker
+        from quant.lab.strategies import default_strategies
+        LAB_STORAGE = make_storage()
+        data = LiveMarketData()
+        LAB_STRATEGIES = default_strategies()
+        LAB_RUNNER = LabRunner(LAB_STRATEGIES, LAB_STORAGE, data, PaperBroker(LAB_STORAGE, data))
+        print(f"[lab] attivo (paper): {', '.join(s.name for s in LAB_STRATEGIES)}")
+    except Exception as e:
+        LAB_RUNNER = None
+        print(f"[!] Lab disabilitato: {e}")
+    return LAB_RUNNER
+
+
+async def lab_run_due_job():
+    if LAB_RUNNER is None:
+        return
+    try:
+        from datetime import datetime, timezone
+        res = await asyncio.to_thread(LAB_RUNNER.run_due, datetime.now(timezone.utc))
+        if res:
+            print(f"[lab] run_due: {res}")
+    except Exception as e:
+        print(f"[!] Errore lab_run_due_job: {e}")
+
+
+async def lab_weekly_review_job(application):
+    if LAB_RUNNER is None:
+        return
+    try:
+        from datetime import datetime, timezone
+        from quant.lab.review import weekly_review
+        text = await asyncio.to_thread(weekly_review, LAB_STORAGE, LAB_STRATEGIES, datetime.now(timezone.utc))
+        for chat_id in get_target_chat_ids():
+            try:
+                await application.bot.send_message(chat_id=chat_id, text=text[:4000], parse_mode="Markdown")
+            except Exception:
+                await application.bot.send_message(chat_id=chat_id, text=text[:4000])
+    except Exception as e:
+        print(f"[!] Errore lab_weekly_review_job: {e}")
+
+
+async def _lab_reply(update, text):
+    try:
+        await update.effective_message.reply_text(text[:4000], parse_mode="Markdown")
+    except Exception:
+        await update.effective_message.reply_text(text[:4000])
+
+
+async def lab_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    ACTIVE_CHAT_IDS.add(update.effective_user.id)
+    if LAB_RUNNER is None:
+        await _lab_reply(update, "Lab non attivo (LAB_ENABLED=false o moduli non disponibili).")
+        return
+    try:
+        from quant.lab.review import scorecard
+        text = await asyncio.to_thread(scorecard, LAB_STORAGE, LAB_STRATEGIES)
+    except Exception as e:
+        text = f"Errore scorecard lab: {e}"
+    await _lab_reply(update, text)
+
+
+async def lab_log_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    ACTIVE_CHAT_IDS.add(update.effective_user.id)
+    if LAB_RUNNER is None:
+        await _lab_reply(update, "Lab non attivo (LAB_ENABLED=false o moduli non disponibili).")
+        return
+    import json as _json
+    name = context.args[0] if context.args else None
+    try:
+        rows = await asyncio.to_thread(LAB_STORAGE.query, "decisions", name, 10)
+        if not rows:
+            await _lab_reply(update, "Nessuna decisione registrata.")
+            return
+        out = [f"Ultime {len(rows)} decisioni" + (f" di {name}" if name else "")]
+        for r in rows:
+            out.append(f"\n{r.get('ts', '')[:16]} {r.get('strategy')} v{r.get('version')}: {r.get('note', '')}")
+            try:
+                tg = _json.loads(r.get("targets_json") or "[]")
+            except Exception:
+                tg = []
+            tg = [x for x in tg if abs(float(x.get("weight", 0) or 0)) > 1e-9][:5]
+            for x in tg:
+                out.append(f"  {x.get('key') or x.get('instrument')}: {float(x.get('weight', 0)):+.3f} - {str(x.get('reason', ''))[:120]}")
+        await _lab_reply(update, "\n".join(out))
+    except Exception as e:
+        await _lab_reply(update, f"Errore lab_log: {e}")
+
+
 async def post_init(application):
     """Configura il menu dei comandi nativo di Telegram con i soli comandi effettivamente usati e pertinenti."""
     bot_commands = [
@@ -4110,7 +4214,8 @@ async def post_init(application):
         BotCommand("pelosi", "🏛️ Trades Capitol Hill & Congress Tracker"),
         BotCommand("occasioni", "💎 Top occasioni a forte sconto"),
         BotCommand("sentinel", "🛡️ Stato radar sentinella proattiva 24/7"),
-        BotCommand("help", "ℹ️ Guida alle funzioni e comandi del bot")
+        BotCommand("help", "ℹ️ Guida alle funzioni e comandi del bot"),
+        BotCommand("lab", "🧪 Lab paper trading: scorecard strategie")
     ]
     try:
         await application.bot.set_my_commands(bot_commands)
@@ -4182,6 +4287,21 @@ async def post_init(application):
             id="alpaca_risk_mgr_2min",
             replace_existing=True
         )
+        # Lab paper trading: run_due ogni 5 minuti + review settimanale domenica 18:00 (Roma)
+        if _lab_build() is not None:
+            scheduler.add_job(
+                lab_run_due_job,
+                CronTrigger(minute="*/5", timezone="Europe/Rome"),
+                id="lab_run_due_5min",
+                replace_existing=True
+            )
+            scheduler.add_job(
+                lab_weekly_review_job,
+                CronTrigger(day_of_week="sun", hour=18, minute=0, timezone="Europe/Rome"),
+                args=[application],
+                id="lab_weekly_review",
+                replace_existing=True
+            )
         scheduler.start()
         application.bot_data["briefing_scheduler"] = scheduler
         print("⏰ [Scheduler] Programmato: Briefing 07:00 / 15:00 CET | Watchdog Sentinella ogni 20 minuti!")
@@ -4457,6 +4577,8 @@ def main():
     app.add_handler(CommandHandler("profilo", profile_cmd))
     app.add_handler(CommandHandler("memoria", memoria_cmd))
     app.add_handler(CommandHandler("add", add_cmd))
+    app.add_handler(CommandHandler("lab", lab_cmd))
+    app.add_handler(CommandHandler("lab_log", lab_log_cmd))
     app.add_handler(CallbackQueryHandler(handle_callback_query))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app.add_handler(MessageHandler(filters.VIDEO | filters.VIDEO_NOTE | filters.ANIMATION, handle_video))

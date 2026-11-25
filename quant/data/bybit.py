@@ -33,11 +33,12 @@ def _ms(ts: pd.Timestamp) -> int:
     return int(ts.value // 10**6)
 
 
-def fetch_klines(symbol: str, interval: str, start: pd.Timestamp, end: pd.Timestamp) -> pd.DataFrame:
+def fetch_klines(symbol: str, interval: str, start: pd.Timestamp, end: pd.Timestamp,
+                 category: str = "linear") -> pd.DataFrame:
     rows = []
     cur_end, s_ms, e_ms = _ms(end), _ms(start), _ms(end)
     while True:
-        res = _http_get_json("/v5/market/kline", {"category": "linear", "symbol": symbol,
+        res = _http_get_json("/v5/market/kline", {"category": category, "symbol": symbol,
                              "interval": INTERVAL_MAP[interval], "end": cur_end, "limit": 1000})["result"]
         chunk = res.get("list") or []
         if not chunk:
