@@ -112,7 +112,7 @@ class TradingCompassService:
             verdict_color = "amber"
         else:
             verdict = "DISALLINEAMENTO TEMPORANEO (RISK GUARD)"
-            verdict_desc = "Volatilità avversa rilevata. Lo stop-loss a -1.20% e il filtro volume impediscono overtrading dannoso."
+            verdict_desc = "Volatilità avversa rilevata. Lo stop-loss dinamico su ATR e i filtri volume/ciclo impediscono overtrading dannoso."
             verdict_color = "red"
 
         return {
@@ -122,7 +122,7 @@ class TradingCompassService:
             "verdict_color": verdict_color,
             "expected_value_usd": round(ev_per_trade, 2),
             "realized_rr": round(realized_rr, 2),
-            "target_rr": 2.5,
+            "target_rr": 3.0,
             "win_rate": round(win_rate, 1),
             "profit_factor": round(profit_factor, 2),
             "open_itm_ratio": round(itm_ratio, 1),

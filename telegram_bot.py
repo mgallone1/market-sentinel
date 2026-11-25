@@ -12,6 +12,7 @@ Include:
 import os
 import re
 import io
+import html
 import time
 import asyncio
 import pypdf
@@ -33,6 +34,7 @@ from telegram.ext import (
 )
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
+from apscheduler.triggers.interval import IntervalTrigger
 from zoneinfo import ZoneInfo
 from datetime import datetime
 
@@ -67,6 +69,27 @@ from services.day_trader_service import DayTraderService
 from services.ensemble_predictor import EnsemblePredictorEngine
 from services.proactive_sentinel import ProactiveSentinelService
 from services.trade_journal_service import TradeJournalService
+from services import learning_engine_service
+from services.learning_engine_service import (
+    learning_engine,
+    normalize_context_key,
+    compute_atr_ratchet_levels,
+    optimize_exit_frontier,
+)
+from services.strategy_engines_service import (
+    ENGINE_TREND_PULLBACK,
+    ENGINE_LIQUIDITY_SWEEP,
+    ENGINE_INTRADAY_MOMENTUM,
+    prepare_closed_bars,
+    compute_adx,
+    compute_spread_bps,
+    extract_normalized_features,
+    regime_router,
+    engine_trend_pullback_4h1d,
+    engine_liquidity_sweep_mr,
+    engine_intraday_momentum,
+    select_best_signal,
+)
 
 supabase_svc = SupabaseService()
 llm_svc = LLMReasoningService()
@@ -74,6 +97,7 @@ day_trader_svc = DayTraderService()
 sentinel_svc = ProactiveSentinelService()
 trade_journal_svc = TradeJournalService()
 ACTIVE_CHAT_IDS: Set[int] = set()
+ALLOWED_CHAT_ID: Optional[str] = os.getenv("ALLOWED_CHAT_ID", "").strip() or None
 
 def get_target_chat_ids() -> Set[int]:
     """Restituisce l'insieme di tutti i chat_id registrati su Supabase e attivi nella sessione."""
@@ -87,6 +111,29 @@ def get_target_chat_ids() -> Set[int]:
     if not target_ids:
         target_ids.add(424093845)
     return target_ids
+
+
+def _resolve_learning_chat_ids() -> List[int]:
+    """Risolve i chat_id destinatari degli audit automatici privilegiando ALLOWED_CHAT_ID se configurato."""
+    raw = str(ALLOWED_CHAT_ID or os.getenv("ALLOWED_CHAT_ID", "")).strip()
+    if raw and raw.lower() != "none":
+        try:
+            return [int(raw)]
+        except Exception:
+            pass
+    return sorted(get_target_chat_ids())
+
+
+def _is_chat_authorized(update: Any) -> bool:
+    """Verifica autorizzazione chat rispetto ad ALLOWED_CHAT_ID (se configurato)."""
+    raw = str(ALLOWED_CHAT_ID or os.getenv("ALLOWED_CHAT_ID", "")).strip()
+    if not raw or raw.lower() == "none":
+        return True
+    chat_obj = getattr(update, "effective_chat", None)
+    user_obj = getattr(update, "effective_user", None)
+    cid = getattr(chat_obj, "id", None) if chat_obj is not None else None
+    uid = getattr(user_obj, "id", None) if user_obj is not None else None
+    return str(cid) == raw or str(uid) == raw
 
 class AsyncReentrantLock:
     """Lock asincrono rientrante per garantire l'elaborazione ordinata per singolo utente senza deadlock."""
@@ -3039,8 +3086,399 @@ def _get_btc_macro_bias():
 # Stato storico tracciato in memoria per notifiche push tempestive (Zero Spam)
 _LAST_NOTIFIED_MACRO_BIAS: Optional[str] = None
 _LAST_NOTIFIED_EQUITIES_BIAS: Optional[str] = None
-_POSITION_RISK_STAGE: Dict[str, str] = {}  # {symbol: "INITIAL" | "BE_SAFE" | "LOCK_PROFIT"}
-_ALPACA_RISK_STAGE: Dict[str, str] = {}    # {symbol: "INITIAL" | "BE_SAFE" | "LOCK_PROFIT"}
+_POSITION_RISK_STAGE: Dict[str, str] = {}  # {symbol: "INITIAL" | "TIGHT_RISK" | "BE_SAFE" | "LOCK_MID" | "LOCK_PROFIT"}
+_ALPACA_RISK_STAGE: Dict[str, str] = {}    # {symbol: "INITIAL" | "TIGHT_RISK" | "BE_SAFE" | "LOCK_MID" | "LOCK_PROFIT"}
+_LAST_JOURNAL_DEDUP_TS: float = 0.0
+_JOURNAL_DEDUP_COOLDOWN_SEC: float = 1800.0
+
+
+def _maybe_deduplicate_journal() -> None:
+    """Esegue deduplicazione idempotente dei record untracked legacy con cooldown periodico."""
+    global _LAST_JOURNAL_DEDUP_TS
+    now_ts = time.time()
+    if (now_ts - _LAST_JOURNAL_DEDUP_TS) < _JOURNAL_DEDUP_COOLDOWN_SEC:
+        return
+    _LAST_JOURNAL_DEDUP_TS = now_ts
+    try:
+        removed = trade_journal_svc.deduplicate_legacy_untracked()
+        if removed:
+            print(f"🧹 [Trade Journal] Rimossi {removed} record legacy untracked duplicati.")
+    except Exception as e_dedup:
+        print(f"[!] Warning deduplicate_legacy_untracked: {e_dedup}")
+
+
+def _reconcile_broker_closed_trades(broker: str, closed_trades: List[Dict[str, Any]]) -> None:
+    """Riconcilia le chiusure lato exchange con le righe OPEN nel SQLite journal aggiornando RiskState."""
+    if not closed_trades:
+        return
+    try:
+        transitioned = trade_journal_svc.reconcile_closed_trades_with_open_journal(broker, closed_trades)
+        for tr in transitioned:
+            _risk_closed(broker, tr.get("pnl_usd", 0.0))
+    except Exception as e_rec:
+        print(f"[!] Warning reconcile_closed_trades ({broker}): {e_rec}")
+
+
+def _get_approved_exit_params() -> Optional[Dict[str, Any]]:
+    """Restituisce i parametri adattivi di uscita approvati dall'ultimo EXIT_FRONTIER audit."""
+    try:
+        audit = trade_journal_svc.get_latest_audit("EXIT_FRONTIER")
+        if isinstance(audit, dict):
+            metrics = audit.get("metrics")
+            if isinstance(metrics, dict) and metrics.get("approved") is True:
+                return metrics
+    except Exception:
+        pass
+    return None
+
+
+def _estimate_exit_fees_and_bars(
+    broker: str,
+    symbol: str,
+    notional_usd: float,
+    bar_minutes: int = 15,
+) -> Tuple[float, Optional[int]]:
+    """Stima commissioni round-trip realistiche e barre detenute dall'apertura OPEN nel journal."""
+    broker_u = str(broker or "").upper()
+    fee_pct = 0.0013 if broker_u == "BYBIT" else 0.0
+    fees_usd = round(max(0.0, float(notional_usd or 0.0)) * fee_pct, 4)
+    bars_held: Optional[int] = None
+    try:
+        open_rows = trade_journal_svc.get_open_trade_ids()
+        match = next(
+            (r for r in open_rows if str(r.get("broker", "")).upper() == broker_u and str(r.get("symbol", "")).upper() == symbol.upper()),
+            None,
+        )
+        if match and match.get("opened_at"):
+            raw_open = str(match["opened_at"]).strip()
+            if raw_open.endswith("Z"):
+                raw_open = raw_open[:-1] + "+00:00"
+            open_dt = datetime.fromisoformat(raw_open)
+            if open_dt.tzinfo is None:
+                open_dt = open_dt.replace(tzinfo=ZoneInfo("Europe/Rome"))
+            now_dt = datetime.now(ZoneInfo("Europe/Rome"))
+            elapsed_min = max(0.0, (now_dt - open_dt).total_seconds() / 60.0)
+            bars_held = max(1, int(elapsed_min // max(1, bar_minutes)))
+    except Exception:
+        bars_held = None
+    return fees_usd, bars_held
+
+
+def _compute_closed_df_atr_pct(df: Any, fallback: float = 1.0) -> float:
+    """Calcola ATR% Wilder da un DataFrame OHLCV chiuso con fallback deterministico."""
+    try:
+        import pandas as pd
+        from services.indicators_safe import atr_wilder
+        if df is None or not isinstance(df, pd.DataFrame) or len(df) < 16:
+            return fallback
+        close = df["Close"].iloc[:, 0] if isinstance(df["Close"], pd.DataFrame) else df["Close"]
+        high = df["High"].iloc[:, 0] if isinstance(df["High"], pd.DataFrame) else df["High"]
+        low = df["Low"].iloc[:, 0] if isinstance(df["Low"], pd.DataFrame) else df["Low"]
+        last_c = float(close.iloc[-1] or 0.0)
+        if last_c <= 0.0:
+            return fallback
+        atr_val = float(atr_wilder(high, low, close, 14).iloc[-1] or 0.0)
+        if atr_val <= 0.0:
+            return fallback
+        return max(0.20, round((atr_val / last_c) * 100.0, 4))
+    except Exception:
+        return fallback
+
+
+def _extract_symbol_df_from_bulk(bulk_df: Any, sym: str):
+    """Estrae OHLCV pulito per singolo ticker da DataFrame yfinance multi-ticker o singolo."""
+    import pandas as pd
+    if bulk_df is None or not isinstance(bulk_df, pd.DataFrame) or bulk_df.empty:
+        return None
+    try:
+        cols = bulk_df.columns
+        if isinstance(cols, pd.MultiIndex):
+            lvl0 = cols.get_level_values(0)
+            if "Close" in lvl0 and sym in bulk_df["Close"]:
+                data = {}
+                for field in ("Open", "High", "Low", "Close", "Volume"):
+                    if field in lvl0 and sym in bulk_df[field]:
+                        data[field] = bulk_df[field][sym]
+                if "Close" in data:
+                    out = pd.DataFrame(data).dropna(subset=["Close"])
+                    for f in ("Open", "High", "Low"):
+                        if f not in out:
+                            out[f] = out["Close"]
+                    if "Volume" not in out:
+                        out["Volume"] = 1.0
+                    return out if not out.empty else None
+            if sym in lvl0:
+                sub = bulk_df[sym].dropna(subset=["Close"])
+                return sub if not sub.empty else None
+        elif "Close" in bulk_df.columns and not isinstance(bulk_df["Close"], pd.DataFrame):
+            out = bulk_df.dropna(subset=["Close"]).copy()
+            return out if not out.empty else None
+    except Exception:
+        return None
+    return None
+
+
+def _resample_ohlcv(df: Any, rule: str):
+    """Ricampiona un DataFrame OHLCV chiuso in un timeframe superiore (es. 1h o 4h)."""
+    import pandas as pd
+    if df is None or not isinstance(df, pd.DataFrame) or df.empty:
+        return None
+    if not isinstance(df.index, pd.DatetimeIndex):
+        return None
+    try:
+        agg_map = {"Open": "first", "High": "max", "Low": "min", "Close": "last"}
+        if "Volume" in df.columns:
+            agg_map["Volume"] = "sum"
+        out = df.resample(rule).agg(agg_map).dropna(subset=["Close"])
+        return out if not out.empty else None
+    except Exception:
+        return None
+
+
+def _fetch_bybit_closed_ohlcv(
+    b_sym: str,
+    b_yf: Optional[str],
+    interval_str: str,
+    interval_min: int,
+    limit: int = 120,
+):
+    """Scarica candele chiuse da Bybit linear (o yfinance fallback) garantendo drop della barra in formazione."""
+    import pandas as pd
+    df = None
+    try:
+        kl = bybit_service.session.get_kline(category="linear", symbol=b_sym, interval=interval_str, limit=limit)
+        kl_list = kl.get("result", {}).get("list", []) if isinstance(kl, dict) else []
+        if kl_list and len(kl_list) >= 20:
+            raw_df = pd.DataFrame(
+                list(reversed(kl_list)),
+                columns=["start", "Open", "High", "Low", "Close", "Volume", "turnover"],
+            )
+            for _col in ("Open", "High", "Low", "Close", "Volume"):
+                raw_df[_col] = raw_df[_col].astype(float)
+            raw_df.index = pd.to_datetime(raw_df["start"].astype("int64"), unit="ms", utc=True)
+            df = prepare_closed_bars(raw_df, interval_minutes=interval_min)
+    except Exception:
+        df = None
+
+    if (df is None or df.empty) and b_yf:
+        try:
+            import yfinance as yf
+            yf_period = "3d" if interval_min == 15 else ("1mo" if interval_min == 60 else "3mo")
+            yf_int = "15m" if interval_min == 15 else "1h"
+            raw_yf = yf.download(b_yf, period=yf_period, interval=yf_int, progress=False)
+            if raw_yf is not None and not raw_yf.empty:
+                if hasattr(raw_yf.columns, "levels") and len(raw_yf.columns.levels) > 1:
+                    raw_yf.columns = raw_yf.columns.get_level_values(0)
+                df = prepare_closed_bars(raw_yf, interval_minutes=interval_min)
+        except Exception:
+            df = None
+    return df
+
+
+def _log_shadow_rejection(
+    broker: str,
+    symbol: str,
+    side: Optional[str],
+    engine: str,
+    macro_bias: str,
+    atr_pct: float,
+    rome_hour: int,
+    reject_reason: str,
+    signal_price: float,
+    sl_pct: float,
+    tp_pct: float,
+    features: Optional[Dict[str, Any]],
+    context_key_override: Optional[str] = None,
+) -> None:
+    """Registra candidati bloccati/scartati in `signal_shadows` filtrando rumore NO_SIGNAL/INSUFFICIENT_DATA."""
+    reason_u = str(reject_reason or "").strip().upper()
+    if not reason_u or reason_u in ("NO_SIGNAL", "INSUFFICIENT_DATA"):
+        return
+    eff_side = str(side or "").strip().upper()
+    if eff_side not in ("LONG", "SHORT"):
+        bias_u = str(macro_bias or "NEUTRAL").upper()
+        if bias_u == "BULLISH":
+            eff_side = "LONG"
+        elif bias_u == "BEARISH":
+            eff_side = "SHORT"
+        else:
+            rsi_val = float((features or {}).get("rsi", 50.0) or 50.0)
+            eff_side = "LONG" if rsi_val >= 50.0 else "SHORT"
+    if float(signal_price or 0.0) <= 0.0:
+        return
+    try:
+        ctx_key = context_key_override or normalize_context_key(
+            broker,
+            eff_side,
+            macro_bias,
+            float(atr_pct or 1.0),
+            int(rome_hour),
+            engine,
+        )
+        trade_journal_svc.record_shadow_signal(
+            broker=broker,
+            symbol=symbol,
+            side=eff_side,
+            engine=engine,
+            context_key=ctx_key,
+            reject_reason=reason_u,
+            signal_price=float(signal_price),
+            sl_pct=max(0.25, float(sl_pct or 1.2)),
+            tp_pct=max(0.50, float(tp_pct or 3.0)),
+            features=dict(features or {}),
+        )
+    except Exception as e_sh:
+        print(f"[!] Warning record_shadow_signal ({broker} {symbol}): {e_sh}")
+
+
+def _apply_context_allocation(
+    context_key: str,
+    base_notional: float,
+    available_budget: float,
+    min_notional: float,
+    gate_scale: float = 1.0,
+) -> Tuple[bool, float, Dict[str, Any]]:
+    """Applica il moltiplicatore Bayesiano contestuale rispettando cap esposizione 70% e Shadow Mode."""
+    try:
+        alloc = learning_engine.compute_context_allocation(
+            context_key=context_key,
+            db_path=trade_journal_svc.db_path,
+        )
+    except Exception as e_al:
+        print(f"[!] Warning compute_context_allocation ({context_key}): {e_al}")
+        alloc = {"context_key": context_key, "mode": "STANDARD", "scale": 1.0}
+
+    scale = float(alloc.get("scale", 1.0) or 0.0)
+    mode_u = str(alloc.get("mode", "STANDARD") or "STANDARD").upper()
+    if scale <= 0.0 or mode_u in ("SHADOW", "SHADOW_BLOCKED"):
+        return False, 0.0, alloc
+
+    scaled_notional = round(min(float(available_budget), float(base_notional) * scale * float(gate_scale)), 2)
+    if scaled_notional < float(min_notional):
+        return False, 0.0, alloc
+    return True, scaled_notional, alloc
+
+
+def _apply_dynamic_ratchet_and_exits(
+    *,
+    broker: str,
+    symbol: str,
+    side_norm: str,
+    entry_price: float,
+    current_price: float,
+    current_sl: float,
+    pnl_pct: float,
+    unrealized_usd: float,
+    notional_usd: float,
+    atr_pct: float,
+    macro_bias: str,
+    stage_map: Dict[str, str],
+    update_sl_fn: Any,
+    close_fn: Any,
+    bar_minutes: int,
+    adaptive_params: Optional[Dict[str, Any]],
+    notification_events: List[str],
+    macro_close_thresh: float = -0.10,
+) -> bool:
+    """Gestisce Macro Shield, Ratchet Stop dinamico ATR-adattivo (BE >= 0.25%) e chiusure TP/SL con check rigoroso degli errori."""
+    stage_rank = {"INITIAL": 0, "TIGHT_RISK": 1, "BE_SAFE": 2, "LOCK_MID": 3, "LOCK_PROFIT": 4}
+    curr_stage = stage_map.setdefault(symbol, "INITIAL")
+    side_u = "LONG" if str(side_norm).upper() in ("LONG", "BUY") else "SHORT"
+    bias_u = str(macro_bias or "NEUTRAL").upper()
+
+    macro_conflict = (bias_u == "BEARISH" and side_u == "LONG") or (bias_u == "BULLISH" and side_u == "SHORT")
+    if macro_conflict and pnl_pct < macro_close_thresh:
+        c_res = close_fn(symbol)
+        if not isinstance(c_res, dict) or "error" in c_res:
+            err_msg = c_res.get("error") if isinstance(c_res, dict) else "invalid_response"
+            print(f"[!] Macro Shield ({broker}): chiusura {symbol} non eseguita ({err_msg}), nessun journal/notifica.")
+            return True
+        stage_map.pop(symbol, None)
+        try:
+            _risk_closed(broker, unrealized_usd)
+            fees_usd, bars_held = _estimate_exit_fees_and_bars(broker, symbol, notional_usd, bar_minutes=bar_minutes)
+            trade_journal_svc.record_exit(
+                broker=broker,
+                symbol=symbol,
+                exit_price=current_price or entry_price,
+                pnl_usd=unrealized_usd,
+                pnl_pct=pnl_pct,
+                close_reason="MACRO_SHIELD",
+                fees_usd=fees_usd,
+                bars_held=bars_held,
+            )
+        except Exception as e_j:
+            print(f"[!] Warning journal exit ({broker} {symbol}): {e_j}")
+        notification_events.append((
+            f"🛑 *MACRO SHIELD ({broker}): CHIUSURA PREVENTIVA CONTRO-TREND*\n"
+            f"────────────────────────\n"
+            f"• *Asset:* `{symbol}` [{side_u}]\n"
+            f"• *PnL Chiusura:* `${unrealized_usd:+.2f}` ({pnl_pct:+.2f}%)\n"
+            f"• *Motivazione:* Inversione Macro a `{bias_u}`.\n"
+            f"💡 _Capitale preservato: evitato accumulo di drawdown contro-trend._"
+        ))
+        return True
+
+    levels = compute_atr_ratchet_levels(atr_pct, side_u, entry_price, adaptive_params=adaptive_params)
+    tiers = (
+        ("LOCK_PROFIT", levels["max_trigger_pct"], levels["max_lock_pct"], levels["max_sl"], "🚀 *TRAILING PROFIT LOCK ATTIVATO*"),
+        ("LOCK_MID", levels["mid_trigger_pct"], levels["mid_lock_pct"], levels["mid_sl"], "💰 *PROFITTO INTERMEDIO GARANTITO*"),
+        ("BE_SAFE", levels["be_trigger_pct"], levels["be_lock_pct"], levels["be_sl"], "🛡️ *BREAK-EVEN SAFE ATTIVATO (COPRE FEE)*"),
+        ("TIGHT_RISK", levels["tight_trigger_pct"], levels["tight_lock_pct"], levels["tight_sl"], "🛡️ *RATCHET STOP: RISCHIO RIDOTTO*"),
+    )
+    for target_stage, trig_pct, lock_pct, raw_sl, title in tiers:
+        if pnl_pct >= trig_pct:
+            if stage_rank.get(curr_stage, 0) < stage_rank[target_stage]:
+                target_sl = round(float(raw_sl), 2) if (broker == "ALPACA" and float(raw_sl) >= 1.0) else float(raw_sl)
+                sl_improved = (current_sl <= 0.0) or (side_u == "LONG" and current_sl < target_sl) or (side_u == "SHORT" and current_sl > target_sl)
+                if target_sl > 0.0 and sl_improved:
+                    sl_res = update_sl_fn(symbol, target_sl)
+                    if isinstance(sl_res, dict) and "error" not in sl_res:
+                        stage_map[symbol] = target_stage
+                        notification_events.append((
+                            f"{title}\n"
+                            f"────────────────────────\n"
+                            f"• *Asset ({broker}):* `{symbol}` [{side_u}]\n"
+                            f"• *Nuovo Stop:* `${target_sl:.4f}` (`{lock_pct:+.2f}%` vs entry, trigger `{trig_pct:+.2f}%`)\n"
+                            f"• *PnL Fluttuante:* `${unrealized_usd:+.2f}` ({pnl_pct:+.2f}%)\n"
+                            f"• *Target Dinamico:* TP `+{levels['tp_pct']:.2f}%` | ATR `{atr_pct:.2f}%`"
+                        ))
+            break
+
+    if pnl_pct >= levels["tp_pct"] or pnl_pct <= -levels["sl_pct"]:
+        c_res = close_fn(symbol)
+        if not isinstance(c_res, dict) or "error" in c_res:
+            err_msg = c_res.get("error") if isinstance(c_res, dict) else "invalid_response"
+            print(f"[!] TP/SL ({broker}): chiusura {symbol} non eseguita ({err_msg}), nessun journal/notifica.")
+            return True
+        stage_map.pop(symbol, None)
+        is_tp = pnl_pct >= levels["tp_pct"]
+        c_reason = "TAKE_PROFIT" if is_tp else "STOP_LOSS"
+        try:
+            _risk_closed(broker, unrealized_usd)
+            fees_usd, bars_held = _estimate_exit_fees_and_bars(broker, symbol, notional_usd, bar_minutes=bar_minutes)
+            trade_journal_svc.record_exit(
+                broker=broker,
+                symbol=symbol,
+                exit_price=current_price or entry_price,
+                pnl_usd=unrealized_usd,
+                pnl_pct=pnl_pct,
+                close_reason=c_reason,
+                fees_usd=fees_usd,
+                bars_held=bars_held,
+            )
+        except Exception as e_j:
+            print(f"[!] Warning journal exit ({broker} {symbol}): {e_j}")
+        event_title = f"🎯 *TAKE PROFIT RAGGIUNTO (+{levels['tp_pct']:.2f}%)*" if is_tp else f"🛑 *STOP LOSS ESEGUITO (-{levels['sl_pct']:.2f}%)*"
+        notification_events.append((
+            f"{event_title}\n"
+            f"────────────────────────\n"
+            f"• *Asset ({broker}):* `{symbol}` [{side_u}]\n"
+            f"• *Risultato Incassato:* `${unrealized_usd:+.2f}` ({pnl_pct:+.2f}%)\n"
+            f"• *Disciplina Quantitativa:* Uscita ATR-adattiva eseguita su {broker}."
+        ))
+        return True
+    return False
 
 def _get_equities_macro_bias():
     """
@@ -3112,6 +3550,168 @@ def _get_equities_macro_bias():
         print(f"[!] Errore calcolo bias equities macro: {e_eq}")
         return "NEUTRAL", 20.0, 0.0
 
+def _evaluate_and_trade_alpaca_candidate(
+    *,
+    sym: str,
+    df_sym_1h: Any,
+    eq_bias: str,
+    vix_val: float,
+    vix_delta_pct: float,
+    spy_24h_ch: float,
+    equity_alpaca: float,
+    base_notional: float,
+    available_budget: float,
+    positions: List[Dict[str, Any]],
+    adaptive_params: Optional[Dict[str, Any]],
+    notification_events: List[str],
+) -> float:
+    """Valuta un titolo USA con regime router multi-engine, allocator Bayesiano e RiskGate."""
+    import pandas as pd
+    from services.hurst_migliorino_cycles import HurstMigliorinoCycleService
+
+    if df_sym_1h is None or len(df_sym_1h) < 35:
+        return 0.0
+    sc = df_sym_1h["Close"]
+    high_s = df_sym_1h["High"]
+    low_s = df_sym_1h["Low"]
+    vol_s = df_sym_1h["Volume"]
+    last_c = float(sc.iloc[-1])
+    if last_c <= 0.0:
+        return 0.0
+
+    s_ch = ((sc.iloc[-1] - sc.iloc[-7]) / sc.iloc[-7]) * 100.0 if len(sc) >= 8 else 0.0
+    alpha = s_ch - spy_24h_ch
+    atr_pct = _compute_closed_df_atr_pct(df_sym_1h, fallback=1.2)
+    adx_1h = float(compute_adx(high_s, low_s, sc, 14).iloc[-1] or 20.0)
+    avg_vol = float(vol_s.rolling(20).mean().iloc[-1] or 1.0)
+    vol_ratio = float(vol_s.iloc[-1] or 0.0) / (avg_vol + 1e-5)
+
+    cycle = HurstMigliorinoCycleService.calculate_cycle_metrics(pd.DataFrame({"Close": sc}))
+    tempo_battleplan = cycle.get("tempo_battleplan", "")
+    is_vix_unfavorable = (vix_delta_pct > 2.0) or (vix_val >= 24.0 and vix_delta_pct >= 0.0) or (vix_val >= 28.0)
+    now_cet = datetime.now(ZoneInfo("Europe/Rome"))
+
+    route = regime_router(eq_bias, adx_1h, atr_pct, funding_rate=0.0, vix_val=vix_val, spread_bps=0.0)
+    allowed_engines = set(route.get("allowed_engines") or [])
+    prefer_limit = bool(route.get("prefer_limit", False))
+
+    candidates: List[Dict[str, Any]] = []
+    df_sym_4h = _resample_ohlcv(df_sym_1h, "4h")
+    if ENGINE_TREND_PULLBACK in allowed_engines and df_sym_4h is not None and len(df_sym_4h) >= 20:
+        sig_tp = engine_trend_pullback_4h1d(
+            df_sym_4h, df_sym_1h, eq_bias, cycle_data=cycle, funding_rate=0.0,
+            interval_minutes_4h=240, interval_minutes_1h=60,
+        )
+        if sig_tp:
+            candidates.append(sig_tp)
+
+    if ENGINE_INTRADAY_MOMENTUM in allowed_engines:
+        sig_mom = engine_intraday_momentum(
+            df_sym_1h, eq_bias, cycle, None, None, 0.0, vol_ratio,
+            is_overnight=False, is_equities=True, vix_unfavorable=is_vix_unfavorable,
+            adx_min=16.0, interval_minutes=60,
+        )
+        if sig_mom.get("triggered"):
+            candidates.append(sig_mom)
+        elif sig_mom.get("reject_reason"):
+            _log_shadow_rejection(
+                "ALPACA", sym, sig_mom.get("side"), ENGINE_INTRADAY_MOMENTUM, eq_bias, atr_pct,
+                now_cet.hour, str(sig_mom.get("reject_reason")), last_c,
+                float(sig_mom.get("sl_pct") or 1.2), float(sig_mom.get("tp_pct") or 3.6), sig_mom.get("features"),
+            )
+
+    best_sig = select_best_signal(candidates)
+    if not best_sig:
+        return 0.0
+
+    sig_side = str(best_sig["side"]).upper()
+    chosen_engine = str(best_sig.get("engine") or ENGINE_INTRADAY_MOMENTUM).upper()
+    ratchet_entry = compute_atr_ratchet_levels(atr_pct, sig_side, last_c, adaptive_params=adaptive_params)
+    sl_pct = float(ratchet_entry["sl_pct"] if adaptive_params else best_sig.get("sl_pct", ratchet_entry["sl_pct"]))
+    tp_pct = float(ratchet_entry["tp_pct"] if adaptive_params else best_sig.get("tp_pct", ratchet_entry["tp_pct"]))
+    context_key = normalize_context_key("ALPACA", sig_side, eq_bias, atr_pct, now_cet.hour, chosen_engine)
+
+    sentinel_data = sentinel_svc.get_asset_fundamental_sentiment(sym)
+    if (sig_side == "LONG" and sentinel_data.get("sentiment") == "BEARISH") or (
+        sig_side == "SHORT" and sentinel_data.get("sentiment") == "BULLISH" and sentinel_data.get("has_political_interest")
+    ):
+        _log_shadow_rejection(
+            "ALPACA", sym, sig_side, chosen_engine, eq_bias, atr_pct, now_cet.hour,
+            "SENTINEL_SHIELD", last_c, sl_pct, tp_pct, best_sig.get("features"), context_key_override=context_key,
+        )
+        return 0.0
+
+    alloc_ok, alloc_notional, alloc_info = _apply_context_allocation(
+        context_key, base_notional, available_budget, min_notional=500.0,
+    )
+    if not alloc_ok:
+        _log_shadow_rejection(
+            "ALPACA", sym, sig_side, chosen_engine, eq_bias, atr_pct, now_cet.hour,
+            "SHADOW_ALLOCATOR", last_c, sl_pct, tp_pct, best_sig.get("features"), context_key_override=context_key,
+        )
+        return 0.0
+
+    raw_otype = str(best_sig.get("order_type") or ("limit" if prefer_limit else "market")).strip().lower()
+    order_type = "limit" if raw_otype == "limit" else "market"
+    limit_price = best_sig.get("limit_price")
+    if order_type == "limit" and (limit_price is None or float(limit_price) <= 0.0):
+        limit_price = round(last_c * (0.999 if sig_side == "LONG" else 1.001), 2)
+    elif limit_price is not None:
+        limit_price = round(float(limit_price), 2)
+
+    ref_p = float(limit_price) if (order_type == "limit" and limit_price) else last_c
+    shares = max(1, int(alloc_notional / ref_p))
+    target_p = round(ref_p * (1 + tp_pct / 100.0), 2) if sig_side == "LONG" else round(ref_p * (1 - tp_pct / 100.0), 2)
+    stop_p = round(ref_p * (1 - sl_pct / 100.0), 2) if sig_side == "LONG" else round(ref_p * (1 + sl_pct / 100.0), 2)
+
+    if not _risk_gate(
+        "ALPACA", sym, equity_alpaca,
+        [{"entry_price": float(pp.get("avg_entry_price", 0) or 0), "size": float(pp.get("qty", 0) or 0)} for pp in positions],
+        ref_p, stop_p, target_p, shares, notification_events,
+    ):
+        _log_shadow_rejection(
+            "ALPACA", sym, sig_side, chosen_engine, eq_bias, atr_pct, now_cet.hour,
+            "RISK_GATE", ref_p, sl_pct, tp_pct, best_sig.get("features"), context_key_override=context_key,
+        )
+        return 0.0
+
+    order_res = alpaca_service.place_bracket_order(
+        sym, shares, ("buy" if sig_side == "LONG" else "sell"), target_p, stop_p,
+        order_type=order_type, limit_price=(limit_price if order_type == "limit" else None),
+    )
+    if not isinstance(order_res, dict) or "error" in order_res:
+        return 0.0
+
+    _risk_opened("ALPACA", equity_alpaca)
+    client_oid = str(order_res.get("client_order_id") or order_res.get("id") or make_order_link_id(sym, sig_side[0], df_sym_1h.index[-1]))
+    try:
+        trade_journal_svc.record_entry(
+            broker="ALPACA", symbol=sym, side=sig_side, entry_price=ref_p, notional_usd=shares * ref_p,
+            context={
+                "macro_bias": eq_bias, "cycle_tempo": tempo_battleplan, "alpha_spy": round(alpha, 2),
+                "rsi": best_sig.get("features", {}).get("rsi"), "vix": round(vix_val, 1),
+                "sl_pct": sl_pct, "tp_pct": tp_pct, "atr_pct": round(atr_pct, 3),
+                "engine": chosen_engine, "context_key": context_key, "order_type": order_type,
+                "alloc_mode": alloc_info.get("mode"), "alloc_scale": alloc_info.get("scale"),
+                "sentinel_sentiment": sentinel_data.get("sentiment"), "sentinel_reasons": sentinel_data.get("reasons", []),
+            },
+            client_order_id=client_oid, engine=chosen_engine, context_key=context_key,
+        )
+    except Exception as e_j:
+        print(f"[!] Warning trade journal entry: {e_j}")
+
+    boost_txt = f"\n• *Fondamentali Sentinella:* `{sentinel_data.get('sentiment')}` ({', '.join(sentinel_data.get('reasons', ['Allineato']))})" if sentinel_data.get("reasons") else ""
+    notification_events.append((
+        f"{'🟢' if sig_side == 'LONG' else '🔻'} *NUOVO ORDINE WALL STREET ({chosen_engine})*\n"
+        f"────────────────────────\n"
+        f"• *Titolo:* `{sym}` [{sig_side}] x{shares} (`{order_type.upper()}`)\n"
+        f"• *Controvalore Dinamico (Cap 70%):* `${shares * ref_p:,.0f}` (Alloc `{alloc_info.get('mode', 'STANDARD')}` {float(alloc_info.get('scale', 1.0)):.2f}x)\n"
+        f"• *Macro SPY:* `{eq_bias}` | *Alpha:* `{alpha:+.2f}%` | *VIX:* `{vix_val:.1f}` ({vix_delta_pct:+.1f}%)\n"
+        f"• *Target ATR:* TP `${target_p:.2f}` (`+{tp_pct:.2f}%`) | SL `${stop_p:.2f}` (`-{sl_pct:.2f}%`){boost_txt}"
+    ))
+    return float(shares * ref_p)
+
+
 def _sync_alpaca_risk_and_screening():
     """
     Motore quantitativo istituzionale per Wall Street (Alpaca Equities):
@@ -3125,6 +3725,13 @@ def _sync_alpaca_risk_and_screening():
     global _LAST_NOTIFIED_EQUITIES_BIAS
     notification_events = []
     try:
+        _maybe_deduplicate_journal()
+        try:
+            recent_alpaca_closed = alpaca_service.get_recent_closed_trades(limit_days=7) or []
+            _reconcile_broker_closed_trades("ALPACA", recent_alpaca_closed)
+        except Exception as e_rec_a:
+            print(f"[!] Warning riconciliazione Alpaca: {e_rec_a}")
+
         # 1. Verifica se il mercato azionario USA è aperto
         clock = alpaca_service._api_request("clock")
         is_open = clock.get("is_open", False) if isinstance(clock, dict) else False
@@ -3152,260 +3759,118 @@ def _sync_alpaca_risk_and_screening():
             ))
             _LAST_NOTIFIED_EQUITIES_BIAS = eq_bias
 
-        # 3. Gestione posizioni aperte Alpaca (Break-Even Safe & Trailing Profit Lock)
+        # 3. Gestione posizioni aperte Alpaca (Ratchet Stop Dinamico ATR-Adattivo & Exit Frontier)
         positions = alpaca_service._api_request("positions")
         if not isinstance(positions, list):
             positions = []
-        
+
         current_syms = {p["symbol"] for p in positions}
-        stale_syms = [s for s in _ALPACA_RISK_STAGE if s not in current_syms]
-        for s in stale_syms:
+        for s in [s for s in _ALPACA_RISK_STAGE if s not in current_syms]:
             del _ALPACA_RISK_STAGE[s]
 
+        adaptive_params = _get_approved_exit_params()
+        open_atr_map: Dict[str, float] = {}
+        if current_syms:
+            try:
+                import yfinance as yf
+                open_bulk = yf.download(list(current_syms), period="1mo", interval="1h", progress=False)
+                for osym in current_syms:
+                    odf = prepare_closed_bars(_extract_symbol_df_from_bulk(open_bulk, osym), interval_minutes=60)
+                    open_atr_map[osym] = _compute_closed_df_atr_pct(odf, fallback=1.0)
+            except Exception:
+                pass
+
+        closed_in_cycle: Set[str] = set()
         for p in positions:
             sym = p["symbol"]
             plpc = float(p.get("unrealized_plpc", 0.0) or 0.0) * 100.0
             unrealized = float(p.get("unrealized_pl", 0.0) or 0.0)
             side = p.get("side", "long").lower()
+            entry_p = float(p.get("avg_entry_price", 0.0) or 0.0)
+            curr_p = float(p.get("current_price", 0.0) or entry_p)
+            notional_p = abs(float(p.get("market_value", 0.0) or 0.0))
+            if _apply_dynamic_ratchet_and_exits(
+                broker="ALPACA",
+                symbol=sym,
+                side_norm=("LONG" if side == "long" else "SHORT"),
+                entry_price=entry_p,
+                current_price=curr_p,
+                current_sl=0.0,
+                pnl_pct=plpc,
+                unrealized_usd=unrealized,
+                notional_usd=notional_p,
+                atr_pct=open_atr_map.get(sym, 1.0),
+                macro_bias=eq_bias,
+                stage_map=_ALPACA_RISK_STAGE,
+                update_sl_fn=alpaca_service.update_stop_loss,
+                close_fn=alpaca_service.close_position,
+                bar_minutes=60,
+                adaptive_params=adaptive_params,
+                notification_events=notification_events,
+                macro_close_thresh=-0.15,
+            ):
+                if sym not in _ALPACA_RISK_STAGE:
+                    closed_in_cycle.add(sym)
 
-            if sym not in _ALPACA_RISK_STAGE:
-                _ALPACA_RISK_STAGE[sym] = "INITIAL"
-
-            # Chiusura se la posizione è in conflitto totale col bias macro ed è in perdita
-            if eq_bias == "BEARISH" and side == "long" and plpc < -0.15:
-                print(f"🛑 [Alpaca Macro Shield] Chiusura posizione Long contro-trend su {sym} (Macro SPY: BEARISH).")
-                c_res = alpaca_service.close_position(sym)
-                if isinstance(c_res, dict) and "error" in c_res:
-                    print(f"[!] Warning chiusura Alpaca {sym} fallita: {c_res.get('error')}")
-                    continue
-                try:
-                    _risk_closed("ALPACA", unrealized)
-                    trade_journal_svc.record_exit(broker="ALPACA", symbol=sym, exit_price=float(p.get("current_price", 0.0) or 0.0), pnl_usd=unrealized, pnl_pct=plpc, close_reason="MACRO_SHIELD")
-                except Exception as e_j:
-                    print(f"[!] Warning journal exit: {e_j}")
-                notification_events.append((
-                    f"🛑 *WALL STREET SHIELD: CHIUSURA PREVENTIVA CONTRO-TREND*\n"
-                    f"────────────────────────\n"
-                    f"• *Azione:* `{sym}` [LONG]\n"
-                    f"• *PnL Chiusura:* `${unrealized:+.2f}` ({plpc:+.2f}%)\n"
-                    f"• *Motivazione:* Inversione Macro SPY/VIX a BEARISH.\n"
-                    f"💡 _Capitale preservato: evitato drawdown sistemico su Wall Street._"
-                ))
-                continue
-
-            # Break-Even Safe (+0.80% gain)
-            if plpc >= 0.80 and _ALPACA_RISK_STAGE[sym] == "INITIAL":
-                entry_p = float(p.get("avg_entry_price", 0.0) or 0.0)
-                be_price = round(entry_p * 1.0020, 2) if side == "long" else round(entry_p * 0.9980, 2)
-                sl_res = alpaca_service.update_stop_loss(sym, be_price)
-                if isinstance(sl_res, dict) and "error" not in sl_res:
-                    _ALPACA_RISK_STAGE[sym] = "BE_SAFE"
-                    notification_events.append((
-                        f"🛡️ *BREAK-EVEN SAFE ATTIVATO (RISCHIO ZERO)*\n"
-                        f"────────────────────────\n"
-                        f"• *Azione:* `{sym}` [{side.upper()}]\n"
-                        f"• *Guadagno Raggiunto:* `+{plpc:.2f}%` (+${unrealized:.2f})\n"
-                        f"• *Azione Protettiva:* Stop loss alzato a pareggio (${be_price:.2f}).\n"
-                        f"💡 _Operazione a rischio zero certificata._"
-                    ))
-
-            # Trailing Lock (+1.60% gain)
-            elif plpc >= 1.60 and _ALPACA_RISK_STAGE[sym] in ["INITIAL", "BE_SAFE"]:
-                entry_p = float(p.get("avg_entry_price", 0.0) or 0.0)
-                lock_price = round(entry_p * 1.0100, 2) if side == "long" else round(entry_p * 0.9900, 2)
-                sl_res = alpaca_service.update_stop_loss(sym, lock_price)
-                if isinstance(sl_res, dict) and "error" not in sl_res:
-                    _ALPACA_RISK_STAGE[sym] = "LOCK_PROFIT"
-                    notification_events.append((
-                        f"🔒 *TRAILING PROFIT LOCK ATTIVATO*\n"
-                        f"────────────────────────\n"
-                        f"• *Azione:* `{sym}` [{side.upper()}]\n"
-                        f"• *Guadagno Raggiunto:* `+{plpc:.2f}%` (+${unrealized:.2f})\n"
-                        f"• *Azione Protettiva:* Minimo utile garantito bloccato al +1.00% netto (${lock_price:.2f}).\n"
-                        f"💡 _Vincita blindata in cassa._"
-                    ))
-
-            # Target Istituzionale (+3.60% TP / -1.20% SL)
-            if plpc >= 3.60 or plpc <= -1.20:
-                c_res = alpaca_service.close_position(sym)
-                if isinstance(c_res, dict) and "error" in c_res:
-                    print(f"[!] Warning chiusura Alpaca target {sym} fallita: {c_res.get('error')}")
-                    continue
-                is_tp = plpc >= 3.60
-                c_reason = "TAKE_PROFIT" if is_tp else "STOP_LOSS"
-                try:
-                    _risk_closed("ALPACA", unrealized)
-                    trade_journal_svc.record_exit(broker="ALPACA", symbol=sym, exit_price=float(p.get("current_price", 0.0) or 0.0), pnl_usd=unrealized, pnl_pct=plpc, close_reason=c_reason)
-                except Exception as e_j:
-                    print(f"[!] Warning journal exit: {e_j}")
-                event_title = "🎯 *TAKE PROFIT RAGGIUNTO (+3.60%)*" if is_tp else "🛑 *STOP LOSS ESEGUITO (-1.20%)*"
-                notification_events.append((
-                    f"{event_title}\n"
-                    f"────────────────────────\n"
-                    f"• *Azione:* `{sym}` [{side.upper()}]\n"
-                    f"• *Risultato Incassato:* `${unrealized:+.2f} USD` ({plpc:+.2f}%)\n"
-                    f"• *Disciplina Quantitativa:* Uscita disciplinata 1:3 eseguita su Alpaca."
-                ))
+        open_positions_active = [p for p in positions if p["symbol"] not in closed_in_cycle]
 
         # 4. Dynamic Capital Exposure & Flexible Position Sizing (Fino al 70% del Capitale)
         acc_info = alpaca_service._api_request("account")
         equity_alpaca = float(acc_info.get("equity", 100000.0) or 100000.0) if isinstance(acc_info, dict) else 100000.0
-        
-        # Calcolo esposizione reale a mercato attuale
+
         _risk_observe("ALPACA", equity_alpaca)
-        current_invested_alpaca = sum(float(p.get("market_value", 0.0) or 0.0) for p in positions)
+        current_invested_alpaca = sum(abs(float(p.get("market_value", 0.0) or 0.0)) for p in open_positions_active)
         max_allowed_exposure_alpaca = equity_alpaca * 0.70  # Fino al 70% del capitale
         available_risk_budget_alpaca = max(0.0, max_allowed_exposure_alpaca - current_invested_alpaca)
-        
-        # Size per singolo trade dinamica (10% dell'equity per operazione piena, o budget residuo se capiente)
-        dynamic_shares_budget = round(max(2000.0, min(equity_alpaca * 0.10, available_risk_budget_alpaca)), 0)
+        base_notional_alpaca = round(min(max(1000.0, equity_alpaca * 0.10), available_risk_budget_alpaca), 0)
+        max_conc = _get_max_concurrent_trades()
 
-        # 5. Screening Ingressi Flessibili Wall Street (Fino al 70% del capitale senza limite fisso a 3)
-        if available_risk_budget_alpaca >= 2000.0 and eq_bias in ["BULLISH", "BEARISH", "NEUTRAL"]:
+        # 5. Screening Ingressi Multi-Engine Wall Street (Fino al cap 70% e RiskConfig.max_concurrent_trades)
+        if available_risk_budget_alpaca >= 1000.0 and eq_bias in ["BULLISH", "BEARISH", "NEUTRAL"]:
             import yfinance as yf
-            import pandas as pd
-            from services.hurst_migliorino_cycles import HurstMigliorinoCycleService
+            now_cet = datetime.now(ZoneInfo("Europe/Rome"))
+            if now_cet.hour == 15 and now_cet.minute < 45:
+                print(f"⏱️ [Open Bell Filter] Primi 15 minuti di Wall Street ({now_cet.strftime('%H:%M')}). Attesa stabilizzazione spread.")
+                return notification_events
 
-            active_syms = {p["symbol"] for p in positions}
+            active_syms = {p["symbol"] for p in open_positions_active}
             universe_equities = ["NVDA", "AAPL", "MSFT", "TSLA", "AMZN", "META", "GOOGL", "AMD"]
-
-            # Scarica dati per ranking Alpha vs SPY
             try:
                 bulk_df = yf.download(universe_equities + ["SPY"], period="1mo", interval="1h", progress=False)
-                from services.indicators_safe import wilder_rsi, atr_wilder, drop_forming_bar
-                bulk_df = drop_forming_bar(bulk_df, 60)
-                spy_c = bulk_df["Close"]["SPY"].dropna()
-                spy_24h_ch = ((spy_c.iloc[-1] - spy_c.iloc[-7]) / spy_c.iloc[-7]) * 100 if len(spy_c) >= 8 else 0.0
+                spy_df = prepare_closed_bars(_extract_symbol_df_from_bulk(bulk_df, "SPY"), interval_minutes=60)
+                spy_24h_ch = 0.0
+                if spy_df is not None and len(spy_df) >= 8:
+                    spy_c = spy_df["Close"]
+                    spy_24h_ch = ((float(spy_c.iloc[-1]) - float(spy_c.iloc[-7])) / float(spy_c.iloc[-7])) * 100.0
 
-                def _rank_stock(sym):
-                    if sym not in bulk_df["Close"]:
+                stock_dfs: Dict[str, Any] = {}
+                for sym in universe_equities:
+                    sdf = prepare_closed_bars(_extract_symbol_df_from_bulk(bulk_df, sym), interval_minutes=60)
+                    if sdf is not None and len(sdf) >= 35:
+                        stock_dfs[sym] = sdf
+
+                def _rank_stock(sym: str) -> float:
+                    sdf = stock_dfs.get(sym)
+                    if sdf is None or len(sdf) < 8:
                         return 0.0
-                    sc = bulk_df["Close"][sym].dropna()
-                    if len(sc) < 8:
-                        return 0.0
-                    s_ch = ((sc.iloc[-1] - sc.iloc[-7]) / sc.iloc[-7]) * 100
-                    alpha = s_ch - spy_24h_ch
+                    sc = sdf["Close"]
+                    alpha = (((float(sc.iloc[-1]) - float(sc.iloc[-7])) / float(sc.iloc[-7])) * 100.0) - spy_24h_ch
                     return -alpha if eq_bias in ["BULLISH", "NEUTRAL"] else alpha
 
-                sorted_stocks = sorted(universe_equities, key=_rank_stock)
-
-                for sym in sorted_stocks:
-                    if sym in active_syms or len(active_syms) >= 3:
+                for sym in sorted(stock_dfs.keys(), key=_rank_stock):
+                    if sym in active_syms or len(active_syms) >= max_conc:
                         continue
-                    
-                    sc = bulk_df["Close"][sym].dropna()
-                    if len(sc) < 35:
-                        continue
-
-                    last_c = float(sc.iloc[-1])
-                    s_ch = ((sc.iloc[-1] - sc.iloc[-7]) / sc.iloc[-7]) * 100 if len(sc) >= 8 else 0.0
-                    alpha = s_ch - spy_24h_ch
-
-                    # Indicatori tecnici 1H
-                    delta = sc.diff()
-                    rsi = float(wilder_rsi(sc, 14).iloc[-1])
-                    ema20 = float(sc.ewm(span=20, adjust=False).mean().iloc[-1])
-                    ema50 = float(sc.ewm(span=50, adjust=False).mean().iloc[-1])
-
-                    # Ciclica Hurst & Migliorino 1H
-                    df_sym = pd.DataFrame({"Close": sc})
-                    cycle = HurstMigliorinoCycleService.calculate_cycle_metrics(df_sym)
-                    tempo_battleplan = cycle.get("tempo_battleplan", "")
-                    vincolo_migliorino = cycle.get("vincolo_migliorino", "LIBERO")
-                    hurst_fld = float(cycle.get("hurst_fld_value", 0.0) or 0.0)
-
-                    # Dynamic ATR 14
-                    high_s = bulk_df["High"][sym].dropna()
-                    low_s = bulk_df["Low"][sym].dropna()
-                    atr = float(atr_wilder(high_s, low_s, sc, 14).iloc[-1] or (last_c * 0.015))
-                    atr_pct = (atr / last_c) * 100.0
-
-                    dynamic_sl_pct = round(max(0.90, min(2.50, atr_pct * 1.4)), 2)
-                    dynamic_tp_pct = round(dynamic_sl_pct * 3.0, 2)
-
-                    # Numero di azioni calcolato dal budget dinamico
-                    shares = max(1, int(dynamic_shares_budget / last_c))
-
-                    # Regole di ammissibilità direzionale (BULLISH o NEUTRAL con confluenza ciclica 1H o Prezzo > FLD)
-                    allow_long = (eq_bias == "BULLISH") or (eq_bias == "NEUTRAL" and ("1° TEMPO" in tempo_battleplan.upper() or "2° TEMPO" in tempo_battleplan.upper() or last_c > hurst_fld))
-
-                    # Dynamic VIX Shield: Divieto categorico di acquisto se il VIX è in ascesa, sopra 24 con variazione positiva, o in shock
-                    is_vix_unfavorable = (vix_delta_pct > 2.0) or (vix_val >= 24.0 and vix_delta_pct >= 0.0) or (vix_val >= 28.0)
-                    if is_vix_unfavorable:
-                        print(f"🛡️ [VIX Shield Wall Street] VIX avverso/in salita (Livello: {vix_val:.1f}, Delta: {vix_delta_pct:+.1f}%). Ingressi Long TASSATIVAMENTE sospesi.")
-                        continue
-
-                    # Filtro Apertura Mercato (Primi 15 minuti 15:30-15:45 CET): Protezione da spike e fake breakout
-                    try:
-                        import datetime
-                        import zoneinfo
-                        now_cet = datetime.datetime.now(zoneinfo.ZoneInfo("Europe/Rome"))
-                        if now_cet.hour == 15 and now_cet.minute < 45:
-                            print(f"⏱️ [Open Bell Filter] Primi 15 minuti di Wall Street ({now_cet.strftime('%H:%M')}). Attesa stabilizzazione spread, ingressi sospesi.")
-                            continue
-                    except Exception as e_time:
-                        print(f"[!] Warning verifica orario apertura: {e_time}")
-
-                    # INGRESSO LONG: trend 1H positivo (Prezzo sopra EMA20 o EMA50), RSI di spinta e ciclo libero
-                    is_uptrend_1h = (last_c > ema20 and last_c > ema50) or (last_c > ema20 and ema20 > ema50)
-                    if allow_long and is_uptrend_1h and (rsi > 50):
-                        if "RIBASSISTA" in vincolo_migliorino.upper():
-                            print(f"⚠️ [Filtro Ciclico Ignorato Long] {sym} ha vincolo ciclico ribassista. Scartato.")
-                            continue
-
-                        # Filtro Fondamentale & Sentiment dalla Sentinella
-                        sentinel_data = sentinel_svc.get_asset_fundamental_sentiment(sym)
-                        if sentinel_data.get("sentiment") == "BEARISH":
-                            print(f"🛡️ [Sentinel Shield Wall Street] {sym} presenta news flow avverso / downgrade: {sentinel_data.get('reasons')}. Trade Long evitato.")
-                            continue
-
-                        target_p = round(last_c * (1 + dynamic_tp_pct / 100.0), 2)
-                        stop_p = round(last_c * (1 - dynamic_sl_pct / 100.0), 2)
-
-                        print(f"📈 [Setup A+ WALL STREET LONG] {sym} (Macro: {eq_bias}, Ciclo: {tempo_battleplan}, Alpha: {alpha:+.2f}%, RSI: {rsi:.1f}, ATR-SL: {dynamic_sl_pct}%). Ordine bracket {shares} azioni...")
-                        if not _risk_gate("ALPACA", sym, equity_alpaca,
-                                          [{"entry_price": float(pp.get("avg_entry_price", 0) or 0), "size": float(pp.get("qty", 0) or 0)} for pp in positions],
-                                          last_c, stop_p, target_p, shares, notification_events):
-                            continue
-                        order_res = alpaca_service.place_bracket_order(sym, shares, "buy", target_p, stop_p)
-                        if "error" not in order_res:
-                            _risk_opened("ALPACA", equity_alpaca)
-                            # Registra nel Trade Journal con contesto analitico completo
-                            try:
-                                trade_journal_svc.record_entry(
-                                    broker="ALPACA",
-                                    symbol=sym,
-                                    side="LONG",
-                                    entry_price=last_c,
-                                    notional_usd=shares * last_c,
-                                    context={
-                                        "macro_bias": eq_bias,
-                                        "cycle_tempo": tempo_battleplan,
-                                        "alpha_spy": round(alpha, 2),
-                                        "rsi": round(rsi, 1),
-                                        "vix": round(vix_val, 1),
-                                        "sentinel_sentiment": sentinel_data.get("sentiment"),
-                                        "sentinel_reasons": sentinel_data.get("reasons", []),
-                                        "sentinel_boost": sentinel_data.get("has_breaking_catalyst", False)
-                                    }
-                                )
-                            except Exception as e_j:
-                                print(f"[!] Warning trade journal entry: {e_j}")
-
-                            boost_txt = f"\n• *Fondamentali Sentinella:* `{sentinel_data.get('sentiment')}` ({', '.join(sentinel_data.get('reasons', ['Allineato']))})" if sentinel_data.get("reasons") else ""
-                            notification_events.append((
-                                f"🟢 *NUOVO ORDINE WALL STREET APERTO (ALPACA)*\n"
-                                f"────────────────────────\n"
-                                f"• *Titolo:* `{sym}` (x{shares} quote)\n"
-                                f"• *Controvalore Dinamico (Cap 70%):* `${shares * last_c:,.0f}`\n"
-                                f"• *Macro Regime SPY:* `{eq_bias}` | *Ciclica 1H:* `{tempo_battleplan or 'Allineata'}`\n"
-                                f"• *Alpha vs SPY:* `{alpha:+.2f}%` | *VIX:* `{vix_val:.1f}` ({vix_delta_pct:+.1f}%)\n"
-                                f"• *Target R:R 1:3 ATR:* TP `${target_p:.2f}` (+{dynamic_tp_pct:.2f}%) | SL `${stop_p:.2f}` (-{dynamic_sl_pct:.2f}%){boost_txt}\n"
-                                f"• *Confluenza:* VIX Dynamic Shield, Battleplan e Sentinella sincronizzati."
-                            ))
-                        # Consenti ulteriori ingressi fino al raggiungimento del cap del 70% di capitale
-                        available_risk_budget_alpaca -= (shares * last_c)
-                        if available_risk_budget_alpaca < 2000.0:
+                    spent = _evaluate_and_trade_alpaca_candidate(
+                        sym=sym, df_sym_1h=stock_dfs[sym], eq_bias=eq_bias, vix_val=vix_val,
+                        vix_delta_pct=vix_delta_pct, spy_24h_ch=spy_24h_ch, equity_alpaca=equity_alpaca,
+                        base_notional=base_notional_alpaca, available_budget=available_risk_budget_alpaca,
+                        positions=open_positions_active, adaptive_params=adaptive_params,
+                        notification_events=notification_events,
+                    )
+                    if spent > 0.0:
+                        active_syms.add(sym)
+                        available_risk_budget_alpaca = max(0.0, available_risk_budget_alpaca - spent)
+                        if available_risk_budget_alpaca < 500.0:
                             break
             except Exception as e_screening:
                 print(f"[!] Errore screening equities Alpaca: {e_screening}")
@@ -3461,6 +3926,7 @@ def _meta_gate_check(b_sym, df, side):
 
 
 _RISK_CFG = risk_limits.RiskConfig.from_env()
+_DEFAULT_RISK_CFG_REF = _RISK_CFG
 _RISK_STATE = risk_limits.RiskState(_RISK_CFG.state_path)
 
 
@@ -3494,6 +3960,21 @@ def _risk_gate(broker, sym, equity, positions, entry, stop, tp, qty, notificatio
     return False
 
 
+_risk_gate.cfg = _RISK_CFG  # expose RiskConfig cleanly without breaking call signature
+
+
+def _get_max_concurrent_trades() -> int:
+    """Legge dinamicamente max_concurrent_trades da RiskConfig (fallback sicuro >= 1)."""
+    try:
+        cfg = getattr(_risk_gate, "cfg", None)
+        if _RISK_CFG is not None and (cfg is None or cfg is _DEFAULT_RISK_CFG_REF):
+            cfg = _RISK_CFG
+        val = int(getattr(cfg, "max_concurrent_trades", 6) or 6)
+        return max(1, val)
+    except Exception:
+        return 6
+
+
 def _risk_opened(broker, equity=None):
     try:
         risk_limits.record_open(_RISK_CFG, _RISK_STATE, broker, equity)
@@ -3517,11 +3998,248 @@ def _has_open_position(b_sym) -> bool:
         return True
 
 
+def _collect_bybit_signals(
+    *,
+    b_sym: str,
+    b_yf: str,
+    macro_bias: str,
+    c_funding: float,
+    spread_bps: float,
+    rome_hour: int,
+) -> Optional[Dict[str, Any]]:
+    """Scarica candele chiuse 15m/1h/4h e seleziona il miglior segnale tra i 3 motori quantitativi."""
+    df_15m = _fetch_bybit_closed_ohlcv(b_sym, b_yf, "15", 15, limit=180)
+    if df_15m is None or len(df_15m) < 35:
+        return None
+    df_1h = _fetch_bybit_closed_ohlcv(b_sym, b_yf, "60", 60, limit=120) or _resample_ohlcv(df_15m, "1h")
+    df_4h = _fetch_bybit_closed_ohlcv(b_sym, b_yf, "240", 240, limit=100) or (
+        _resample_ohlcv(df_1h, "4h") if df_1h is not None else _resample_ohlcv(df_15m, "4h")
+    )
+
+    close = df_15m["Close"]
+    vol = df_15m["Volume"]
+    last_c = float(close.iloc[-1])
+    if last_c <= 0.0:
+        return None
+    avg_vol = float(vol.rolling(20).mean().iloc[-1] or 1.0)
+    vol_ratio = float(vol.iloc[-1] or 0.0) / (avg_vol + 1e-5)
+    atr_pct = _compute_closed_df_atr_pct(df_15m, fallback=1.0)
+
+    adx_src = df_1h if (df_1h is not None and len(df_1h) >= 28) else df_15m
+    adx_1h = float(compute_adx(adx_src["High"], adx_src["Low"], adx_src["Close"], 14).iloc[-1] or 20.0)
+
+    cycle_data: Dict[str, Any] = {}
+    try:
+        from services.deep_trade_analysis_service import get_deep_trade_forecast
+        cycle_data = get_deep_trade_forecast(b_sym, tf="1h").get("cycle", {}) or {}
+    except Exception:
+        cycle_data = {}
+
+    cvd_info: Dict[str, Any] = {"bias": "NEUTRAL", "ratio": 1.0}
+    try:
+        cvd_info = bybit_service.get_cumulative_volume_delta(b_sym, limit=50) or cvd_info
+    except Exception:
+        pass
+    obi_info: Dict[str, Any] = {"bias": "BALANCED", "imbalance": 0.0}
+    try:
+        obi_info = bybit_service.get_orderbook_imbalance(b_sym) or obi_info
+    except Exception:
+        pass
+
+    route = regime_router(macro_bias, adx_1h, atr_pct, funding_rate=c_funding, spread_bps=spread_bps)
+    allowed_engines = set(route.get("allowed_engines") or [])
+    prefer_limit = bool(route.get("prefer_limit", False))
+    is_overnight = (0 <= rome_hour < 7)
+
+    candidates: List[Dict[str, Any]] = []
+    if ENGINE_TREND_PULLBACK in allowed_engines and df_4h is not None and df_1h is not None and len(df_4h) >= 20 and len(df_1h) >= 20:
+        sig_tp = engine_trend_pullback_4h1d(
+            df_4h, df_1h, macro_bias, cycle_data=cycle_data, funding_rate=c_funding,
+            interval_minutes_4h=240, interval_minutes_1h=60,
+        )
+        if sig_tp:
+            candidates.append(sig_tp)
+
+    if ENGINE_LIQUIDITY_SWEEP in allowed_engines:
+        sig_mr = engine_liquidity_sweep_mr(
+            df_15m, cvd_info, obi_info, c_funding, macro_bias, interval_minutes=15,
+        )
+        if sig_mr:
+            candidates.append(sig_mr)
+
+    if ENGINE_INTRADAY_MOMENTUM in allowed_engines:
+        sig_mom = engine_intraday_momentum(
+            df_15m, macro_bias, cycle_data, cvd_info, obi_info, c_funding, vol_ratio,
+            is_overnight=is_overnight, is_equities=False, adx_min=16.0, interval_minutes=15,
+        )
+        if sig_mom.get("triggered"):
+            candidates.append(sig_mom)
+        elif sig_mom.get("reject_reason"):
+            _log_shadow_rejection(
+                "BYBIT", b_sym, sig_mom.get("side"), ENGINE_INTRADAY_MOMENTUM, macro_bias, atr_pct,
+                rome_hour, str(sig_mom.get("reject_reason")), last_c,
+                float(sig_mom.get("sl_pct") or 1.2), float(sig_mom.get("tp_pct") or 3.6), sig_mom.get("features"),
+            )
+
+    best_sig = select_best_signal(candidates)
+    if not best_sig:
+        return None
+    return {
+        "signal": best_sig, "df_15m": df_15m, "last_c": last_c, "atr_pct": atr_pct,
+        "prefer_limit": prefer_limit, "cycle_data": cycle_data, "cvd_info": cvd_info, "vol_ratio": vol_ratio,
+    }
+
+
+def _evaluate_and_trade_bybit_candidate(
+    *,
+    b_sym: str,
+    b_yf: str,
+    b_name: str,
+    macro_bias: str,
+    c_funding: float,
+    c_alpha: float,
+    spread_bps: float,
+    bybit_equity: float,
+    base_notional: float,
+    available_budget: float,
+    bybit_positions: List[Dict[str, Any]],
+    adaptive_params: Optional[Dict[str, Any]],
+    notification_events: List[str],
+) -> float:
+    """Valuta un candidato Bybit con 3 motori, Sentinel, MetaGate, Allocator Bayesiano, Race Guard e RiskGate."""
+    rome_hour = datetime.now(ZoneInfo("Europe/Rome")).hour
+    pack = _collect_bybit_signals(
+        b_sym=b_sym, b_yf=b_yf, macro_bias=macro_bias,
+        c_funding=c_funding, spread_bps=spread_bps, rome_hour=rome_hour,
+    )
+    if not pack:
+        return 0.0
+
+    best_sig = pack["signal"]
+    df_15m = pack["df_15m"]
+    last_c = float(pack["last_c"])
+    atr_pct = float(pack["atr_pct"])
+    prefer_limit = bool(pack["prefer_limit"])
+    cycle_data = pack["cycle_data"]
+    cvd_info = pack["cvd_info"]
+    vol_ratio = float(pack["vol_ratio"])
+
+    sig_side = str(best_sig["side"]).upper()
+    chosen_engine = str(best_sig.get("engine") or ENGINE_INTRADAY_MOMENTUM).upper()
+    ratchet_entry = compute_atr_ratchet_levels(atr_pct, sig_side, last_c, adaptive_params=adaptive_params)
+    sl_pct = float(ratchet_entry["sl_pct"] if adaptive_params else best_sig.get("sl_pct", ratchet_entry["sl_pct"]))
+    tp_pct = float(ratchet_entry["tp_pct"] if adaptive_params else best_sig.get("tp_pct", ratchet_entry["tp_pct"]))
+    context_key = normalize_context_key("BYBIT", sig_side, macro_bias, atr_pct, rome_hour, chosen_engine)
+
+    sentinel_data = sentinel_svc.get_asset_fundamental_sentiment(b_sym)
+    if (sig_side == "SHORT" and sentinel_data.get("sentiment") == "BULLISH" and sentinel_data.get("has_political_interest")) or (
+        sig_side == "LONG" and sentinel_data.get("sentiment") == "BEARISH"
+    ):
+        _log_shadow_rejection(
+            "BYBIT", b_sym, sig_side, chosen_engine, macro_bias, atr_pct, rome_hour,
+            "SENTINEL_SHIELD", last_c, sl_pct, tp_pct, best_sig.get("features"), context_key_override=context_key,
+        )
+        return 0.0
+
+    gate_ok, gate_scale = _meta_gate_check(b_sym, df_15m, (1 if sig_side == "LONG" else -1))
+    if not gate_ok:
+        _log_shadow_rejection(
+            "BYBIT", b_sym, sig_side, chosen_engine, macro_bias, atr_pct, rome_hour,
+            "META_GATE", last_c, sl_pct, tp_pct, best_sig.get("features"), context_key_override=context_key,
+        )
+        return 0.0
+
+    alloc_ok, eff_notional, alloc_info = _apply_context_allocation(
+        context_key, base_notional, available_budget, min_notional=1000.0, gate_scale=gate_scale,
+    )
+    if not alloc_ok:
+        _log_shadow_rejection(
+            "BYBIT", b_sym, sig_side, chosen_engine, macro_bias, atr_pct, rome_hour,
+            "SHADOW_ALLOCATOR", last_c, sl_pct, tp_pct, best_sig.get("features"), context_key_override=context_key,
+        )
+        return 0.0
+
+    if _has_open_position(b_sym):
+        print(f"[Race Guard] {b_sym}: posizione gia' aperta, ordine {sig_side} saltato.")
+        return 0.0
+
+    raw_otype = str(best_sig.get("order_type") or ("Limit" if prefer_limit else "Market")).strip().lower()
+    is_limit = raw_otype == "limit"
+    order_type = "Limit" if is_limit else "Market"
+    limit_price = best_sig.get("limit_price")
+    if is_limit and (limit_price is None or float(limit_price) <= 0.0):
+        limit_price = last_c * (0.999 if sig_side == "LONG" else 1.001)
+    ref_p = float(limit_price) if (is_limit and limit_price) else last_c
+    sl_p = ref_p * (1 - sl_pct / 100.0) if sig_side == "LONG" else ref_p * (1 + sl_pct / 100.0)
+    tp_p = ref_p * (1 + tp_pct / 100.0) if sig_side == "LONG" else ref_p * (1 - tp_pct / 100.0)
+
+    if not _risk_gate(
+        "BYBIT", b_sym, bybit_equity,
+        [{"entry_price": bp.get("entry_price"), "size": bp.get("size"), "stop_loss": bp.get("stop_loss")} for bp in bybit_positions],
+        ref_p, sl_p, tp_p, eff_notional, notification_events, is_notional=True,
+    ):
+        _log_shadow_rejection(
+            "BYBIT", b_sym, sig_side, chosen_engine, macro_bias, atr_pct, rome_hour,
+            "RISK_GATE", ref_p, sl_pct, tp_pct, best_sig.get("features"), context_key_override=context_key,
+        )
+        return 0.0
+
+    link_id = make_order_link_id(b_sym, ("L" if sig_side == "LONG" else "S"), df_15m.index[-1])
+    order_res = bybit_service.place_order(
+        b_sym, side=("Buy" if sig_side == "LONG" else "Sell"), notional_usd=eff_notional,
+        take_profit_pct=tp_pct, stop_loss_pct=sl_pct, order_link_id=link_id,
+        order_type=order_type, limit_price=(float(limit_price) if is_limit and limit_price else None),
+        post_only=is_limit,
+    )
+    if not isinstance(order_res, dict) or order_res.get("duplicate") or "error" in order_res:
+        return 0.0
+
+    _risk_opened("BYBIT", bybit_equity)
+    fill_p = float(order_res.get("price") or ref_p)
+    try:
+        trade_journal_svc.record_entry(
+            broker="BYBIT", symbol=b_sym, side=sig_side, entry_price=fill_p, notional_usd=eff_notional,
+            context={
+                "macro_bias": macro_bias, "cycle_tempo": cycle_data.get("tempo_battleplan", ""),
+                "hurst_fld": float(cycle_data.get("hurst_fld_value", 0.0) or 0.0),
+                "funding_rate": c_funding, "alpha_btc": c_alpha,
+                "cvd_ratio": cvd_info.get("ratio", 1.0), "rsi": best_sig.get("features", {}).get("rsi"),
+                "vol_ratio": round(vol_ratio, 2), "sl_pct": sl_pct, "tp_pct": tp_pct,
+                "atr_pct": round(atr_pct, 3), "engine": chosen_engine, "context_key": context_key,
+                "order_type": order_type, "alloc_mode": alloc_info.get("mode"), "alloc_scale": alloc_info.get("scale"),
+                "sentinel_sentiment": sentinel_data.get("sentiment"), "sentinel_reasons": sentinel_data.get("reasons", []),
+            },
+            client_order_id=link_id, engine=chosen_engine, context_key=context_key,
+        )
+    except Exception as e_j:
+        print(f"[!] Warning trade journal entry: {e_j}")
+
+    boost_txt = f"\n• *Sentinella Macro/News:* `{sentinel_data.get('sentiment')}` ({', '.join(sentinel_data.get('reasons', ['Allineato']))})" if sentinel_data.get("reasons") else ""
+    notification_events.append((
+        f"{'🟢' if sig_side == 'LONG' else '🔻'} *NUOVO ORDINE {sig_side} APERTO ({chosen_engine})*\n"
+        f"────────────────────────\n"
+        f"• *Asset:* `{b_sym}` ({b_name}) | `{order_type}`\n"
+        f"• *Notionale Dinamico (Cap 70%):* `${eff_notional:,.0f}` (Alloc `{alloc_info.get('mode', 'STANDARD')}` {float(alloc_info.get('scale', 1.0)):.2f}x)\n"
+        f"• *Macro Regime:* `{macro_bias}` | *Funding:* `{c_funding:+.4f}%` | *Alpha BTC:* `{c_alpha:+.2f}%`\n"
+        f"• *Target ATR:* TP `+{tp_pct:.2f}%` | SL `-{sl_pct:.2f}%`{boost_txt}"
+    ))
+    return float(eff_notional)
+
+
 def _sync_crypto_risk_and_screening():
     """Motore quantitativo istituzionale: allineamento Macro BTC, Dynamic Compounding Sizing e Risk Alerts."""
     global _LAST_NOTIFIED_MACRO_BIAS
     notification_events = []
     try:
+        _maybe_deduplicate_journal()
+        try:
+            closed_res = bybit_service.session.get_closed_pnl(category="linear", limit=30)
+            raw_closed = closed_res.get("result", {}).get("list", []) if isinstance(closed_res, dict) and closed_res.get("retCode") == 0 else []
+            if raw_closed:
+                _reconcile_broker_closed_trades("BYBIT", raw_closed)
+        except Exception as e_rec_b:
+            print(f"[!] Warning riconciliazione Bybit: {e_rec_b}")
+
         # 1. Leggi trend macro da BTC (Timeframe 4 Ore)
         macro_bias = _get_btc_macro_bias()
         print(f"🌊 [Macro Bias BTC 4H] Direzione di mercato: {macro_bias}")
@@ -3553,181 +4271,62 @@ def _sync_crypto_risk_and_screening():
             ))
             _LAST_NOTIFIED_MACRO_BIAS = macro_bias
 
-        # 2. Gestione posizioni aperte Bybit e Scudi Protettivi
+        # 2. Gestione posizioni aperte Bybit (Ratchet Stop Dinamico ATR-Adattivo & Exit Frontier)
         bybit_positions = bybit_service.get_open_positions()
         current_symbols = {bp["symbol"] for bp in bybit_positions}
-
-        # Pulisci stage per posizioni non più aperte
-        stale_syms = [s for s in _POSITION_RISK_STAGE if s not in current_symbols]
-        for s in stale_syms:
+        for s in [s for s in _POSITION_RISK_STAGE if s not in current_symbols]:
             del _POSITION_RISK_STAGE[s]
 
+        adaptive_params = _get_approved_exit_params()
         for bp in bybit_positions:
             bsym = bp["symbol"]
-            pnl_pct = bp["pnl_pct"]
-            unrealized = bp["unrealized_pnl"]
-            bside = bp["side"]
-            entry_p = bp["entry_price"]
+            pnl_pct = float(bp.get("pnl_pct", 0.0) or 0.0)
+            unrealized = float(bp.get("unrealized_pnl", 0.0) or 0.0)
+            bside = str(bp.get("side", "BUY")).upper()
+            entry_p = float(bp.get("entry_price", 0.0) or 0.0)
+            curr_p = float(bp.get("current_price", 0.0) or entry_p)
             curr_sl = float(bp.get("stop_loss", 0.0) or 0.0)
+            notional_p = abs(float(bp.get("position_value") or (float(bp.get("size", 0.0) or 0.0) * entry_p)))
 
-            if bsym not in _POSITION_RISK_STAGE:
-                _POSITION_RISK_STAGE[bsym] = "INITIAL"
-
-            # A. Chiusura se la posizione è in conflitto totale col bias macro ed è in perdita
-            if macro_bias == "BEARISH" and bside == "BUY" and pnl_pct < -0.10:
-                print(f"🛑 [Macro Shield] Chiusura posizione Long contro-trend su {bsym} (Macro: BEARISH).")
-                _cr = bybit_service.close_position(bsym)
-                if isinstance(_cr, dict) and "error" in _cr:
-                    print(f"[!] Macro Shield: chiusura {bsym} non eseguita ({_cr['error']}), nessun journal/notifica.")
-                    continue
-                try:
-                    _risk_closed("BYBIT", unrealized)
-                    trade_journal_svc.record_exit(broker="BYBIT", symbol=bsym, exit_price=float(bp.get("current_price", 0.0) or entry_p), pnl_usd=unrealized, pnl_pct=pnl_pct, close_reason="MACRO_SHIELD")
-                except Exception as e_j:
-                    print(f"[!] Warning journal exit: {e_j}")
-                notification_events.append((
-                    f"🛑 *MACRO SHIELD: CHIUSURA PREVENTIVA CONTRO-TREND*\n"
-                    f"────────────────────────\n"
-                    f"• *Contratto:* `{bsym}` [LONG]\n"
-                    f"• *PnL Chiusura:* `${unrealized:+.2f}` ({pnl_pct:+.2f}%)\n"
-                    f"• *Motivazione:* Inversione Macro BTC a BEARISH.\n"
-                    f"💡 _Capitale preservato: evitato accumulo di drawdown contro-trend._"
-                ))
-                continue
-            elif macro_bias == "BULLISH" and bside == "SELL" and pnl_pct < -0.10:
-                print(f"🛑 [Macro Shield] Chiusura posizione Short contro-trend su {bsym} (Macro: BULLISH).")
-                _cr = bybit_service.close_position(bsym)
-                if isinstance(_cr, dict) and "error" in _cr:
-                    print(f"[!] Macro Shield: chiusura {bsym} non eseguita ({_cr['error']}), nessun journal/notifica.")
-                    continue
-                try:
-                    _risk_closed("BYBIT", unrealized)
-                    trade_journal_svc.record_exit(broker="BYBIT", symbol=bsym, exit_price=float(bp.get("current_price", 0.0) or entry_p), pnl_usd=unrealized, pnl_pct=pnl_pct, close_reason="MACRO_SHIELD")
-                except Exception as e_j:
-                    print(f"[!] Warning journal exit: {e_j}")
-                notification_events.append((
-                    f"🛑 *MACRO SHIELD: CHIUSURA PREVENTIVA CONTRO-TREND*\n"
-                    f"────────────────────────\n"
-                    f"• *Contratto:* `{bsym}` [SHORT]\n"
-                    f"• *PnL Chiusura:* `${unrealized:+.2f}` ({pnl_pct:+.2f}%)\n"
-                    f"• *Motivazione:* Inversione Macro BTC a BULLISH.\n"
-                    f"💡 _Capitale preservato: evitato accumulo di drawdown contro-trend._"
-                ))
-                continue
-
-            # B. RATCHET TRAILING STOP A SCALINI ISTITUZIONALE
-            # Scalino 1: +0.40% -> Stop stretto a -0.30% (riduzione perdita del 75%, anti-reversal precoce)
-            if 0.40 <= pnl_pct < 0.80:
-                tight_sl = round(entry_p * 0.9970, 4) if bside == "BUY" else round(entry_p * 1.0030, 4)
-                if (bside == "BUY" and curr_sl < tight_sl) or (bside == "SELL" and (curr_sl <= 0 or curr_sl > tight_sl)):
-                    sl_res = bybit_service.update_stop_loss(bsym, tight_sl)
-                    if isinstance(sl_res, dict) and "error" not in sl_res:
-                        print(f"🛡️ [Ratchet Stop Step 1] Spostato Stop Loss su {bsym} a -0.30% protettivo ({tight_sl})!")
-                        if _POSITION_RISK_STAGE.get(bsym) != "TIGHT_RISK":
-                            _POSITION_RISK_STAGE[bsym] = "TIGHT_RISK"
-                            notification_events.append((
-                                f"🛡️ *RATCHET STOP: RISCHIO TAGLIATO (-75%)*\n"
-                                f"────────────────────────\n"
-                                f"• *Contratto:* `{bsym}` [{bside}]\n"
-                                f"• *Ingresso:* `${entry_p:.4f}` &rarr; *Nuovo SL Protettivo:* `${tight_sl:.4f}` (-0.30%)\n"
-                                f"• *PnL Fluttuante:* `${unrealized:+.2f}` ({pnl_pct:+.2f}%)\n"
-                                f"• *Protezione:* Riduzione immediata del rischio sul primo impulso positivo."
-                            ))
-
-            # Scalino 2: +0.80% -> Break-Even Safe (+0.20% netto)
-            elif 0.80 <= pnl_pct < 1.20:
-                be_sl = round(entry_p * 1.0020, 4) if bside == "BUY" else round(entry_p * 0.9980, 4)
-                if (bside == "BUY" and curr_sl < be_sl) or (bside == "SELL" and (curr_sl <= 0 or curr_sl > be_sl)):
-                    sl_res = bybit_service.update_stop_loss(bsym, be_sl)
-                    if isinstance(sl_res, dict) and "error" not in sl_res:
-                        print(f"🛡️ [Day-Trader Break-Even] Spostato Stop Loss su {bsym} a BE protetto ({be_sl})!")
-                        if _POSITION_RISK_STAGE.get(bsym) != "BE_SAFE":
-                            _POSITION_RISK_STAGE[bsym] = "BE_SAFE"
-                            notification_events.append((
-                                f"🛡️ *BREAK-EVEN ATTIVATO: RISCHIO AZZERATO*\n"
-                                f"────────────────────────\n"
-                                f"• *Contratto:* `{bsym}` [{bside}]\n"
-                                f"• *Ingresso:* `${entry_p:.4f}` &rarr; *Nuovo SL:* `${be_sl:.4f}`\n"
-                                f"• *Guadagno Fluttuante:* `${unrealized:+.2f}` ({pnl_pct:+.2f}%)\n"
-                                f"• *Garanzia:* Stop alzato a +0.20% netto a totale copertura delle commissioni di exchange."
-                            ))
-
-            # Scalino 3: +1.20% -> Profit Lock Intermedio (+0.60% netto)
-            elif 1.20 <= pnl_pct < 1.60:
-                lock_mid_sl = round(entry_p * 1.0060, 4) if bside == "BUY" else round(entry_p * 0.9940, 4)
-                if (bside == "BUY" and curr_sl < lock_mid_sl) or (bside == "SELL" and (curr_sl <= 0 or curr_sl > lock_mid_sl)):
-                    sl_res = bybit_service.update_stop_loss(bsym, lock_mid_sl)
-                    if isinstance(sl_res, dict) and "error" not in sl_res:
-                        print(f"💰 [Ratchet Stop Step 3] Spostato Stop Loss su {bsym} a +0.60% netto ({lock_mid_sl})!")
-                        if _POSITION_RISK_STAGE.get(bsym) != "LOCK_MID":
-                            _POSITION_RISK_STAGE[bsym] = "LOCK_MID"
-                            notification_events.append((
-                                f"💰 *PROFITTO INTERMEDIO GARANTITO (+0.60%)*\n"
-                                f"────────────────────────\n"
-                                f"• *Contratto:* `{bsym}` [{bside}]\n"
-                                f"• *Nuovo Stop:* `${lock_mid_sl:.4f}` (+0.60% Netto)\n"
-                                f"• *PnL Attuale:* `${unrealized:+.2f}` ({pnl_pct:+.2f}%)\n"
-                                f"• *Avanzamento:* Il trade corre verso il Take Profit istituzionale."
-                            ))
-
-            # Scalino 4: >= +1.60% -> Trailing Lock Pieno (+1.00% netto)
-            elif pnl_pct >= 1.60:
-                trail_sl = round(entry_p * 1.0100, 4) if bside == "BUY" else round(entry_p * 0.9900, 4)
-                if (bside == "BUY" and curr_sl < trail_sl) or (bside == "SELL" and (curr_sl <= 0 or curr_sl > trail_sl)):
-                    sl_res = bybit_service.update_stop_loss(bsym, trail_sl)
-                    if isinstance(sl_res, dict) and "error" not in sl_res:
-                        print(f"🚀 [Trailing Lock] Spostato Stop Loss su {bsym} a +1.00% netto ({trail_sl})!")
-                        if _POSITION_RISK_STAGE.get(bsym) != "LOCK_PROFIT":
-                            _POSITION_RISK_STAGE[bsym] = "LOCK_PROFIT"
-                            notification_events.append((
-                                f"🚀 *TRAILING PROFIT LOCK ATTIVATO*\n"
-                                f"────────────────────────\n"
-                                f"• *Contratto:* `{bsym}` [{bside}]\n"
-                                f"• *Nuovo Stop Garantito:* `${trail_sl:.4f}` (+1.00% Netto)\n"
-                                f"• *PnL Attuale:* `${unrealized:+.2f}` ({pnl_pct:+.2f}%)\n"
-                                f"• *Target R:R 1:3:* In corsa libera verso il Take Profit (+3.60%)."
-                            ))
-
-            # D. Target Istituzionale 1:3 (+3.60% TP / -1.20% SL)
-            if pnl_pct >= 3.60 or pnl_pct <= -1.20:
-                _cr = bybit_service.close_position(bsym)
-                if isinstance(_cr, dict) and "error" in _cr:
-                    print(f"[!] TP/SL: chiusura {bsym} non eseguita ({_cr['error']}), nessun journal/notifica.")
-                    continue
-                is_tp = pnl_pct >= 3.60
-                c_reason = "TAKE_PROFIT" if is_tp else "STOP_LOSS"
-                try:
-                    _risk_closed("BYBIT", unrealized)
-                    trade_journal_svc.record_exit(broker="BYBIT", symbol=bsym, exit_price=float(bp.get("current_price", 0.0) or entry_p), pnl_usd=unrealized, pnl_pct=pnl_pct, close_reason=c_reason)
-                except Exception as e_j:
-                    print(f"[!] Warning journal exit: {e_j}")
-                event_title = "🎯 *TAKE PROFIT RAGGIUNTO (+3.60%)*" if is_tp else "🛑 *STOP LOSS ESEGUITO (-1.20%)*"
-                notification_events.append((
-                    f"{event_title}\n"
-                    f"────────────────────────\n"
-                    f"• *Contratto:* `{bsym}` [{bside}]\n"
-                    f"• *Risultato Incassato:* `${unrealized:+.2f} USDT` ({pnl_pct:+.2f}%)\n"
-                    f"• *Gestione Disciplinata:* Esecuzione target 1:3 asimmetrico completata su Bybit."
-                ))
+            pos_df = _fetch_bybit_closed_ohlcv(bsym, None, "15", 15, limit=60)
+            atr_pct = _compute_closed_df_atr_pct(pos_df, fallback=1.0)
+            _apply_dynamic_ratchet_and_exits(
+                broker="BYBIT",
+                symbol=bsym,
+                side_norm=("LONG" if bside == "BUY" else "SHORT"),
+                entry_price=entry_p,
+                current_price=curr_p,
+                current_sl=curr_sl,
+                pnl_pct=pnl_pct,
+                unrealized_usd=unrealized,
+                notional_usd=notional_p,
+                atr_pct=atr_pct,
+                macro_bias=macro_bias,
+                stage_map=_POSITION_RISK_STAGE,
+                update_sl_fn=bybit_service.update_stop_loss,
+                close_fn=bybit_service.close_position,
+                bar_minutes=15,
+                adaptive_params=adaptive_params,
+                notification_events=notification_events,
+                macro_close_thresh=-0.10,
+            )
 
         # 3. Dynamic Capital Exposure & Flexible Position Sizing (Fino al 70% del Capitale Bybit)
         wallet = bybit_service.get_wallet_summary()
         bybit_equity = float(wallet.get("total_equity", 160000.0) or 160000.0)
-        
+
         _risk_observe("BYBIT", bybit_equity)
         bybit_positions = bybit_service.get_open_positions()
         active_bybit_syms = {bp["symbol"] for bp in bybit_positions}
-        
-        # Calcolo esposizione reale a mercato attuale (somma dei nozionali aperti)
-        current_invested_bybit = sum(float(bp.get("size", 0.0) or 0.0) * float(bp.get("entry_price", 0.0) or 0.0) for bp in bybit_positions)
-        max_allowed_exposure_bybit = bybit_equity * 0.70  # Fino al 70% dell'equity
-        available_risk_budget_bybit = max(0.0, max_allowed_exposure_bybit - current_invested_bybit)
-        
-        # Sizing a pieno carico (10% dell'equity per trade, max $30,000, o budget residuo se capiente)
-        dynamic_notional = round(max(3000.0, min(bybit_equity * 0.10, available_risk_budget_bybit)), 0)
 
-        # Screening ingressi flessibili A+ (Oltre 3 trade contemporanei, fino al cap del 70% del capitale)
-        if available_risk_budget_bybit >= 3000.0 and macro_bias in ["BULLISH", "BEARISH", "NEUTRAL"]:
+        current_invested_bybit = sum(float(bp.get("size", 0.0) or 0.0) * float(bp.get("entry_price", 0.0) or 0.0) for bp in bybit_positions)
+        max_allowed_exposure_bybit = bybit_equity * 0.70
+        available_risk_budget_bybit = max(0.0, max_allowed_exposure_bybit - current_invested_bybit)
+        base_notional = round(min(max(1000.0, bybit_equity * 0.10), available_risk_budget_bybit), 0)
+        max_conc = _get_max_concurrent_trades()
+
+        # Screening ingressi multi-engine (fino al cap 70% ed a RiskConfig.max_concurrent_trades)
+        if available_risk_budget_bybit >= 1000.0 and macro_bias in ["BULLISH", "BEARISH", "NEUTRAL"]:
             bybit_candidates = [
                 ("SOLUSDT", "SOL-USD", "Solana"),
                 ("BTCUSDT", "BTC-USD", "Bitcoin"),
@@ -3738,316 +4337,50 @@ def _sync_crypto_risk_and_screening():
                 ("ADAUSDT", "ADA-USD", "Cardano"),
                 ("SUIUSDT", "SUI-USD", "Sui"),
                 ("NEARUSDT", "NEAR-USD", "Near Protocol"),
-                ("DOGEUSDT", "DOGE-USD", "Dogecoin")
+                ("DOGEUSDT", "DOGE-USD", "Dogecoin"),
             ]
 
-            # 1. Recupera Tickers Bybit per estrarre Funding Rate e Variazione 24h (Alpha vs BTC)
-            ticker_data_map = {}
+            ticker_data_map: Dict[str, Dict[str, float]] = {}
             btc_24h_change = 0.0
             try:
                 t_res = bybit_service.session.get_tickers(category="linear")
-                t_list = t_res.get("result", {}).get("list", [])
+                t_list = t_res.get("result", {}).get("list", []) if isinstance(t_res, dict) else []
                 for t_item in t_list:
                     sym = t_item.get("symbol")
+                    bid_p = float(t_item.get("bid1Price", 0.0) or 0.0)
+                    ask_p = float(t_item.get("ask1Price", 0.0) or 0.0)
                     ticker_data_map[sym] = {
                         "funding_rate_pct": float(t_item.get("fundingRate", 0.0) or 0.0) * 100.0,
-                        "change_24h_pct": float(t_item.get("price24hPcnt", 0.0) or 0.0) * 100.0
+                        "change_24h_pct": float(t_item.get("price24hPcnt", 0.0) or 0.0) * 100.0,
+                        "spread_bps": compute_spread_bps(bid_p, ask_p) if (bid_p > 0.0 and ask_p > 0.0) else 0.0,
                     }
                 btc_24h_change = ticker_data_map.get("BTCUSDT", {}).get("change_24h_pct", 0.0)
             except Exception as e_t:
                 print(f"[!] Warning recupero tickers funding/alpha: {e_t}")
 
-            # 2. Ordina i candidati in base alla Forza Relativa (Alpha vs BTC):
-            # Se siamo in ottica Long/Neutral, privilegia le coin con maggior Alpha (più forti di BTC); se Bearish, quelle più deboli
             def _rank_candidate(cand):
-                c_sym = cand[0]
-                c_alpha = ticker_data_map.get(c_sym, {}).get("change_24h_pct", 0.0) - btc_24h_change
+                c_alpha = ticker_data_map.get(cand[0], {}).get("change_24h_pct", 0.0) - btc_24h_change
                 return -c_alpha if macro_bias in ["BULLISH", "NEUTRAL"] else c_alpha
 
-            sorted_candidates = sorted(bybit_candidates, key=_rank_candidate)
-
-            for b_sym, b_yf, b_name in sorted_candidates:
-                if b_sym in active_bybit_syms or len(active_bybit_syms) >= 3:
+            for b_sym, b_yf, b_name in sorted(bybit_candidates, key=_rank_candidate):
+                if b_sym in active_bybit_syms or len(active_bybit_syms) >= max_conc:
                     continue
                 try:
-                    import yfinance as yf
-                    import pandas as pd
-                    from services.indicators_safe import wilder_rsi, atr_wilder, drop_forming_bar
-                    df = None
-                    try:
-                        # Klines 15m dai perpetual Bybit (stessa fonte prezzi degli ordini)
-                        kl = bybit_service.session.get_kline(category="linear", symbol=b_sym, interval="15", limit=300)
-                        kl_list = kl.get("result", {}).get("list", [])
-                        if kl_list and len(kl_list) >= 40:
-                            df = pd.DataFrame(list(reversed(kl_list)), columns=["start", "Open", "High", "Low", "Close", "Volume", "turnover"])
-                            for _col in ["Open", "High", "Low", "Close", "Volume"]:
-                                df[_col] = df[_col].astype(float)
-                            df.index = pd.to_datetime(df["start"].astype("int64"), unit="ms", utc=True)
-                            df = drop_forming_bar(df, 15)
-                    except Exception as e_kl:
-                        print(f"[!] Warning klines Bybit {b_sym}, fallback yfinance: {e_kl}")
-                        df = None
-                    if df is None or df.empty:
-                        df = yf.download(b_yf, period="3d", interval="15m", progress=False)
-                        if not df.empty:
-                            if hasattr(df.columns, "levels") and len(df.columns.levels) > 1:
-                                df.columns = df.columns.get_level_values(0)
-                            df = drop_forming_bar(df, 15)
-                    if df.empty or len(df) < 35:
-                        continue
-                    close = df["Close"].iloc[:, 0] if isinstance(df["Close"], pd.DataFrame) else df["Close"]
-                    rsi = float(wilder_rsi(close, 14).iloc[-1])
-                    ema20 = float(close.ewm(span=20, adjust=False).mean().iloc[-1])
-                    ema50 = float(close.ewm(span=50, adjust=False).mean().iloc[-1])
-                    last_c = float(close.iloc[-1])
-
-                    vol = df["Volume"].iloc[:, 0] if isinstance(df["Volume"], pd.DataFrame) else df["Volume"]
-                    avg_vol = float(vol.rolling(20).mean().iloc[-1] or 1.0)
-                    last_vol = float(vol.iloc[-1] or 0.0)
-                    vol_ratio = last_vol / (avg_vol + 1e-5)
-
-                    high = df['High'].iloc[:, 0] if isinstance(df['High'], pd.DataFrame) else df['High']
-                    low = df['Low'].iloc[:, 0] if isinstance(df['Low'], pd.DataFrame) else df['Low']
-                    or_high = float(high.iloc[-5:-1].max())
-                    or_low = float(low.iloc[-5:-1].min())
-
-                    # Dati di Funding Rate & Alpha vs BTC
                     c_info = ticker_data_map.get(b_sym, {})
-                    c_funding = c_info.get("funding_rate_pct", 0.0)
-                    c_alpha = c_info.get("change_24h_pct", 0.0) - btc_24h_change
-
-                    # Calcolo ATR Dinamico (Average True Range a 14 periodi) per tarare Stop Loss e Take Profit
-                    atr = float(atr_wilder(high, low, close, 14).iloc[-1] or (last_c * 0.01))
-                    atr_pct = (atr / last_c) * 100
-                    
-                    # Stop Loss calibrato su 1.4x ATR (minimo 0.90%, massimo 1.80%)
-                    dynamic_sl_pct = round(max(0.90, min(1.80, atr_pct * 1.4)), 2)
-                    # Take Profit calibrato con Rapporto Aureo Istituzionale 1:3
-                    dynamic_tp_pct = round(dynamic_sl_pct * 3.0, 2)
-
-                    # Estrai la diagnostica ciclica profonda (Hurst FLD e Battleplan 1H)
-                    forecast_check = {}
-                    try:
-                        from services.deep_trade_analysis_service import get_deep_trade_forecast
-                        forecast_check = get_deep_trade_forecast(b_sym, tf="1h")
-                    except Exception as e_fc:
-                        print(f"[!] Warning verifica ciclica forecast: {e_fc}")
-
-                    cycle_data = forecast_check.get("cycle", {})
-                    vincolo_migliorino = cycle_data.get("vincolo_migliorino", "LIBERO")
-                    tempo_battleplan = cycle_data.get("tempo_battleplan", "")
-                    hurst_fld = float(cycle_data.get("hurst_fld_value", 0.0) or 0.0)
-
-                    # 1. KILL-ZONE SESSION FILTER (Fasce Orarie Istituzionali):
-                    # Europa (08:00 - 12:00 CET) e USA (14:30 - 21:30 CET) = Finestre ad alto volume
-                    # Notte (00:00 - 07:00 CET) = Finestra a bassa liquidità: selettività rigorosa
-                    from datetime import datetime
-                    from zoneinfo import ZoneInfo
-                    rome_hour = datetime.now(ZoneInfo("Europe/Rome")).hour
-                    is_overnight_low_vol = (0 <= rome_hour < 7)
-
-                    # LEZIONE APPRESA DAL POST-MORTEM HISTORICAL JOURNAL:
-                    # Nei trade notturni (00:00-07:00) si concentrano i fakeout da spread allargato e volumi sottili (PnL -343$).
-                    # Adeguamento: nella fascia notturna eleviamo il filtro volumi a 1.70x e inibiamo breakout fragili.
-                    min_vol_required = 1.70 if is_overnight_low_vol else 1.10
-                    if vol_ratio < min_vol_required:
-                        if is_overnight_low_vol:
-                            print(f"🛡️ [Anti-Fakeout Notturno] {b_sym} scartato: volume {vol_ratio:.2f}x inferiore alla soglia blindata notturna (1.70x).")
-                        continue
-
-                    # 2. CUMULATIVE VOLUME DELTA (CVD) - Flusso Ordini Aggressivi
-                    cvd_info = bybit_service.get_cumulative_volume_delta(b_sym, limit=50)
-                    cvd_bias = cvd_info.get("bias", "NEUTRAL")
-                    cvd_ratio = cvd_info.get("ratio", 1.0)
-
-                    # Regole di ammissibilità Direzionale con Filtro Ciclico di Hurst & Migliorino (Anti-Fakeout):
-                    # Se il macro trend 4H non è esplicitamente rialzista, i LONG richiedono sia 1°/2° tempo ciclico SIA prezzo > FLD (congiunzione stretta AND, non OR)
-                    allow_short = (macro_bias == "BEARISH") or (macro_bias == "NEUTRAL" and ("3° TEMPO" in tempo_battleplan.upper() or "4° TEMPO" in tempo_battleplan.upper()) and last_c < hurst_fld)
-                    allow_long = (macro_bias == "BULLISH") or (macro_bias == "NEUTRAL" and ("1° TEMPO" in tempo_battleplan.upper() or "2° TEMPO" in tempo_battleplan.upper()) and last_c > hurst_fld)
-
-                    # INGRESSO SHORT (Ammesso se consentito dal Macro Bias, Ciclica e Flusso CVD)
-                    if allow_short and (last_c < or_low) and (last_c < ema20 < ema50) and (rsi < 48) and (vol_ratio >= min_vol_required):
-                        # Filtro CVD (Adattato con Machine Learning Post-Mortem):
-                        # Se compratori assorbono o se di notte il CVD non conferma netta pressione venditrice, evita lo short
-                        max_cvd_ratio_short = 1.05 if is_overnight_low_vol else 1.25
-                        if cvd_bias == "BULLISH" or cvd_ratio > max_cvd_ratio_short:
-                            print(f"🛡️ [CVD Shield Short] {b_sym} presenta assorbimento compratori (Ratio: {cvd_ratio:.2f} > {max_cvd_ratio_short}). Evitato short in trappola.")
-                            continue
-                        # Filtro Squeeze Funding Rate: Evita di shortare asset con funding iper-negativo (rischio short squeeze violento)
-                        if c_funding < -0.030:
-                            print(f"🛡️ [Funding Shield Short] {b_sym} presenta Funding iper-negativo ({c_funding:+.4f}%). Rischio Short Squeeze, trade scartato.")
-                            continue
-
-                        # Convalida Microstruttura del Book (Order Book Imbalance)
-                        try:
-                            obi = bybit_service.get_orderbook_imbalance(b_sym)
-                            if obi.get("bias") == "BUY_WALL" and obi.get("imbalance", 0) > 0.40:
-                                print(f"🛡️ [OBI Shield Short] {b_sym} presenta muri di acquisto sul book (Imbalance: {obi['imbalance']:+.2f}). Evitato short sul supporto.")
-                                continue
-                        except Exception as e_obi:
-                            print(f"[!] Warning verifica OBI: {e_obi}")
-
-                        # Se il ciclo è esplicitamente vincolato al rialzo o in spinta d'inizio ciclo (1° Quarto), proteggi il capitale
-                        # NB: "RIALZISTA FORZATO" non viene mai prodotto da HurstMigliorinoCycleService (ramo morto, lasciato per compatibilita')
-                        if "RIALZISTA FORZATO" in vincolo_migliorino.upper() or "1° TEMPO" in tempo_battleplan.upper():
-                            print(f"⚠️ [Filtro Ciclico Ignorato Short] {b_sym} in inizio ciclo/spinta rialzista ({tempo_battleplan}). Short evitato.")
-                            continue
-
-                        # Filtro Fondamentale & Sentiment dalla Sentinella
-                        sentinel_data = sentinel_svc.get_asset_fundamental_sentiment(b_sym)
-                        if sentinel_data.get("sentiment") == "BULLISH" and sentinel_data.get("has_political_interest"):
-                            print(f"🛡️ [Sentinel Shield Short] {b_sym} presenta catalizzatore rialzista / acquisto istituzionale: {sentinel_data.get('reasons')}. Short evitato.")
-                            continue
-
-                        print(f"📉 [Setup A+ SHORT Confluente] {b_sym} (Macro: {macro_bias}, Ciclo: {tempo_battleplan}, Funding: {c_funding:+.4f}%, Alpha: {c_alpha:+.2f}%, RSI: {rsi:.1f}, VolRatio: {vol_ratio:.2f}x, ATR-SL: {dynamic_sl_pct}%). Ordine dinamico ${dynamic_notional:,.0f}...")
-                        _gate_ok, _gate_scale = _meta_gate_check(b_sym, df, -1)
-                        if not _gate_ok:
-                            continue
-                        if _gate_scale < 1.0:
-                            dynamic_notional *= _gate_scale
-                        if _has_open_position(b_sym):
-                            print(f"[Race Guard] {b_sym}: posizione gia' aperta, ordine {'LONG' if False else 'SHORT'} saltato.")
-                            continue
-                        if not _risk_gate("BYBIT", b_sym, bybit_equity,
-                                          [{"entry_price": bp.get("entry_price"), "size": bp.get("size"), "stop_loss": bp.get("stop_loss")} for bp in bybit_positions],
-                                          last_c, last_c * (1 + dynamic_sl_pct / 100.0), last_c * (1 - dynamic_tp_pct / 100.0), dynamic_notional, notification_events, is_notional=True):
-                            continue
-                        order_res = bybit_service.place_order(b_sym, side="Sell", notional_usd=dynamic_notional, take_profit_pct=dynamic_tp_pct, stop_loss_pct=dynamic_sl_pct, order_link_id=make_order_link_id(b_sym, "S", df.index[-1]))
-                        if order_res.get("duplicate"):
-                            print(f"[Idempotenza] {b_sym}: orderLinkId gia' usato per questa barra, ordine saltato.")
-                            continue
-                        if "error" not in order_res:
-                            _risk_opened("BYBIT", bybit_equity)
-                            # Registra nel Trade Journal
-                            try:
-                                trade_journal_svc.record_entry(
-                                    broker="BYBIT",
-                                    symbol=b_sym,
-                                    side="SHORT",
-                                    entry_price=float(order_res.get("price") or last_c),
-                                    notional_usd=dynamic_notional,
-                                    context={
-                                        "macro_bias": macro_bias,
-                                        "cycle_tempo": tempo_battleplan,
-                                        "hurst_fld": hurst_fld,
-                                        "funding_rate": c_funding,
-                                        "alpha_btc": c_alpha,
-                                        "cvd_ratio": cvd_ratio,
-                                        "rsi": round(rsi, 1),
-                                        "vol_ratio": round(vol_ratio, 2),
-                                        "sentinel_sentiment": sentinel_data.get("sentiment"),
-                                        "sentinel_reasons": sentinel_data.get("reasons", [])
-                                    }
-                                )
-                            except Exception as e_j:
-                                print(f"[!] Warning trade journal entry: {e_j}")
-
-                            boost_txt = f"\n• *Sentinella Macro/News:* `{sentinel_data.get('sentiment')}` ({', '.join(sentinel_data.get('reasons', ['Allineato']))})" if sentinel_data.get("reasons") else ""
-                            notification_events.append((
-                                f"🔻 *NUOVO ORDINE SHORT APERTO (SETUP A+)*\n"
-                                f"────────────────────────\n"
-                                f"• *Asset:* `{b_sym}` ({b_name})\n"
-                                f"• *Notionale Dinamico (Cap 70%):* `${dynamic_notional:,.0f}`\n"
-                                f"• *Macro Regime:* `{macro_bias}` | *Ciclica 1H:* `{tempo_battleplan or 'Allineata'}`\n"
-                                f"• *Derivati & Alpha:* Funding `{c_funding:+.4f}%` | Alpha BTC `{c_alpha:+.2f}%`\n"
-                                f"• *Target R:R 1:3 ATR:* Take Profit +{dynamic_tp_pct:.2f}% | Stop Loss -{dynamic_sl_pct:.2f}%{boost_txt}\n"
-                                f"• *Confluenza:* OBI Confermato, FLD Hurst, Sentinella e Squeeze Shield attivi."
-                            ))
-                        # Scala budget residuo per consentire trade multipli fino al cap del 70%
-                        available_risk_budget_bybit -= dynamic_notional
-                        if available_risk_budget_bybit < 3000.0:
-                            break
-
-                    # INGRESSO LONG (Ammesso se consentito dal Macro Bias, Ciclica e Flusso CVD)
-                    elif allow_long and (last_c > or_high) and (last_c > ema20 > ema50) and (rsi > 52) and (vol_ratio >= min_vol_required):
-                        # Filtro CVD (Adattato con Machine Learning Post-Mortem):
-                        # Se venditori scaricano o se di notte il CVD non conferma netta spinta compratrice, evita il long
-                        min_cvd_ratio_long = 1.15 if is_overnight_low_vol else 0.75
-                        if cvd_bias == "BEARISH" or cvd_ratio < min_cvd_ratio_long:
-                            print(f"🛡️ [CVD Shield Long] {b_sym} presenta scarico venditori (Ratio: {cvd_ratio:.2f} < {min_cvd_ratio_long}). Evitato long su fakeout.")
-                            continue
-                        # Filtro Squeeze Funding Rate: Evita di comprare asset con funding iper-positivo (rischio long squeeze/flush)
-                        if c_funding > 0.035:
-                            print(f"🛡️ [Funding Shield Long] {b_sym} presenta Funding iper-positivo ({c_funding:+.4f}%). Rischio Long Squeeze, trade scartato.")
-                            continue
-
-                        # Convalida Microstruttura del Book (Order Book Imbalance)
-                        try:
-                            obi = bybit_service.get_orderbook_imbalance(b_sym)
-                            if obi.get("bias") == "SELL_WALL" and obi.get("imbalance", 0) < -0.40:
-                                print(f"🛡️ [OBI Shield Long] {b_sym} presenta muri di vendita sul book (Imbalance: {obi['imbalance']:+.2f}). Evitato long sulla resistenza.")
-                                continue
-                        except Exception as e_obi:
-                            print(f"[!] Warning verifica OBI: {e_obi}")
-
-                        # Se il ciclo è vincolato al ribasso o è in 4° tempo (fase terminale di esaurimento), evita di comprare sui massimi
-                        if "RIBASSISTA" in vincolo_migliorino.upper():
-                            print(f"⚠️ [Filtro Ciclico Ignorato Long] {b_sym} ha vincolo ciclico ribassista in corso. Trade scartato.")
-                            continue
-
-                        # Filtro Fondamentale & Sentiment dalla Sentinella
-                        sentinel_data = sentinel_svc.get_asset_fundamental_sentiment(b_sym)
-                        if sentinel_data.get("sentiment") == "BEARISH":
-                            print(f"🛡️ [Sentinel Shield Long] {b_sym} presenta news flow avverso / downgrade: {sentinel_data.get('reasons')}. Long evitato.")
-                            continue
-
-                        print(f"📈 [Setup A+ LONG Confluente] {b_sym} (Macro: {macro_bias}, Ciclo: {tempo_battleplan}, Funding: {c_funding:+.4f}%, Alpha: {c_alpha:+.2f}%, RSI: {rsi:.1f}, VolRatio: {vol_ratio:.2f}x, ATR-SL: {dynamic_sl_pct}%). Ordine dinamico ${dynamic_notional:,.0f}...")
-                        _gate_ok, _gate_scale = _meta_gate_check(b_sym, df, 1)
-                        if not _gate_ok:
-                            continue
-                        if _gate_scale < 1.0:
-                            dynamic_notional *= _gate_scale
-                        if _has_open_position(b_sym):
-                            print(f"[Race Guard] {b_sym}: posizione gia' aperta, ordine {'LONG' if True else 'SHORT'} saltato.")
-                            continue
-                        if not _risk_gate("BYBIT", b_sym, bybit_equity,
-                                          [{"entry_price": bp.get("entry_price"), "size": bp.get("size"), "stop_loss": bp.get("stop_loss")} for bp in bybit_positions],
-                                          last_c, last_c * (1 - dynamic_sl_pct / 100.0), last_c * (1 + dynamic_tp_pct / 100.0), dynamic_notional, notification_events, is_notional=True):
-                            continue
-                        order_res = bybit_service.place_order(b_sym, side="Buy", notional_usd=dynamic_notional, take_profit_pct=dynamic_tp_pct, stop_loss_pct=dynamic_sl_pct, order_link_id=make_order_link_id(b_sym, "L", df.index[-1]))
-                        if order_res.get("duplicate"):
-                            print(f"[Idempotenza] {b_sym}: orderLinkId gia' usato per questa barra, ordine saltato.")
-                            continue
-                        if "error" not in order_res:
-                            _risk_opened("BYBIT", bybit_equity)
-                            # Registra nel Trade Journal
-                            try:
-                                trade_journal_svc.record_entry(
-                                    broker="BYBIT",
-                                    symbol=b_sym,
-                                    side="LONG",
-                                    entry_price=float(order_res.get("price") or last_c),
-                                    notional_usd=dynamic_notional,
-                                    context={
-                                        "macro_bias": macro_bias,
-                                        "cycle_tempo": tempo_battleplan,
-                                        "hurst_fld": hurst_fld,
-                                        "funding_rate": c_funding,
-                                        "alpha_btc": c_alpha,
-                                        "cvd_ratio": cvd_ratio,
-                                        "rsi": round(rsi, 1),
-                                        "vol_ratio": round(vol_ratio, 2),
-                                        "sentinel_sentiment": sentinel_data.get("sentiment"),
-                                        "sentinel_reasons": sentinel_data.get("reasons", [])
-                                    }
-                                )
-                            except Exception as e_j:
-                                print(f"[!] Warning trade journal entry: {e_j}")
-
-                            boost_txt = f"\n• *Sentinella Macro/News:* `{sentinel_data.get('sentiment')}` ({', '.join(sentinel_data.get('reasons', ['Allineato']))})" if sentinel_data.get("reasons") else ""
-                            notification_events.append((
-                                f"🟢 *NUOVO ORDINE LONG APERTO (SETUP A+)*\n"
-                                f"────────────────────────\n"
-                                f"• *Asset:* `{b_sym}` ({b_name})\n"
-                                f"• *Notionale Dinamico (Cap 70%):* `${dynamic_notional:,.0f}`\n"
-                                f"• *Macro Regime:* `{macro_bias}` | *Ciclica 1H:* `{tempo_battleplan or 'Allineata'}`\n"
-                                f"• *Derivati & Alpha:* Funding `{c_funding:+.4f}%` | Alpha BTC `{c_alpha:+.2f}%`\n"
-                                f"• *Target R:R 1:3 ATR:* Take Profit +{dynamic_tp_pct:.2f}% | Stop Loss -{dynamic_sl_pct:.2f}%{boost_txt}\n"
-                                f"• *Confluenza:* OBI Confermato, FLD Hurst, Sentinella e Squeeze Shield attivi."
-                            ))
-                        # Scala budget residuo per consentire trade multipli fino al cap del 70%
-                        available_risk_budget_bybit -= dynamic_notional
-                        if available_risk_budget_bybit < 3000.0:
+                    c_funding = float(c_info.get("funding_rate_pct", 0.0) or 0.0)
+                    c_alpha = float(c_info.get("change_24h_pct", 0.0) or 0.0) - btc_24h_change
+                    c_spread_bps = float(c_info.get("spread_bps", 0.0) or 0.0)
+                    spent = _evaluate_and_trade_bybit_candidate(
+                        b_sym=b_sym, b_yf=b_yf, b_name=b_name, macro_bias=macro_bias,
+                        c_funding=c_funding, c_alpha=c_alpha, spread_bps=c_spread_bps,
+                        bybit_equity=bybit_equity, base_notional=base_notional,
+                        available_budget=available_risk_budget_bybit, bybit_positions=bybit_positions,
+                        adaptive_params=adaptive_params, notification_events=notification_events,
+                    )
+                    if spent > 0.0:
+                        active_bybit_syms.add(b_sym)
+                        available_risk_budget_bybit = max(0.0, available_risk_budget_bybit - spent)
+                        if available_risk_budget_bybit < 1000.0:
                             break
                 except Exception as ex:
                     print(f"[!] Errore screening {b_sym}: {ex}")
@@ -4202,6 +4535,131 @@ async def lab_log_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         await _lab_reply(update, f"Errore lab_log: {e}")
 
+def _learning_ohlcv_fetcher(
+    broker: str,
+    symbol: str,
+    start_iso: Optional[str] = None,
+    end_iso: Optional[str] = None,
+    interval: str = "15m",
+    limit: int = 120,
+):
+    """Fornisce candele chiuse (Bybit/yfinance) per la valutazione MFE/MAE & shadow forward simulation."""
+    tf_map = {"15m": ("15", 15), "1h": ("60", 60), "4h": ("240", 240)}
+    interval_str, interval_min = tf_map.get(str(interval or "15m").lower(), ("15", 15))
+    broker_u = str(broker or "").strip().upper()
+    sym_u = str(symbol or "").strip().upper()
+
+    if broker_u == "BYBIT":
+        yf_sym = f"{sym_u[:-4]}-USD" if sym_u.endswith("USDT") else sym_u
+        return _fetch_bybit_closed_ohlcv(sym_u, yf_sym, interval_str, interval_min, limit=max(120, int(limit or 120)))
+
+    try:
+        import yfinance as yf
+        yf_int = "15m" if interval_min == 15 else "1h"
+        yf_period = "1mo" if yf_int == "15m" else "3mo"
+        raw_df = yf.download(sym_u, period=yf_period, interval=yf_int, progress=False)
+        if raw_df is not None and not raw_df.empty:
+            if hasattr(raw_df.columns, "levels") and len(raw_df.columns.levels) > 1:
+                raw_df.columns = raw_df.columns.get_level_values(0)
+            return prepare_closed_bars(raw_df, interval_minutes=interval_min)
+    except Exception:
+        pass
+    return None
+
+
+async def learning_eval_job(application: Any = None):
+    """Job periodico (30m): valuta MFE/MAE dei trade chiusi, shadow pendenti e controlla drift MetaGate."""
+    try:
+        def _run_eval():
+            eval_res = learning_engine.run_evaluation_cycle(_learning_ohlcv_fetcher, db_path=trade_journal_svc.db_path)
+            summary = learning_engine.get_learning_dashboard_summary(
+                db_path=trade_journal_svc.db_path, meta_gate_path=os.getenv("QUANT_META_GATE_PATH"),
+            )
+            return eval_res, summary
+
+        eval_res, summary = await asyncio.to_thread(_run_eval)
+        qd = summary.get("quant_drift", {}) if isinstance(summary, dict) else {}
+        rs = summary.get("real_stats", {}) if isinstance(summary, dict) else {}
+        if qd.get("active"):
+            brier_val = qd.get("brier")
+            base_rate = qd.get("base_rate")
+            real_wr = (float(rs.get("win_rate", 0.0) or 0.0) / 100.0) if int(rs.get("total", 0) or 0) >= 15 else None
+            if not qd.get("deployable") or (brier_val is not None and float(brier_val) > 0.25) or (
+                real_wr is not None and base_rate is not None and abs(real_wr - float(base_rate)) > 0.20
+            ):
+                print(f"⚠️ [MetaGate Brier Drift] Warning calibrazione/drift: {qd}")
+        print(f"🧠 [Learning Eval] Ciclo completato: {eval_res}")
+        return eval_res
+    except Exception as e:
+        print(f"[!] Errore learning_eval_job: {e}")
+        return {}
+
+
+async def weekly_learning_audit_job(application: Any = None):
+    """Job settimanale (Domenica 20:00 CET): genera report learning netto fee e lo invia via Telegram HTML."""
+    try:
+        _, summary_text = await asyncio.to_thread(learning_engine.build_weekly_learning_report, trade_journal_svc.db_path)
+        bot = getattr(application, "bot", None)
+        if bot is not None:
+            html_msg = f"<b>🧠 WEEKLY LEARNING AUDIT</b>\n<pre>{html.escape(str(summary_text))}</pre>"
+            for cid in _resolve_learning_chat_ids():
+                try:
+                    await bot.send_message(chat_id=cid, text=html_msg, parse_mode="HTML")
+                except Exception:
+                    try:
+                        await bot.send_message(chat_id=cid, text=str(summary_text))
+                    except Exception:
+                        pass
+        return summary_text
+    except Exception as e:
+        print(f"[!] Errore weekly_learning_audit_job: {e}")
+        return ""
+
+
+async def learning_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handler interattivo /learning e /audit con verifica chat autorizzata e output HTML sicuro."""
+    target_msg = get_target_msg(update)
+    if not _is_chat_authorized(update):
+        await target_msg.reply_text("⛔ Accesso non autorizzato a questo comando.")
+        return
+    try:
+        summary = await asyncio.to_thread(
+            learning_engine.get_learning_dashboard_summary,
+            trade_journal_svc.db_path,
+            os.getenv("QUANT_META_GATE_PATH"),
+        )
+        rs = summary.get("real_stats", {})
+        sh = summary.get("shadow_stats", {})
+        ef = summary.get("exit_frontier", {})
+        qd = summary.get("quant_drift", {})
+        allocs = summary.get("context_allocations", [])[:5]
+        engines = summary.get("engines_breakdown", {})
+
+        lines = [
+            "<b>🧠 MARKET SENTINEL — LEARNING ENGINE</b>",
+            f"• <b>Trade Reali:</b> <code>{int(rs.get('total', 0))}</code> | WR <code>{float(rs.get('win_rate', 0.0)):.1f}%</code> | PF Netto <code>{float(rs.get('profit_factor_net', 0.0)):.2f}</code>",
+            f"• <b>Expectancy Netta:</b> <code>{float(rs.get('expectancy_r', 0.0)):+.3f}R</code> (<code>${float(rs.get('expectancy_usd', 0.0)):+.2f}</code>/trade) | Fee <code>${float(rs.get('total_fees_usd', 0.0)):.2f}</code>",
+            f"• <b>Path MFE/MAE:</b> MFE <code>+{float(rs.get('avg_mfe_pct', 0.0)):.2f}%</code> | MAE <code>{float(rs.get('avg_mae_pct', 0.0)):.2f}%</code> | CapEff <code>{float(rs.get('avg_capture_eff', 0.0)):.2f}</code> | Edge <code>{float(rs.get('avg_edge_ratio', 0.0)):.2f}</code>",
+            f"• <b>Shadow Signals:</b> <code>{int(sh.get('evaluated', 0))}</code> eval (<code>{int(sh.get('pending', 0))}</code> pending) | WR <code>{float(sh.get('shadow_win_rate', 0.0)):.1f}%</code> | Exp <code>{float(sh.get('shadow_expectancy_r', 0.0)):+.3f}R</code>",
+            f"• <b>Exit Frontier:</b> <code>{'APPROVATA' if ef.get('approved') else 'IN ATTESA'}</code> (N={int(ef.get('n_samples', 0))}, LCB <code>{float(ef.get('best_lcb_r', 0.0)):+.3f}R</code>) — {html.escape(str(ef.get('reason', '')))}",
+            f"• <b>MetaGate Drift:</b> <code>{'ATTIVO' if qd.get('active') else 'OFF'}</code> | Deployable <code>{bool(qd.get('deployable', False))}</code> ({html.escape(str(qd.get('verdict', '')))})",
+        ]
+        if engines:
+            eng_parts = [f"<code>{html.escape(str(k))}</code>: {int(v.get('total', 0))}t ({float(v.get('expectancy_r', 0.0)):+.2f}R)" for k, v in engines.items()]
+            lines.append("• <b>Motori:</b> " + " | ".join(eng_parts))
+        if allocs:
+            lines.append("• <b>Top Context Allocator:</b>")
+            for a in allocs:
+                lines.append(
+                    f"  - <code>{html.escape(str(a.get('context_key', '')))}</code> → <b>{html.escape(str(a.get('mode', 'STANDARD')))}</b> ({float(a.get('scale', 1.0)):.2f}x, N_eff={float(a.get('n_eff', 0.0)):.1f})"
+                )
+        msg_html = "\n".join(lines)
+        try:
+            await target_msg.reply_text(msg_html, parse_mode="HTML")
+        except Exception:
+            await target_msg.reply_text(re.sub(r"<[^>]+>", "", msg_html))
+    except Exception as e:
+        await target_msg.reply_text(f"⚠️ Errore lettura learning summary: {e}")
 
 async def post_init(application):
     """Configura il menu dei comandi nativo di Telegram con i soli comandi effettivamente usati e pertinenti."""
@@ -4214,6 +4672,7 @@ async def post_init(application):
         BotCommand("pelosi", "🏛️ Trades Capitol Hill & Congress Tracker"),
         BotCommand("occasioni", "💎 Top occasioni a forte sconto"),
         BotCommand("sentinel", "🛡️ Stato radar sentinella proattiva 24/7"),
+        BotCommand("learning", "🧠 Metriche learning, MFE/MAE & allocator"),
         BotCommand("help", "ℹ️ Guida alle funzioni e comandi del bot"),
         BotCommand("lab", "🧪 Lab paper trading: scorecard strategie")
     ]
@@ -4302,6 +4761,22 @@ async def post_init(application):
                 id="lab_weekly_review",
                 replace_existing=True
             )
+        # Ciclo apprendimento causale MFE/MAE & Shadow Forward ogni 30 minuti
+        scheduler.add_job(
+            learning_eval_job,
+            IntervalTrigger(minutes=30),
+            args=[application],
+            id="learning_eval_30min",
+            replace_existing=True
+        )
+        # Audit settimanale learning netto commissioni (Domenica 20:00 CET)
+        scheduler.add_job(
+            weekly_learning_audit_job,
+            CronTrigger(day_of_week="sun", hour=20, minute=0, timezone="Europe/Rome"),
+            args=[application],
+            id="weekly_learning_audit_sun20",
+            replace_existing=True
+        )
         scheduler.start()
         application.bot_data["briefing_scheduler"] = scheduler
         print("⏰ [Scheduler] Programmato: Briefing 07:00 / 15:00 CET | Watchdog Sentinella ogni 20 minuti!")
@@ -4576,6 +5051,8 @@ def main():
     app.add_handler(CommandHandler("petrolio", commodities_cmd))
     app.add_handler(CommandHandler("profilo", profile_cmd))
     app.add_handler(CommandHandler("memoria", memoria_cmd))
+    app.add_handler(CommandHandler("learning", learning_command))
+    app.add_handler(CommandHandler("audit", learning_command))
     app.add_handler(CommandHandler("add", add_cmd))
     app.add_handler(CommandHandler("lab", lab_cmd))
     app.add_handler(CommandHandler("lab_log", lab_log_cmd))
