@@ -2661,10 +2661,85 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 : '3.0x SL (1:3)';
 
             const tpDenom = baseTpPct !== null && baseTpPct > 0 ? baseTpPct : (refSl * 3.0);
+            const slDenom = refSl > 0 ? refSl : 1.40;
+            const totalSpan = slDenom + tpDenom;
+            const entryPos = (slDenom / totalSpan) * 100;
+            const currentPos = Math.max(0, Math.min(100, ((pnlPct + slDenom) / totalSpan) * 100));
+            const fillLeft = pnlPct >= 0 ? entryPos : currentPos;
+            const fillWidth = Math.abs(currentPos - entryPos);
             const tpProgress = Math.max(0, Math.min(100, (pnlPct / tpDenom) * 100));
-            const progressColor = pnlPct >= maxTrig ? 'var(--apple-amber)' : (pnlPct > 0 ? 'var(--apple-green)' : 'var(--apple-red)');
+            const progressColor = pnlPct >= maxTrig ? 'var(--apple-amber)' : (pnlPct >= 0 ? 'var(--apple-green)' : 'var(--apple-red)');
 
-            return { guardHtml, slText, tpText, tpProgress, progressColor };
+            const toBarPos = (pct) => Math.max(0, Math.min(100, ((pct + slDenom) / totalSpan) * 100));
+            const milestones = [
+                { pos: toBarPos(tightTrig), label: 'TIGHT', trig: tightTrig, lock: tightLock, active: pnlPct >= tightTrig },
+                { pos: toBarPos(beTrig), label: 'BE', trig: beTrig, lock: beLock, active: pnlPct >= beTrig },
+                { pos: toBarPos(midTrig), label: 'LOCK1', trig: midTrig, lock: midLock, active: pnlPct >= midTrig },
+                { pos: toBarPos(maxTrig), label: 'LOCK2', trig: maxTrig, lock: maxLock, active: pnlPct >= maxTrig }
+            ];
+
+            let ratchetHint = '';
+            if (pnlPct < 0) {
+                const usedRiskPct = Math.min(100, (Math.abs(pnlPct) / slDenom) * 100);
+                const remToSl = Math.max(0, slDenom - Math.abs(pnlPct));
+                ratchetHint = `Rischio: ${pnlPct.toFixed(2)}% / -${slDenom.toFixed(2)}% (${usedRiskPct.toFixed(0)}% usato · -${remToSl.toFixed(2)}% allo SL)`;
+            } else if (pnlPct < tightTrig) {
+                ratchetHint = `Prossimo SL: TIGHT ${tightLock.toFixed(2)}% a +${tightTrig.toFixed(2)}%`;
+            } else if (pnlPct < beTrig) {
+                ratchetHint = `SL stretto ${tightLock.toFixed(2)}% · Prossimo: BE +${beLock.toFixed(2)}% a +${beTrig.toFixed(2)}%`;
+            } else if (pnlPct < midTrig) {
+                ratchetHint = `SL in BE +${beLock.toFixed(2)}% · Prossimo: LOCK +${midLock.toFixed(2)}% a +${midTrig.toFixed(2)}%`;
+            } else if (pnlPct < maxTrig) {
+                ratchetHint = `SL bloccato +${midLock.toFixed(2)}% · Prossimo: MAX +${maxLock.toFixed(2)}% a +${maxTrig.toFixed(2)}%`;
+            } else {
+                ratchetHint = `MAX LOCK attivo: SL +${maxLock.toFixed(2)}% verso TP +${tpDenom.toFixed(1)}%`;
+            }
+
+            const currentR = slDenom > 0 ? (pnlPct / slDenom) : 0;
+            const currentRText = `${currentR >= 0 ? '+' : ''}${currentR.toFixed(2)}R`;
+            const rawOpenTs = pos.opened_at || pos.created_at || pos.timestamp || pos.entry_time || '';
+            let openTimeText = '';
+            if (rawOpenTs) {
+                const d = new Date(typeof rawOpenTs === 'number' && rawOpenTs < 1e12 ? rawOpenTs * 1000 : rawOpenTs);
+                if (!isNaN(d.getTime())) {
+                    const hhmm = d.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' });
+                    const diffH = Math.max(0, (Date.now() - d.getTime()) / 3600000);
+                    const dur = diffH < 1 ? `${Math.round(diffH * 60)}m` : `${diffH.toFixed(1)}h`;
+                    openTimeText = `${hhmm} (${dur})`;
+                }
+            }
+
+            return { guardHtml, slText, tpText, tpProgress, progressColor, entryPos, fillLeft, fillWidth, milestones, ratchetHint, currentR, currentRText, openTimeText };
+        }
+
+        function renderPositionRiskBarHtml(riskInfo) {
+            const ticksHtml = (riskInfo.milestones || []).map(m => {
+                const lockStr = m.lock >= 0 ? `+${m.lock.toFixed(2)}%` : `${m.lock.toFixed(2)}%`;
+                const tip = `${m.label}: sposta SL a ${lockStr} quando PnL raggiunge +${m.trig.toFixed(2)}%`;
+                const bg = m.active ? 'var(--apple-amber)' : 'rgba(255,255,255,0.45)';
+                return `<span data-tip="${escapeHtml(tip)}" style="position:absolute; left:${m.pos.toFixed(1)}%; top:-2px; width:2px; height:9px; background:${bg}; border-radius:1px; transform:translateX(-50%); cursor:help; z-index:2;"></span>`;
+            }).join('');
+
+            const rColor = riskInfo.currentR >= 0 ? 'var(--apple-green)' : 'var(--apple-red)';
+            const centerMeta = riskInfo.openTimeText
+                ? `<b style="color:${rColor};">${escapeHtml(riskInfo.currentRText)}</b> · ${escapeHtml(riskInfo.openTimeText)}`
+                : `<b style="color:${rColor};">${escapeHtml(riskInfo.currentRText)}</b>`;
+
+            return `
+                <div style="display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-top: 8px; font-size: 10px; color: var(--text-tertiary);">
+                    <span>SL: <b style="color: var(--apple-red);">${escapeHtml(riskInfo.slText)}</b></span>
+                    <span data-tip="Multiplo di rischio attuale (R) e orario di apertura">${centerMeta}</span>
+                    <span>TP: <b style="color: var(--apple-green);">${escapeHtml(riskInfo.tpText)}</b></span>
+                </div>
+                <div class="trade-target-progress-bar" style="position:relative; height: 5px; border-radius: 2.5px; background: rgba(255,255,255,0.08); margin-top: 5px; overflow: visible;">
+                    <span data-tip="Entry (0%)" style="position:absolute; left:${riskInfo.entryPos.toFixed(1)}%; top:-2px; width:2px; height:9px; background:rgba(255,255,255,0.85); border-radius:1px; transform:translateX(-50%); z-index:2;"></span>
+                    ${ticksHtml}
+                    <div class="trade-target-fill" style="position:absolute; left:${riskInfo.fillLeft.toFixed(1)}%; width:${riskInfo.fillWidth.toFixed(1)}%; height:100%; border-radius:2.5px; background:${riskInfo.progressColor}; transition: width 0.3s ease, left 0.3s ease;"></div>
+                </div>
+                <div style="margin-top: 5px; font-size: 10px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                    ${escapeHtml(riskInfo.ratchetHint)}
+                </div>
+            `;
         }
 
         
@@ -3486,14 +3561,8 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                                     <span>In $${entry.toFixed(4)} &rarr; Mark $${mark.toFixed(4)}</span>
                                     <span>Size: ${safeSize} ($${(parseFloat(p.position_value || 0)).toLocaleString('en-US', {maximumFractionDigits: 0})})</span>
                                 </div>
-                                <!-- Barra di Progresso TP Sottile Integrata sul Fondo -->
-                                <div style="display: flex; align-items: center; justify-content: space-between; margin-top: 8px; font-size: 10px; color: var(--text-tertiary);">
-                                    <span>TP: <b style="color: var(--green);">${escapeHtml(riskInfo.tpText)}</b></span>
-                                    <span>SL: <b style="color: var(--red);">${escapeHtml(riskInfo.slText)}</b></span>
-                                </div>
-                                <div class="trade-target-progress-bar" style="height: 3px; border-radius: 1.5px; background: rgba(255,255,255,0.08); margin-top: 4px;">
-                                    <div class="trade-target-fill" style="width: ${riskInfo.tpProgress.toFixed(0)}%; background: ${riskInfo.progressColor};"></div>
-                                </div>
+                                <!-- Barra di Progresso Bidirezionale SL <-> Entry <-> Ratchet <-> TP -->
+                                ${renderPositionRiskBarHtml(riskInfo)}
                             </div>
                         </div>
                     `;
@@ -3602,14 +3671,8 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                                         <span>In $${entry.toFixed(2)} &rarr; Mark $${current.toFixed(2)}</span>
                                         <span>Size: ${qty} az. ($${marketVal.toLocaleString('en-US', {maximumFractionDigits: 0})})</span>
                                     </div>
-                                    <!-- Target Take Profit, Stop Loss & Progress Bar Dinamica -->
-                                    <div style="display: flex; align-items: center; justify-content: space-between; margin-top: 8px; font-size: 10px; color: var(--text-tertiary);">
-                                        <span>TP: <b style="color: var(--apple-green);">${escapeHtml(riskInfo.tpText)}</b></span>
-                                        <span>SL: <b style="color: var(--apple-red);">${escapeHtml(riskInfo.slText)}</b></span>
-                                    </div>
-                                    <div class="trade-target-progress-bar" style="height: 3px; border-radius: 1.5px; background: rgba(255,255,255,0.08); margin-top: 4px;">
-                                        <div class="trade-target-fill" style="width: ${riskInfo.tpProgress.toFixed(0)}%; background: ${riskInfo.progressColor};"></div>
-                                    </div>
+                                    <!-- Target Take Profit, Stop Loss & Barra Bidirezionale Ratchet -->
+                                    ${renderPositionRiskBarHtml(riskInfo)}
                                 </div>
                             </div>
                         `;
@@ -4477,7 +4540,15 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 
 async def handle_dashboard_page(request):
     """Serve la pagina HTML della dashboard."""
-    return web.Response(text=DASHBOARD_HTML, content_type="text/html")
+    return web.Response(
+        text=DASHBOARD_HTML,
+        content_type="text/html",
+        headers={
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Pragma": "no-cache",
+            "Expires": "0",
+        },
+    )
 
 import asyncio
 import time
