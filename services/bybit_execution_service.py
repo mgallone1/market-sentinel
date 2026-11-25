@@ -46,6 +46,47 @@ def hysteresis_bias(current: str, previous: str) -> str:
     return current if current == previous else "NEUTRAL"
 
 
+def format_bybit_price(price: float, ref_price: float) -> str:
+    """
+    Formatta un prezzo Bybit Linear USDT adattando i decimali alla scala dell'asset (`ref_price`),
+    evitando troncamenti fatali su monete sub-dollaro (DOGE, XRP, ADA, SUI) e rispettando il tickSize BTC (0.1).
+    """
+    p = float(price or 0.0)
+    if p <= 0:
+        return "0"
+    r = abs(float(ref_price or p))
+    if r >= 10000.0:
+        dec = 1
+    elif r >= 100.0:
+        dec = 2
+    elif r >= 5.0:
+        dec = 3
+    elif r >= 0.5:
+        dec = 4
+    elif r >= 0.05:
+        dec = 5
+    elif r >= 0.005:
+        dec = 6
+    else:
+        dec = 7
+    return f"{round(p, dec):.{dec}f}"
+
+
+def format_bybit_qty(raw_qty: float, clean_sym: str) -> str:
+    """Formatta la quantità contratti compatibile con i step size standard Bybit Linear USDT."""
+    q = max(0.0, float(raw_qty or 0.0))
+    sym = str(clean_sym or "").upper()
+    if "BTC" in sym:
+        return str(round(q, 3))
+    if "ETH" in sym:
+        return str(round(q, 2))
+    if any(tok in sym for tok in ("DOGE", "XRP", "ADA", "SUI", "PEPE", "SHIB", "TRX", "XLM")) or q >= 100.0:
+        return str(max(1, int(round(q))))
+    if q >= 1.0:
+        return str(round(q, 1))
+    return str(round(q, 2))
+
+
 class BybitExecutionService:
     """
     Servizio di Trading Ufficiale per Bybit (Unified Trading Account - Linear USDT Perpetuals).
@@ -254,19 +295,22 @@ class BybitExecutionService:
     def place_order(
         self,
         symbol: str,
-        side: str, # 'Buy' o 'Sell'
+        side: str,  # 'Buy' o 'Sell'
         notional_usd: float = 2500.0,
         take_profit_pct: Optional[float] = 2.5,
         stop_loss_pct: Optional[float] = 1.5,
         leverage: int = 1,
         order_link_id: Optional[str] = None,
+        order_type: str = "Market",
+        limit_price: Optional[float] = None,
+        post_only: bool = False,
     ) -> Dict[str, Any]:
         """
-        Piazza un ordine di apertura LONG o SHORT su Bybit Linear USDT.
+        Piazza un ordine di apertura LONG o SHORT su Bybit Linear USDT (Market o Limit/PostOnly).
         order_link_id: id idempotente (max 36 char, [A-Za-z0-9_-]) inviato come orderLinkId:
         Bybit rifiuta un secondo ordine con lo stesso id (-> {"duplicate": True}).
         Calcola automaticamente la quantità di contratti in base al notional in dollari
-        e imposta leva, Take Profit e Stop Loss se specificati.
+        e imposta leva, Take Profit e Stop Loss con precisione adattiva al prezzo dell'asset.
         """
         clean_sym = symbol.upper().replace("/", "").replace("-", "")
         if not clean_sym.endswith("USDT"):
@@ -274,23 +318,20 @@ class BybitExecutionService:
 
         side_fmt = "Buy" if side.lower() in ["buy", "long", "compra"] else "Sell"
 
-        # 1. Recupera prezzo corrente per calcolare qty corretta
+        # 1. Recupera prezzo corrente per calcolare qty e validare riferimento
         tickers = self.get_realtime_tickers([clean_sym])
-        curr_price = tickers.get(clean_sym, {}).get("last_price", 0.0)
-        if curr_price <= 0:
+        curr_price = float(tickers.get(clean_sym, {}).get("last_price", 0.0) or 0.0)
+        is_limit = str(order_type or "Market").strip().lower() == "limit" and limit_price is not None and float(limit_price) > 0
+        if curr_price <= 0 and not is_limit:
             return {"error": f"Impossibile determinare il prezzo live per {clean_sym}"}
 
-        # Calcola qty
-        raw_qty = notional_usd / curr_price
-        # Precisione per symbol
-        if "BTC" in clean_sym:
-            qty_str = str(round(raw_qty, 3))
-        elif "ETH" in clean_sym:
-            qty_str = str(round(raw_qty, 2))
-        elif "SOL" in clean_sym:
-            qty_str = str(round(raw_qty, 1))
-        else:
-            qty_str = str(round(raw_qty, 1))
+        ref_price = float(limit_price) if is_limit else curr_price
+        if curr_price <= 0:
+            curr_price = ref_price
+
+        # Calcola qty adattiva per symbol
+        raw_qty = notional_usd / ref_price
+        qty_str = format_bybit_qty(raw_qty, clean_sym)
 
         # Imposta Leva (1x di default per zero rischio liquidazione)
         try:
@@ -303,28 +344,30 @@ class BybitExecutionService:
         except Exception:
             pass
 
-        # Calcola TP e SL
+        # Calcola TP e SL rispetto al prezzo di riferimento (limit_price se Limit, altrimenti curr_price)
         tp_str = ""
         sl_str = ""
         if side_fmt == "Buy":
             if take_profit_pct:
-                tp_str = str(round(curr_price * (1 + take_profit_pct / 100), 2))
+                tp_str = format_bybit_price(ref_price * (1 + take_profit_pct / 100), ref_price)
             if stop_loss_pct:
-                sl_str = str(round(curr_price * (1 - stop_loss_pct / 100), 2))
-        else: # SHORT
+                sl_str = format_bybit_price(ref_price * (1 - stop_loss_pct / 100), ref_price)
+        else:  # SHORT
             if take_profit_pct:
-                tp_str = str(round(curr_price * (1 - take_profit_pct / 100), 2))
+                tp_str = format_bybit_price(ref_price * (1 - take_profit_pct / 100), ref_price)
             if stop_loss_pct:
-                sl_str = str(round(curr_price * (1 + stop_loss_pct / 100), 2))
+                sl_str = format_bybit_price(ref_price * (1 + stop_loss_pct / 100), ref_price)
 
         order_params: Dict[str, Any] = {
             "category": "linear",
             "symbol": clean_sym,
             "side": side_fmt,
-            "orderType": "Market",
+            "orderType": "Limit" if is_limit else "Market",
             "qty": qty_str,
-            "timeInForce": "GTC"
+            "timeInForce": ("PostOnly" if post_only else "GTC") if is_limit else "GTC",
         }
+        if is_limit:
+            order_params["price"] = format_bybit_price(float(limit_price), curr_price)
         if tp_str:
             order_params["takeProfit"] = tp_str
         if sl_str:
@@ -342,9 +385,10 @@ class BybitExecutionService:
                     "order_id": res.get("result", {}).get("orderId"),
                     "symbol": clean_sym,
                     "side": "LONG" if side_fmt == "Buy" else "SHORT",
+                    "order_type": order_params["orderType"],
                     "qty": qty_str,
                     "notional": notional_usd,
-                    "price": curr_price,
+                    "price": ref_price,
                     "take_profit": tp_str,
                     "stop_loss": sl_str
                 }
@@ -360,14 +404,15 @@ class BybitExecutionService:
         if not clean_sym.endswith("USDT"):
             clean_sym = f"{clean_sym}USDT"
         try:
+            sl_formatted = format_bybit_price(new_stop_loss, new_stop_loss)
             res = self.session.set_trading_stop(
                 category="linear",
                 symbol=clean_sym,
-                stopLoss=str(round(new_stop_loss, 4)),
+                stopLoss=sl_formatted,
                 tpslMode="Full"
             )
             if res.get("retCode") == 0:
-                return {"status": "success", "symbol": clean_sym, "new_stop_loss": new_stop_loss}
+                return {"status": "success", "symbol": clean_sym, "new_stop_loss": float(sl_formatted)}
             return {"error": res.get("retMsg", "Errore aggiornamento stop loss")}
         except Exception as e:
             return {"error": str(e)}

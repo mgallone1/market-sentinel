@@ -204,16 +204,21 @@ class AlpacaExecutionService:
         qty: int,
         side: str = "buy",
         take_profit_price: Optional[float] = None,
-        stop_loss_price: Optional[float] = None
+        stop_loss_price: Optional[float] = None,
+        order_type: str = "market",
+        limit_price: Optional[float] = None,
     ) -> Dict[str, Any]:
+        is_limit = str(order_type or "market").strip().lower() == "limit" and limit_price is not None and float(limit_price) > 0
         payload: Dict[str, Any] = {
             "symbol": symbol.upper(),
             "qty": qty,
             "side": side.lower(),
-            "type": "market",
+            "type": "limit" if is_limit else "market",
             "time_in_force": "day",
             "order_class": "bracket"
         }
+        if is_limit:
+            payload["limit_price"] = round(float(limit_price), 2)
         if take_profit_price:
             payload["take_profit"] = {"limit_price": round(take_profit_price, 2)}
         if stop_loss_price:
