@@ -2746,6 +2746,18 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         // APPLE STOCKS INTERACTIVE SCRUBBING LISTENER
         function setupChartScrubbing() {
             const canvas = document.getElementById('perfChart');
+            if (canvas && !window.__chartTooltipDismissWired) {
+                window.__chartTooltipDismissWired = true;
+                document.addEventListener('pointerdown', (e) => {
+                    if (chartInstance && canvas && !canvas.contains(e.target)) {
+                        try {
+                            chartInstance.tooltip.setActiveElements([], { x: 0, y: 0 });
+                            chartInstance.setActiveElements([]);
+                            chartInstance.update('none');
+                        } catch (_) {}
+                    }
+                }, { passive: true });
+            }
             const badge = document.getElementById('chart-scrub-badge');
             const heroAmount = document.getElementById('total-equity');
             if (!canvas || !badge || canvas.getAttribute('data-scrub-init')) return;
@@ -3073,6 +3085,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                                 }
                             },
                             tooltip: {
+                                events: ['mousemove', 'mouseout', 'click'],
                                 backgroundColor: isDark ? '#1e293b' : '#ffffff',
                                 titleColor: isDark ? '#f8fafc' : '#0f172a',
                                 bodyColor: isDark ? '#94a3b8' : '#334155',
