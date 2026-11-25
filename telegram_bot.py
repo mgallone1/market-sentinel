@@ -80,6 +80,7 @@ from services.strategy_engines_service import (
     ENGINE_TREND_PULLBACK,
     ENGINE_LIQUIDITY_SWEEP,
     ENGINE_INTRADAY_MOMENTUM,
+    ENGINE_ORB_BREAKOUT,
     prepare_closed_bars,
     compute_adx,
     compute_spread_bps,
@@ -88,6 +89,8 @@ from services.strategy_engines_service import (
     engine_trend_pullback_4h1d,
     engine_liquidity_sweep_mr,
     engine_intraday_momentum,
+    engine_orb_breakout_15m,
+    evaluate_timemachine_gate,
     select_best_signal,
 )
 
@@ -3550,6 +3553,52 @@ def _get_equities_macro_bias():
         print(f"[!] Errore calcolo bias equities macro: {e_eq}")
         return "NEUTRAL", 20.0, 0.0
 
+def _timemachine_precheck_or_reject(
+    *,
+    broker: str,
+    symbol: str,
+    df_bars: Any,
+    side: str,
+    engine: str,
+    macro_bias: str,
+    atr_pct: float,
+    rome_hour: int,
+    signal_price: float,
+    sl_pct: float,
+    tp_pct: float,
+    features: Optional[Dict[str, Any]],
+    context_key: str,
+    fee_rt_pct: float,
+    interval_minutes: Optional[int],
+    horizon_bars: int = 24,
+) -> Tuple[bool, Dict[str, Any]]:
+    """Pre-entry Monte Carlo Time Machine gate with shadow rejection telemetry."""
+    tm_res = evaluate_timemachine_gate(
+        df_bars,
+        side=side,
+        sl_pct=sl_pct,
+        tp_pct=tp_pct,
+        n_replays=1200,
+        horizon_bars=horizon_bars,
+        fee_rt_pct=fee_rt_pct,
+        interval_minutes=interval_minutes,
+    )
+    if not tm_res.get("passed", True):
+        rej = str(tm_res.get("reason") or "TIMEMACHINE_MC")
+        _log_shadow_rejection(
+            broker, symbol, side, engine, macro_bias, atr_pct, rome_hour,
+            rej, signal_price, sl_pct, tp_pct, features, context_key_override=context_key,
+        )
+        print(
+            f"[TimeMachine BLOCK] {broker} {symbol} {side} ({engine}): {rej} "
+            f"E[R]={float(tm_res.get('expected_r', 0.0)):+.2f} "
+            f"WR={float(tm_res.get('resolved_win_rate', 0.0)) * 100.0:.0f}% "
+            f"vs BE={float(tm_res.get('breakeven_wr', 0.0)) * 100.0:.0f}%"
+        )
+        return False, tm_res
+    return True, tm_res
+
+
 def _evaluate_and_trade_alpaca_candidate(
     *,
     sym: str,
@@ -3564,6 +3613,7 @@ def _evaluate_and_trade_alpaca_candidate(
     positions: List[Dict[str, Any]],
     adaptive_params: Optional[Dict[str, Any]],
     notification_events: List[str],
+    df_sym_5m: Any = None,
 ) -> float:
     """Valuta un titolo USA con regime router multi-engine, allocator Bayesiano e RiskGate."""
     import pandas as pd
@@ -3591,7 +3641,7 @@ def _evaluate_and_trade_alpaca_candidate(
     is_vix_unfavorable = (vix_delta_pct > 2.0) or (vix_val >= 24.0 and vix_delta_pct >= 0.0) or (vix_val >= 28.0)
     now_cet = datetime.now(ZoneInfo("Europe/Rome"))
 
-    route = regime_router(eq_bias, adx_1h, atr_pct, funding_rate=0.0, vix_val=vix_val, spread_bps=0.0)
+    route = regime_router(eq_bias, adx_1h, atr_pct, funding_rate=0.0, vix_val=vix_val, spread_bps=0.0, is_equities=True)
     allowed_engines = set(route.get("allowed_engines") or [])
     prefer_limit = bool(route.get("prefer_limit", False))
 
@@ -3618,6 +3668,19 @@ def _evaluate_and_trade_alpaca_candidate(
                 "ALPACA", sym, sig_mom.get("side"), ENGINE_INTRADAY_MOMENTUM, eq_bias, atr_pct,
                 now_cet.hour, str(sig_mom.get("reject_reason")), last_c,
                 float(sig_mom.get("sl_pct") or 1.2), float(sig_mom.get("tp_pct") or 3.6), sig_mom.get("features"),
+            )
+
+    if ENGINE_ORB_BREAKOUT in allowed_engines and df_sym_5m is not None and len(df_sym_5m) >= 6:
+        sig_orb = engine_orb_breakout_15m(
+            df_sym_5m, eq_bias, cycle_data=cycle, vix_unfavorable=is_vix_unfavorable, interval_minutes=5,
+        )
+        if sig_orb.get("triggered"):
+            candidates.append(sig_orb)
+        elif sig_orb.get("reject_reason") in ("VIX_SHIELD", "LOW_VOLUME", "CYCLE_CONFLICT"):
+            _log_shadow_rejection(
+                "ALPACA", sym, sig_orb.get("side"), ENGINE_ORB_BREAKOUT, eq_bias, atr_pct,
+                now_cet.hour, str(sig_orb.get("reject_reason")), last_c,
+                float(sig_orb.get("sl_pct") or 1.2), float(sig_orb.get("tp_pct") or 3.0), sig_orb.get("features"),
             )
 
     best_sig = select_best_signal(candidates)
@@ -3664,6 +3727,18 @@ def _evaluate_and_trade_alpaca_candidate(
     target_p = round(ref_p * (1 + tp_pct / 100.0), 2) if sig_side == "LONG" else round(ref_p * (1 - tp_pct / 100.0), 2)
     stop_p = round(ref_p * (1 - sl_pct / 100.0), 2) if sig_side == "LONG" else round(ref_p * (1 + sl_pct / 100.0), 2)
 
+    tm_use_5m = df_sym_5m is not None and len(df_sym_5m) >= 22
+    tm_ok, tm_res = _timemachine_precheck_or_reject(
+        broker="ALPACA", symbol=sym, df_bars=(df_sym_5m if tm_use_5m else df_sym_1h),
+        side=sig_side, engine=chosen_engine, macro_bias=eq_bias, atr_pct=atr_pct,
+        rome_hour=now_cet.hour, signal_price=ref_p, sl_pct=sl_pct, tp_pct=tp_pct,
+        features=best_sig.get("features"), context_key=context_key,
+        fee_rt_pct=0.05, interval_minutes=(5 if tm_use_5m else 60),
+        horizon_bars=(36 if tm_use_5m else 18),
+    )
+    if not tm_ok:
+        return 0.0
+
     if not _risk_gate(
         "ALPACA", sym, equity_alpaca,
         [{"entry_price": float(pp.get("avg_entry_price", 0) or 0), "size": float(pp.get("qty", 0) or 0)} for pp in positions],
@@ -3694,6 +3769,7 @@ def _evaluate_and_trade_alpaca_candidate(
                 "engine": chosen_engine, "context_key": context_key, "order_type": order_type,
                 "alloc_mode": alloc_info.get("mode"), "alloc_scale": alloc_info.get("scale"),
                 "sentinel_sentiment": sentinel_data.get("sentiment"), "sentinel_reasons": sentinel_data.get("reasons", []),
+                "tm_expected_r": tm_res.get("expected_r"), "tm_p_tp": tm_res.get("p_tp_first"),
             },
             client_order_id=client_oid, engine=chosen_engine, context_key=context_key,
         )
@@ -3701,13 +3777,17 @@ def _evaluate_and_trade_alpaca_candidate(
         print(f"[!] Warning trade journal entry: {e_j}")
 
     boost_txt = f"\n• *Fondamentali Sentinella:* `{sentinel_data.get('sentiment')}` ({', '.join(sentinel_data.get('reasons', ['Allineato']))})" if sentinel_data.get("reasons") else ""
+    tm_txt = (
+        f"\n• *Time Machine MC ({tm_res.get('replays', 0)}):* `E[R]={float(tm_res.get('expected_r', 0.0)):+.2f}` | `WinProb={float(tm_res.get('resolved_win_rate', 0.0))*100:.0f}%`"
+        if tm_res.get("replays", 0) > 0 else ""
+    )
     notification_events.append((
         f"{'🟢' if sig_side == 'LONG' else '🔻'} *NUOVO ORDINE WALL STREET ({chosen_engine})*\n"
         f"────────────────────────\n"
         f"• *Titolo:* `{sym}` [{sig_side}] x{shares} (`{order_type.upper()}`)\n"
         f"• *Controvalore Dinamico (Cap 70%):* `${shares * ref_p:,.0f}` (Alloc `{alloc_info.get('mode', 'STANDARD')}` {float(alloc_info.get('scale', 1.0)):.2f}x)\n"
         f"• *Macro SPY:* `{eq_bias}` | *Alpha:* `{alpha:+.2f}%` | *VIX:* `{vix_val:.1f}` ({vix_delta_pct:+.1f}%)\n"
-        f"• *Target ATR:* TP `${target_p:.2f}` (`+{tp_pct:.2f}%`) | SL `${stop_p:.2f}` (`-{sl_pct:.2f}%`){boost_txt}"
+        f"• *Target ATR:* TP `${target_p:.2f}` (`+{tp_pct:.2f}%`) | SL `${stop_p:.2f}` (`-{sl_pct:.2f}%`){tm_txt}{boost_txt}"
     ))
     return float(shares * ref_p)
 
@@ -3849,6 +3929,16 @@ def _sync_alpaca_risk_and_screening():
                     if sdf is not None and len(sdf) >= 35:
                         stock_dfs[sym] = sdf
 
+                stock_5m_dfs: Dict[str, Any] = {}
+                try:
+                    bulk_5m = yf.download(universe_equities, period="5d", interval="5m", progress=False)
+                    for sym in universe_equities:
+                        sdf5 = prepare_closed_bars(_extract_symbol_df_from_bulk(bulk_5m, sym), interval_minutes=5)
+                        if sdf5 is not None and len(sdf5) >= 6:
+                            stock_5m_dfs[sym] = sdf5
+                except Exception as e_5m:
+                    print(f"[!] Warning download 5m ORB Alpaca: {e_5m}")
+
                 def _rank_stock(sym: str) -> float:
                     sdf = stock_dfs.get(sym)
                     if sdf is None or len(sdf) < 8:
@@ -3866,6 +3956,7 @@ def _sync_alpaca_risk_and_screening():
                         base_notional=base_notional_alpaca, available_budget=available_risk_budget_alpaca,
                         positions=open_positions_active, adaptive_params=adaptive_params,
                         notification_events=notification_events,
+                        df_sym_5m=stock_5m_dfs.get(sym),
                     )
                     if spent > 0.0:
                         active_syms.add(sym)
@@ -4175,6 +4266,16 @@ def _evaluate_and_trade_bybit_candidate(
     sl_p = ref_p * (1 - sl_pct / 100.0) if sig_side == "LONG" else ref_p * (1 + sl_pct / 100.0)
     tp_p = ref_p * (1 + tp_pct / 100.0) if sig_side == "LONG" else ref_p * (1 - tp_pct / 100.0)
 
+    tm_ok, tm_res = _timemachine_precheck_or_reject(
+        broker="BYBIT", symbol=b_sym, df_bars=df_15m,
+        side=sig_side, engine=chosen_engine, macro_bias=macro_bias, atr_pct=atr_pct,
+        rome_hour=rome_hour, signal_price=ref_p, sl_pct=sl_pct, tp_pct=tp_pct,
+        features=best_sig.get("features"), context_key=context_key,
+        fee_rt_pct=0.12, interval_minutes=15, horizon_bars=24,
+    )
+    if not tm_ok:
+        return 0.0
+
     if not _risk_gate(
         "BYBIT", b_sym, bybit_equity,
         [{"entry_price": bp.get("entry_price"), "size": bp.get("size"), "stop_loss": bp.get("stop_loss")} for bp in bybit_positions],
@@ -4210,6 +4311,7 @@ def _evaluate_and_trade_bybit_candidate(
                 "atr_pct": round(atr_pct, 3), "engine": chosen_engine, "context_key": context_key,
                 "order_type": order_type, "alloc_mode": alloc_info.get("mode"), "alloc_scale": alloc_info.get("scale"),
                 "sentinel_sentiment": sentinel_data.get("sentiment"), "sentinel_reasons": sentinel_data.get("reasons", []),
+                "tm_expected_r": tm_res.get("expected_r"), "tm_p_tp": tm_res.get("p_tp_first"),
             },
             client_order_id=link_id, engine=chosen_engine, context_key=context_key,
         )
@@ -4217,13 +4319,17 @@ def _evaluate_and_trade_bybit_candidate(
         print(f"[!] Warning trade journal entry: {e_j}")
 
     boost_txt = f"\n• *Sentinella Macro/News:* `{sentinel_data.get('sentiment')}` ({', '.join(sentinel_data.get('reasons', ['Allineato']))})" if sentinel_data.get("reasons") else ""
+    tm_txt = (
+        f"\n• *Time Machine MC ({tm_res.get('replays', 0)}):* `E[R]={float(tm_res.get('expected_r', 0.0)):+.2f}` | `WinProb={float(tm_res.get('resolved_win_rate', 0.0))*100:.0f}%`"
+        if tm_res.get("replays", 0) > 0 else ""
+    )
     notification_events.append((
         f"{'🟢' if sig_side == 'LONG' else '🔻'} *NUOVO ORDINE {sig_side} APERTO ({chosen_engine})*\n"
         f"────────────────────────\n"
         f"• *Asset:* `{b_sym}` ({b_name}) | `{order_type}`\n"
         f"• *Notionale Dinamico (Cap 70%):* `${eff_notional:,.0f}` (Alloc `{alloc_info.get('mode', 'STANDARD')}` {float(alloc_info.get('scale', 1.0)):.2f}x)\n"
         f"• *Macro Regime:* `{macro_bias}` | *Funding:* `{c_funding:+.4f}%` | *Alpha BTC:* `{c_alpha:+.2f}%`\n"
-        f"• *Target ATR:* TP `+{tp_pct:.2f}%` | SL `-{sl_pct:.2f}%`{boost_txt}"
+        f"• *Target ATR:* TP `+{tp_pct:.2f}%` | SL `-{sl_pct:.2f}%`{tm_txt}{boost_txt}"
     ))
     return float(eff_notional)
 

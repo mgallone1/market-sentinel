@@ -103,6 +103,42 @@ class TestBotLearningWiring(unittest.TestCase):
         self.assertIn("limit_price", bybit_sig.parameters)
         self.assertIn("post_only", bybit_sig.parameters)
 
+    def test_timemachine_precheck_logs_shadow_rejection_when_blocked(self):
+        import pandas as pd
+        idx = pd.date_range("2026-01-01 00:00", periods=50, freq="15min", tz="UTC")
+        closes = [100.0 * (0.993 ** i) for i in range(50)]
+        df_bear = pd.DataFrame(
+            {
+                "Open": closes,
+                "High": [c + 0.2 for c in closes],
+                "Low": [c - 0.2 for c in closes],
+                "Close": closes,
+                "Volume": [1000.0] * 50,
+            },
+            index=idx,
+        )
+        with patch.object(telegram_bot.trade_journal_svc, "record_shadow_signal", return_value=77) as mock_rec:
+            ok, res = telegram_bot._timemachine_precheck_or_reject(
+                broker="BYBIT",
+                symbol="BTCUSDT",
+                df_bars=df_bear,
+                side="LONG",
+                engine="INTRADAY_MOMENTUM",
+                macro_bias="NEUTRAL",
+                atr_pct=1.0,
+                rome_hour=15,
+                signal_price=75.0,
+                sl_pct=1.0,
+                tp_pct=2.5,
+                features={"rsi": 50.0},
+                context_key="BYBIT|LONG|NEUTRAL|MED|EU|INTRADAY_MOMENTUM",
+                fee_rt_pct=0.12,
+                interval_minutes=15,
+            )
+            self.assertFalse(ok)
+            self.assertIn(res["reason"], ("TIMEMACHINE_NEG_EXPECTANCY", "TIMEMACHINE_LOW_WIN_PROB"))
+            mock_rec.assert_called_once()
+
 
 if __name__ == "__main__":
     unittest.main()

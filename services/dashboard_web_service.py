@@ -2111,7 +2111,9 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                     Il Regime Router seleziona dinamicamente quali motori possono operare in base ad ADX 1H, ATR%, Funding Rate, Spread e VIX:<br>
                     <strong>• Trend Pullback 4H/1D (<code>TREND_PULLBACK_4H</code>):</strong> Opera nei trend strutturali con ordini <em>Maker Limit</em> vicino alla EMA20 1H o alla FLD di Hurst, allineato alla direzione 4H.<br>
                     <strong>• Liquidity Sweep Mean Reversion (<code>LIQUIDITY_SWEEP_MR</code>):</strong> Attivo in range o squeeze (<code>ADX &lt; 18</code> o Funding estremo): esegue fade contrarian <em>Maker Limit</em> su spike con wick &ge; 0.45 confermati da CVD, OBI o estremi di Funding.<br>
-                    <strong>• Intraday Momentum (<code>INTRADAY_MOMENTUM</code>):</strong> Breakout intraday a 15m con filtro anti-chop (<code>ADX &ge; 16</code>) e scudi VIX, CVD, Volume Notturno, Ciclo e OBI.
+                    <strong>• Intraday Momentum (<code>INTRADAY_MOMENTUM</code>):</strong> Breakout intraday a 15m con filtro anti-chop (<code>ADX &ge; 16</code>) e scudi VIX, CVD, Volume Notturno, Ciclo e OBI.<br>
+                    <strong data-tip="Opening Range Breakout 15m (Wall Street 09:30-09:45 ET): entra solo alla chiusura di una barra 5m oltre il range iniziale con conferma volumi e ciclica.">• Opening Range Breakout 15m (<code>ORB_BREAKOUT_15M</code>):</strong> Attivo su Wall Street (Alpaca) tra le <code>09:45</code> e le <code>15:30 ET</code> sulla rottura confermata in chiusura del range <code>09:30-09:45</code>.<br>
+                    <strong data-tip="Simulazione bootstrap Monte Carlo (1.200 replay sulle barre storiche recenti) eseguita prima di ogni ordine: blocca i setup con aspettativa negativa o probabilita di vittoria sotto il break-even.">• Time Machine Monte Carlo (<code>TIMEMACHINE_MC</code>):</strong> Pre-check statistico a <code>1.200 replay</code> sulle barre recenti prima di inviare qualsiasi ordine Alpaca/Bybit: scarta automaticamente i setup con <code>E[R] &lt; -0.05</code> o win-rate inferiore al break-even.
                 </div>
             </div>
 

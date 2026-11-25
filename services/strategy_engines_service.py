@@ -7,11 +7,15 @@ Stateless, pure DataFrame-driven signal engines built without lookahead bias:
   1. TREND_PULLBACK_4H  (`engine_trend_pullback_4h1d`): Maker limit pullback on 4H/1H structure.
   2. LIQUIDITY_SWEEP_MR (`engine_liquidity_sweep_mr`): Contrarian Maker fade of trapped stops.
   3. INTRADAY_MOMENTUM  (`engine_intraday_momentum`): Filtered intraday breakout with shadow telemetry.
+  4. ORB_BREAKOUT_15M   (`engine_orb_breakout_15m`): NY 15-minute Opening Range Breakout for equities.
+  5. Time Machine Gate  (`evaluate_timemachine_gate`): Empirical bootstrap Monte Carlo pre-entry check.
 """
 from __future__ import annotations
 
 import math
+import random
 from typing import Any, Dict, List, Optional, Tuple
+from zoneinfo import ZoneInfo
 
 import numpy as np
 import pandas as pd
@@ -22,7 +26,13 @@ from services.indicators_safe import atr_wilder, drop_forming_bar, wilder_rsi
 ENGINE_TREND_PULLBACK = "TREND_PULLBACK_4H"
 ENGINE_LIQUIDITY_SWEEP = "LIQUIDITY_SWEEP_MR"
 ENGINE_INTRADAY_MOMENTUM = "INTRADAY_MOMENTUM"
-ALL_ENGINES = [ENGINE_TREND_PULLBACK, ENGINE_LIQUIDITY_SWEEP, ENGINE_INTRADAY_MOMENTUM]
+ENGINE_ORB_BREAKOUT = "ORB_BREAKOUT_15M"
+ALL_ENGINES = [
+    ENGINE_TREND_PULLBACK,
+    ENGINE_LIQUIDITY_SWEEP,
+    ENGINE_INTRADAY_MOMENTUM,
+    ENGINE_ORB_BREAKOUT,
+]
 
 
 # ---------------------------------------------------------------------------
@@ -258,6 +268,7 @@ def regime_router(
     funding_rate: float = 0.0,
     vix_val: Optional[float] = None,
     spread_bps: float = 0.0,
+    is_equities: bool = False,
 ) -> Dict[str, Any]:
     """Route active strategy engines and execution preference based on trend/squeeze regime."""
     bias = str(macro_bias or "NEUTRAL").upper()
@@ -274,10 +285,14 @@ def regime_router(
     elif (bias in ("BULLISH", "BEARISH") and adx >= 24.0) or (adx >= 30.0 and atr >= 0.4):
         regime = "TREND_STRONG"
         allowed_engines = [ENGINE_TREND_PULLBACK, ENGINE_INTRADAY_MOMENTUM]
+        if is_equities:
+            allowed_engines.append(ENGINE_ORB_BREAKOUT)
         prefer_limit = True  # Pullback Limit engine prioritized; also protective if spread wide
     else:
         regime = "TRANSITION_NEUTRAL"
         allowed_engines = [ENGINE_TREND_PULLBACK, ENGINE_LIQUIDITY_SWEEP, ENGINE_INTRADAY_MOMENTUM]
+        if is_equities:
+            allowed_engines.append(ENGINE_ORB_BREAKOUT)
         prefer_limit = bool(
             spread >= 8.0 or (math.isfinite(vix_num) and vix_num >= 24.0)
         )
@@ -568,6 +583,33 @@ def engine_liquidity_sweep_mr(
 # 5. Engine 3 — INTRADAY_MOMENTUM
 # ---------------------------------------------------------------------------
 
+def _is_cycle_aligned(
+    side: str,
+    bias: str,
+    last_c: float,
+    resolved_cycle: Dict[str, Any],
+) -> bool:
+    """Shared Hurst/Migliorino cycle alignment guard for breakout engines."""
+    tempo_up = str(resolved_cycle.get("tempo_battleplan", "") or "").upper()
+    vincolo_up = str(resolved_cycle.get("vincolo_migliorino", "LIBERO") or "LIBERO").upper()
+    hurst_fld = _safe_float(resolved_cycle.get("hurst_fld_value", 0.0), 0.0)
+
+    if side == "LONG":
+        allow_long = (bias == "BULLISH") or (
+            bias == "NEUTRAL"
+            and ("1° TEMPO" in tempo_up or "2° TEMPO" in tempo_up)
+            and (hurst_fld <= 0.0 or last_c > hurst_fld)
+        )
+        return bool(allow_long and "RIBASSISTA" not in vincolo_up)
+
+    allow_short = (bias == "BEARISH") or (
+        bias == "NEUTRAL"
+        and ("3° TEMPO" in tempo_up or "4° TEMPO" in tempo_up)
+        and (hurst_fld <= 0.0 or last_c < hurst_fld)
+    )
+    return bool(allow_short and "RIALZISTA FORZATO" not in vincolo_up and "1° TEMPO" not in tempo_up)
+
+
 def engine_intraday_momentum(
     df_15m: pd.DataFrame,
     macro_bias: str,
@@ -672,26 +714,8 @@ def engine_intraday_momentum(
         rej = "LOW_VOLUME_OVERNIGHT" if is_overnight else "LOW_VOLUME"
         return _result(False, side, rej, sl_pct, tp_pct, 0.0, features)
 
-    tempo_up = str(resolved_cycle.get("tempo_battleplan", "") or "").upper()
-    vincolo_up = str(resolved_cycle.get("vincolo_migliorino", "LIBERO") or "LIBERO").upper()
-    hurst_fld = _safe_float(resolved_cycle.get("hurst_fld_value", 0.0), 0.0)
-
-    if side == "LONG":
-        allow_long = (bias == "BULLISH") or (
-            bias == "NEUTRAL"
-            and ("1° TEMPO" in tempo_up or "2° TEMPO" in tempo_up)
-            and (hurst_fld <= 0.0 or last_c > hurst_fld)
-        )
-        if not allow_long or "RIBASSISTA" in vincolo_up:
-            return _result(False, side, "CYCLE_CONFLICT", sl_pct, tp_pct, 0.0, features)
-    else:
-        allow_short = (bias == "BEARISH") or (
-            bias == "NEUTRAL"
-            and ("3° TEMPO" in tempo_up or "4° TEMPO" in tempo_up)
-            and (hurst_fld <= 0.0 or last_c < hurst_fld)
-        )
-        if not allow_short or "RIALZISTA FORZATO" in vincolo_up or "1° TEMPO" in tempo_up:
-            return _result(False, side, "CYCLE_CONFLICT", sl_pct, tp_pct, 0.0, features)
+    if not _is_cycle_aligned(side, bias, last_c, resolved_cycle):
+        return _result(False, side, "CYCLE_CONFLICT", sl_pct, tp_pct, 0.0, features)
 
     cvd_bias = str((cvd_info or {}).get("bias", "NEUTRAL") or "NEUTRAL").upper()
     cvd_ratio = features["cvd_ratio"]
@@ -726,6 +750,281 @@ def engine_intraday_momentum(
     score = round(_clamp(score, 0.0, 100.0), 2)
 
     return _result(True, side, "", sl_pct, tp_pct, score, features)
+
+
+def engine_orb_breakout_15m(
+    df_5m: pd.DataFrame,
+    macro_bias: str,
+    cycle_data: Optional[Dict[str, Any]] = None,
+    vix_unfavorable: bool = False,
+    or_minutes: int = 15,
+    min_vol_x: float = 1.10,
+    interval_minutes: Optional[float] = 5,
+    now: Any = None,
+) -> Dict[str, Any]:
+    """NY 15-minute Opening Range Breakout (ORB) engine on closed 5m bars."""
+    bars = prepare_closed_bars(df_5m, interval_minutes=interval_minutes, now=now)
+    bias = str(macro_bias or "NEUTRAL").upper()
+
+    def _result(
+        triggered: bool,
+        side: Optional[str],
+        reject_reason: str,
+        sl_pct: float,
+        tp_pct: float,
+        score: float,
+        features: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        return {
+            "triggered": triggered,
+            "side": side,
+            "engine": ENGINE_ORB_BREAKOUT,
+            "reject_reason": reject_reason,
+            "order_type": "Market",
+            "limit_price": None,
+            "sl_pct": sl_pct,
+            "tp_pct": tp_pct,
+            "score": score,
+            "features": features,
+        }
+
+    if bars is None or len(bars) < 6 or not isinstance(bars.index, pd.DatetimeIndex):
+        empty_feats = extract_normalized_features(
+            bars if bars is not None else pd.DataFrame(),
+            cycle_data=cycle_data,
+            macro_bias=bias,
+        )
+        return _result(False, None, "INSUFFICIENT_DATA", 1.2, 3.0, 0.0, empty_feats)
+
+    ny_tz = ZoneInfo("America/New_York")
+    idx = bars.index
+    if idx.tz is None:
+        # Assume NY local if market-hour timestamps exist directly, otherwise UTC
+        has_ny_morning = any((t.hour == 9 and t.minute >= 30) for t in idx[-min(len(idx), 120):])
+        idx_ny = idx.tz_localize(ny_tz if has_ny_morning else "UTC").tz_convert(ny_tz)
+    else:
+        idx_ny = idx.tz_convert(ny_tz)
+
+    bars_ny = bars.copy()
+    bars_ny.index = idx_ny
+    last_date = idx_ny[-1].date()
+    session_bars = bars_ny[bars_ny.index.date == last_date]
+    rth_bars = session_bars.between_time("09:30", "15:55")
+
+    or_bars_count = max(1, int(or_minutes // 5))
+    if len(rth_bars) <= or_bars_count:
+        feats = extract_normalized_features(bars, cycle_data=cycle_data, macro_bias=bias)
+        return _result(False, None, "INSUFFICIENT_DATA", 1.2, 3.0, 0.0, feats)
+
+    last_ts = rth_bars.index[-1]
+    last_hm = last_ts.hour * 60 + last_ts.minute
+    if last_hm < (9 * 60 + 45) or last_hm > (15 * 60 + 30):
+        feats = extract_normalized_features(bars, cycle_data=cycle_data, macro_bias=bias)
+        return _result(False, None, "OUTSIDE_ORB_WINDOW", 1.2, 3.0, 0.0, feats)
+
+    or_slice = rth_bars.iloc[:or_bars_count]
+    or_high = _safe_float(or_slice["High"].max(), 0.0)
+    or_low = _safe_float(or_slice["Low"].min(), 0.0)
+    or_mid = (or_high + or_low) / 2.0
+    or_avg_vol = _safe_float(or_slice["Volume"].mean(), 0.0)
+
+    last_bar = rth_bars.iloc[-1]
+    prev_bar = rth_bars.iloc[-2]
+    last_c = _safe_float(last_bar["Close"], 0.0)
+    prev_c = _safe_float(prev_bar["Close"], last_c)
+    last_vol = _safe_float(last_bar["Volume"], 0.0)
+
+    if last_c <= 0.0 or or_high <= 0.0 or or_low <= 0.0 or or_high <= or_low:
+        feats = extract_normalized_features(bars, cycle_data=cycle_data, macro_bias=bias)
+        return _result(False, None, "INSUFFICIENT_DATA", 1.2, 3.0, 0.0, feats)
+
+    resolved_cycle = _resolve_cycle_data(bars["Close"], cycle_data)
+    features = extract_normalized_features(bars, cycle_data=resolved_cycle, macro_bias=bias)
+    vol_ratio = (last_vol / or_avg_vol) if or_avg_vol > 0.0 else features.get("vol_ratio", 1.0)
+    features["vol_ratio"] = round(vol_ratio, 4)
+    features["or_high"] = round(or_high, 4)
+    features["or_low"] = round(or_low, 4)
+
+    cand_long = (last_c > or_high) and (prev_c <= or_high * 1.002) and (((last_c - or_high) / or_high) * 100.0 <= 1.50)
+    cand_short = (last_c < or_low) and (prev_c >= or_low * 0.998) and (((or_low - last_c) / or_low) * 100.0 <= 1.50)
+
+    if not cand_long and not cand_short:
+        return _result(False, None, "NO_SIGNAL", 1.2, 3.0, 0.0, features)
+
+    side = "LONG" if cand_long else "SHORT"
+    raw_sl_dist = abs((last_c - or_mid) / last_c) * 100.0
+    sl_pct = round(_clamp(raw_sl_dist, 0.80, 2.50), 2)
+    tp_pct = round(sl_pct * 2.5, 2)
+
+    if side == "LONG" and vix_unfavorable:
+        return _result(False, side, "VIX_SHIELD", sl_pct, tp_pct, 0.0, features)
+
+    if or_avg_vol > 0.0 and vol_ratio < min_vol_x:
+        return _result(False, side, "LOW_VOLUME", sl_pct, tp_pct, 0.0, features)
+
+    if not _is_cycle_aligned(side, bias, last_c, resolved_cycle):
+        return _result(False, side, "CYCLE_CONFLICT", sl_pct, tp_pct, 0.0, features)
+
+    breakout_ext = abs((last_c - (or_high if side == "LONG" else or_low)) / last_c) * 100.0
+    score = 62.0
+    if (side == "LONG" and bias == "BULLISH") or (side == "SHORT" and bias == "BEARISH"):
+        score += 12.0
+    score += min(10.0, max(0.0, (vol_ratio - min_vol_x) * 12.0))
+    score += min(8.0, breakout_ext * 10.0)
+    score = round(_clamp(score, 0.0, 100.0), 2)
+
+    return _result(True, side, "", sl_pct, tp_pct, score, features)
+
+
+def evaluate_timemachine_gate(
+    df_bars: pd.DataFrame,
+    side: str,
+    sl_pct: float,
+    tp_pct: float,
+    n_replays: int = 1200,
+    horizon_bars: int = 24,
+    fee_rt_pct: float = 0.12,
+    min_expected_r: float = -0.05,
+    wr_tolerance: float = 0.05,
+    seed: int = 19,
+    interval_minutes: Optional[float] = None,
+    now: Any = None,
+) -> Dict[str, Any]:
+    """Empirical bootstrap Monte Carlo pre-entry check inspired by trader-timemachine.
+
+    Rebuilds `n_replays` synthetic paths of `horizon_bars` from recent closed-bar ratios
+    (O/prevC, H/prevC, L/prevC, C/prevC). Checks SL before TP on each bar.
+    """
+    side_u = str(side or "").upper()
+    if side_u == "BUY":
+        side_u = "LONG"
+    elif side_u == "SELL":
+        side_u = "SHORT"
+
+    sl_p = _safe_float(sl_pct, -1.0)
+    tp_p = _safe_float(tp_pct, -1.0)
+    fee = max(0.0, _safe_float(fee_rt_pct, 0.12))
+
+    if side_u not in ("LONG", "SHORT") or sl_p <= 0.0 or tp_p <= 0.0:
+        return {"passed": False, "reason": "INVALID_PLAN", "replays": 0, "expected_r": 0.0}
+
+    bars = prepare_closed_bars(df_bars, interval_minutes=interval_minutes, now=now)
+    if bars is None or len(bars) < 22:
+        return {
+            "passed": True,
+            "reason": "INSUFFICIENT_HISTORY",
+            "replays": 0,
+            "expected_r": 0.0,
+            "p_tp_first": 0.0,
+            "p_sl_first": 0.0,
+            "p_neither": 1.0,
+            "resolved_win_rate": 0.0,
+            "breakeven_wr": round(1.0 / (1.0 + (tp_p / sl_p)), 4),
+        }
+
+    tail = bars.tail(500)
+    opens = tail["Open"].to_numpy(dtype=float)
+    highs = tail["High"].to_numpy(dtype=float)
+    lows = tail["Low"].to_numpy(dtype=float)
+    closes = tail["Close"].to_numpy(dtype=float)
+
+    pool: List[Tuple[float, float, float]] = []
+    for i in range(1, len(tail)):
+        prev_c = closes[i - 1]
+        if prev_c <= 0.0 or not math.isfinite(prev_c):
+            continue
+        hr = highs[i] / prev_c
+        lr = lows[i] / prev_c
+        cr = closes[i] / prev_c
+        if hr > 0.0 and lr > 0.0 and cr > 0.0 and math.isfinite(hr) and math.isfinite(lr) and math.isfinite(cr):
+            pool.append((hr, lr, cr))
+
+    if len(pool) < 20:
+        return {
+            "passed": True,
+            "reason": "INSUFFICIENT_HISTORY",
+            "replays": 0,
+            "expected_r": 0.0,
+            "p_tp_first": 0.0,
+            "p_sl_first": 0.0,
+            "p_neither": 1.0,
+            "resolved_win_rate": 0.0,
+            "breakeven_wr": round(1.0 / (1.0 + (tp_p / sl_p)), 4),
+        }
+
+    sl_mult = (1.0 - sl_p / 100.0) if side_u == "LONG" else (1.0 + sl_p / 100.0)
+    tp_mult = (1.0 + tp_p / 100.0) if side_u == "LONG" else (1.0 - tp_p / 100.0)
+    sl_r = -1.0 - (fee / sl_p)
+    tp_r = (tp_p - fee) / sl_p
+
+    rng = random.Random(seed)
+    n_rep = max(100, int(n_replays))
+    h_bars = max(4, int(horizon_bars))
+    pool_len = len(pool)
+
+    tp_hits = 0
+    sl_hits = 0
+    total_r = 0.0
+
+    for _ in range(n_rep):
+        px = 1.0
+        outcome_r: Optional[float] = None
+        for _step in range(h_bars):
+            hr, lr, cr = pool[rng.randrange(pool_len)]
+            bar_h = px * hr
+            bar_l = px * lr
+            if side_u == "LONG":
+                if bar_l <= sl_mult:
+                    sl_hits += 1
+                    outcome_r = sl_r
+                    break
+                if bar_h >= tp_mult:
+                    tp_hits += 1
+                    outcome_r = tp_r
+                    break
+            else:
+                if bar_h >= sl_mult:
+                    sl_hits += 1
+                    outcome_r = sl_r
+                    break
+                if bar_l <= tp_mult:
+                    tp_hits += 1
+                    outcome_r = tp_r
+                    break
+            px = px * cr
+        if outcome_r is None:
+            raw_ret_pct = ((px - 1.0) * 100.0) if side_u == "LONG" else ((1.0 - px) * 100.0)
+            outcome_r = (raw_ret_pct - fee) / sl_p
+        total_r += outcome_r
+
+    p_tp = tp_hits / n_rep
+    p_sl = sl_hits / n_rep
+    p_neither = max(0.0, 1.0 - p_tp - p_sl)
+    resolved = p_tp + p_sl
+    resolved_wr = (p_tp / resolved) if resolved > 0.0 else 0.5
+    breakeven_wr = 1.0 / (1.0 + (tp_p / sl_p))
+    expected_r = total_r / n_rep
+
+    passed = True
+    reason = "TIMEMACHINE_OK"
+    if expected_r < min_expected_r:
+        passed = False
+        reason = "TIMEMACHINE_NEG_EXPECTANCY"
+    elif resolved >= 0.15 and resolved_wr < (breakeven_wr - wr_tolerance):
+        passed = False
+        reason = "TIMEMACHINE_LOW_WIN_PROB"
+
+    return {
+        "passed": passed,
+        "reason": reason,
+        "replays": n_rep,
+        "expected_r": round(expected_r, 3),
+        "p_tp_first": round(p_tp, 4),
+        "p_sl_first": round(p_sl, 4),
+        "p_neither": round(p_neither, 4),
+        "resolved_win_rate": round(resolved_wr, 4),
+        "breakeven_wr": round(breakeven_wr, 4),
+    }
 
 
 # ---------------------------------------------------------------------------

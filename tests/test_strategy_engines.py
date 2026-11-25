@@ -13,13 +13,16 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from services.strategy_engines_service import (
     ENGINE_INTRADAY_MOMENTUM,
     ENGINE_LIQUIDITY_SWEEP,
+    ENGINE_ORB_BREAKOUT,
     ENGINE_TREND_PULLBACK,
     compute_adx,
     compute_spread_bps,
     engine_intraday_momentum,
     engine_liquidity_sweep_mr,
+    engine_orb_breakout_15m,
     engine_trend_pullback_4h1d,
     evaluate_shadow_bars,
+    evaluate_timemachine_gate,
     extract_normalized_features,
     prepare_closed_bars,
     regime_router,
@@ -507,6 +510,84 @@ class TestSelectorAndShadowEvaluator(unittest.TestCase):
         self.assertFalse(res["triggered"])
         self.assertLess(res["features"]["last_price"], 101.0)
 
+
+class TestOrbBreakoutAndTimeMachine(unittest.TestCase):
+    def _make_ny_5m_session(self, close_prices, volumes=None, end_hour=10, end_minute=0):
+        idx = pd.date_range(
+            "2026-10-19 09:30",
+            periods=len(close_prices),
+            freq="5min",
+            tz="America/New_York",
+        )
+        vols = volumes if volumes is not None else [1000.0] * len(close_prices)
+        opens = [close_prices[0]] + list(close_prices[:-1])
+        highs = [max(o, c) + 0.35 for o, c in zip(opens, close_prices)]
+        lows = [min(o, c) - 0.35 for o, c in zip(opens, close_prices)]
+        return pd.DataFrame(
+            {"Open": opens, "High": highs, "Low": lows, "Close": close_prices, "Volume": vols},
+            index=idx,
+        )
+
+    def test_regime_router_includes_orb_only_for_equities(self):
+        r_crypto = regime_router("BULLISH", adx_1h=28.0, atr_pct=1.1, is_equities=False)
+        self.assertNotIn(ENGINE_ORB_BREAKOUT, r_crypto["allowed_engines"])
+        r_eq = regime_router("BULLISH", adx_1h=28.0, atr_pct=1.1, is_equities=True)
+        self.assertIn(ENGINE_ORB_BREAKOUT, r_eq["allowed_engines"])
+
+    def test_orb_breakout_triggers_long_and_blocks_vix_and_low_vol(self):
+        # 3 OR bars (09:30, 09:35, 09:40) around 100.0 (OR high ~100.85), followed by consolidation then breakout
+        closes = [100.0, 100.2, 100.1, 100.3, 100.4, 101.3]
+        vols = [1000.0, 1000.0, 1000.0, 900.0, 950.0, 1800.0]
+        df_5m = self._make_ny_5m_session(closes, volumes=vols)
+        now_after = df_5m.index[-1] + timedelta(minutes=6)
+
+        res = engine_orb_breakout_15m(
+            df_5m,
+            macro_bias="BULLISH",
+            cycle_data={"tempo_battleplan": "1° Tempo su 4", "hurst_fld_value": 99.0},
+            vix_unfavorable=False,
+            interval_minutes=5,
+            now=now_after,
+        )
+        self.assertTrue(res["triggered"])
+        self.assertEqual(res["side"], "LONG")
+        self.assertEqual(res["engine"], ENGINE_ORB_BREAKOUT)
+        self.assertGreaterEqual(res["score"], 62.0)
+
+        vix_blk = engine_orb_breakout_15m(
+            df_5m, macro_bias="BULLISH", vix_unfavorable=True, interval_minutes=5, now=now_after
+        )
+        self.assertFalse(vix_blk["triggered"])
+        self.assertEqual(vix_blk["reject_reason"], "VIX_SHIELD")
+
+        vols_low = [1000.0, 1000.0, 1000.0, 900.0, 950.0, 400.0]
+        df_low = self._make_ny_5m_session(closes, volumes=vols_low)
+        vol_blk = engine_orb_breakout_15m(
+            df_low, macro_bias="BULLISH", vix_unfavorable=False, interval_minutes=5, now=now_after
+        )
+        self.assertFalse(vol_blk["triggered"])
+        self.assertEqual(vol_blk["reject_reason"], "LOW_VOLUME")
+
+    def test_timemachine_gate_passes_favorable_blocks_unfavorable_and_insufficient(self):
+        # Favorable bullish drift -> LONG passes
+        bull_closes = [100.0 * (1.0035 ** i) for i in range(60)]
+        df_bull = _make_ohlcv(bull_closes, spread_half=0.25, freq="15min")
+        ok = evaluate_timemachine_gate(df_bull, side="LONG", sl_pct=1.0, tp_pct=2.0, n_replays=400, interval_minutes=15)
+        self.assertTrue(ok["passed"])
+        self.assertGreater(ok["expected_r"], 0.0)
+
+        # Strong bearish drift -> LONG blocked by Time Machine
+        bear_closes = [100.0 * (0.994 ** i) for i in range(60)]
+        df_bear = _make_ohlcv(bear_closes, spread_half=0.25, freq="15min")
+        blk = evaluate_timemachine_gate(df_bear, side="LONG", sl_pct=1.0, tp_pct=2.0, n_replays=400, interval_minutes=15)
+        self.assertFalse(blk["passed"])
+        self.assertIn(blk["reason"], ("TIMEMACHINE_NEG_EXPECTANCY", "TIMEMACHINE_LOW_WIN_PROB"))
+
+        # Short history -> graceful pass
+        df_short = _make_ohlcv([100.0, 100.5, 101.0], spread_half=0.2, freq="15min")
+        ins = evaluate_timemachine_gate(df_short, side="LONG", sl_pct=1.0, tp_pct=2.0, interval_minutes=15)
+        self.assertTrue(ins["passed"])
+        self.assertEqual(ins["reason"], "INSUFFICIENT_HISTORY")
 
 
 if __name__ == "__main__":
