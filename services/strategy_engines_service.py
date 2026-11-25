@@ -282,7 +282,7 @@ def regime_router(
         regime = "RANGE_OR_SQUEEZE"
         allowed_engines = [ENGINE_LIQUIDITY_SWEEP]
         prefer_limit = True
-    elif (bias in ("BULLISH", "BEARISH") and adx >= 24.0) or (adx >= 30.0 and atr >= 0.4):
+    elif (bias in ("BULLISH", "BEARISH") and adx >= 21.0) or (adx >= 30.0 and atr >= 0.4):
         regime = "TREND_STRONG"
         allowed_engines = [ENGINE_TREND_PULLBACK, ENGINE_INTRADAY_MOMENTUM]
         if is_equities:
@@ -705,6 +705,16 @@ def engine_intraday_momentum(
         return _result(False, None, "NO_SIGNAL", sl_pct, tp_pct, 0.0, features)
 
     side = "LONG" if cand_long else "SHORT"
+
+    atr_abs = (atr_pct / 100.0) * last_c if (atr_pct > 0.0 and last_c > 0.0) else 0.0
+    ema20_dist_atr = (abs(last_c - ema20) / atr_abs) if atr_abs > 0.0 else 0.0
+    features["ema20_dist_atr"] = round(ema20_dist_atr, 3)
+
+    # Anti-Chase guard: prevent entering late after an impulse is already overextended
+    if side == "LONG" and (rsi > 68.0 or ema20_dist_atr > 2.2):
+        return _result(False, side, "OVEREXTENDED_CHASE", sl_pct, tp_pct, 0.0, features)
+    if side == "SHORT" and (rsi < 32.0 or ema20_dist_atr > 2.2):
+        return _result(False, side, "OVEREXTENDED_CHASE", sl_pct, tp_pct, 0.0, features)
 
     if side == "LONG" and vix_unfavorable:
         return _result(False, side, "VIX_SHIELD", sl_pct, tp_pct, 0.0, features)

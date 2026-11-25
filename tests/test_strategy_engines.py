@@ -300,12 +300,13 @@ class TestLiquiditySweepEngine(unittest.TestCase):
 class TestIntradayMomentumEngine(unittest.TestCase):
     @staticmethod
     def _make_breakout_long_df():
-        # Strong uptrend establishing high ADX, EMA20 > EMA50, then 4-bar consolidation and sharp breakout bar
-        base = np.linspace(95.0, 118.0, 60)
-        consol = np.array([118.1, 118.0, 118.2, 118.1])
-        breakout = np.array([120.5])
-        closes = np.concatenate([base, consol, breakout])
-        vols = np.concatenate([np.full(64, 1000.0), [2200.0]])
+        # Realistic uptrend establishing high ADX & EMA20 > EMA50, healthy pullback/consolidation, then breakout
+        base = np.linspace(95.0, 116.5, 52) + np.sin(np.arange(52) * 0.8) * 1.1
+        pullback = np.array([115.2, 113.8, 113.0, 112.9, 113.4, 113.9, 114.2, 114.1])
+        consol = np.array([114.3, 114.2, 114.4, 114.3])
+        breakout = np.array([115.1])
+        closes = np.concatenate([base, pullback, consol, breakout])
+        vols = np.concatenate([np.full(len(closes) - 1, 1000.0), [2200.0]])
         return _make_ohlcv(closes, spread_half=0.35, volumes=vols, freq="15min")
 
     def test_chop_low_adx_rejects_with_low_adx_chop(self):
@@ -588,6 +589,26 @@ class TestOrbBreakoutAndTimeMachine(unittest.TestCase):
         ins = evaluate_timemachine_gate(df_short, side="LONG", sl_pct=1.0, tp_pct=2.0, interval_minutes=15)
         self.assertTrue(ins["passed"])
         self.assertEqual(ins["reason"], "INSUFFICIENT_HISTORY")
+
+    def test_intraday_momentum_blocks_overextended_chase(self):
+        # Strong late ramp so RSI > 68 and price is stretched > 2.2 ATR above EMA20
+        closes = [100.0 + (i * 0.2 if i < 24 else (i - 23) * 3.5) for i in range(32)]
+        df = _make_ohlcv(closes, spread_half=0.3, freq="15min")
+        res = engine_intraday_momentum(
+            df,
+            macro_bias="BULLISH",
+            cycle_data={"tempo_battleplan": "1° TEMPO", "vincolo_migliorino": "LIBERO", "hurst_fld_value": 90.0},
+            cvd_info={"bias": "BULLISH", "ratio": 1.3},
+            obi_info={"bias": "BALANCED", "imbalance": 0.1},
+            funding_rate=0.0,
+            vol_ratio=1.5,
+            is_overnight=False,
+            adx_min=10.0,
+            interval_minutes=15,
+        )
+        self.assertFalse(res["triggered"])
+        self.assertEqual(res["reject_reason"], "OVEREXTENDED_CHASE")
+        self.assertEqual(res["side"], "LONG")
 
 
 if __name__ == "__main__":
