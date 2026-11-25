@@ -845,6 +845,8 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             bottom: calc(70px + env(safe-area-inset-bottom, 20px));
             left: 14px;
             right: 14px;
+            max-width: calc(100vw - 28px);
+            box-sizing: border-box;
             background: rgba(28, 28, 30, 0.94);
             color: #FFFFFF;
             backdrop-filter: blur(25px);
@@ -863,6 +865,12 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             pointer-events: none;
             transform: translateY(12px) scale(0.98);
             transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+        #mobile-tooltip-text {
+            min-width: 0;
+            flex: 1;
+            overflow-wrap: anywhere;
+            word-break: break-word;
         }
         .toast-tooltip-mobile.show {
             opacity: 1;
@@ -1451,10 +1459,55 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             gap: 3px;
         }
         .learning-bucket-key {
-            font-size: 11px;
+            display: flex;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 4px;
+            font-size: 10px;
             font-weight: 600;
             color: var(--text-primary);
-            word-break: break-word;
+            overflow-wrap: anywhere;
+        }
+        .ctx-pill {
+            display: inline-flex;
+            align-items: center;
+            padding: 2px 6px;
+            border-radius: 5px;
+            font-size: 9px;
+            font-weight: 700;
+            letter-spacing: 0.2px;
+            background: rgba(142, 142, 147, 0.14);
+            color: var(--text-secondary);
+        }
+        .ctx-pill-long { background: rgba(48, 209, 88, 0.14); color: var(--apple-green); }
+        .ctx-pill-short { background: rgba(255, 69, 58, 0.14); color: var(--apple-red); }
+        .ctx-pill-broker { background: rgba(10, 132, 255, 0.14); color: var(--apple-blue); }
+        .ctx-pill-muted { opacity: 0.58; }
+        .exposure-strip {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 8px;
+            padding: 9px 12px;
+            margin-bottom: 10px;
+            border-radius: 12px;
+            background: var(--surface-glass);
+            border: 0.5px solid var(--border-subtle);
+            font-size: 11px;
+        }
+        .engine-bar-track {
+            width: 100%;
+            height: 4px;
+            border-radius: 999px;
+            background: rgba(142, 142, 147, 0.18);
+            overflow: hidden;
+            margin-top: 4px;
+        }
+        .engine-bar-fill {
+            height: 100%;
+            border-radius: 999px;
+            transition: width 0.25s ease;
         }
         .learning-bucket-tags {
             display: flex;
@@ -1633,6 +1686,10 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 <span>Posizioni Attive (Futures 24/7)</span>
                 <span id="active-positions-count" class="mono" style="font-size: 11px; color: var(--apple-blue);">0 attive</span>
             </div>
+            <div id="bybit-exposure-bar" class="exposure-strip mono" data-tip="Esposizione netta (Long - Short) e rischio massimo stimato sugli Stop Loss attivi di Bybit.">
+                <span style="color: var(--text-tertiary);">Esposizione Netta: --</span>
+                <span style="color: var(--text-tertiary);">Rischio SL: --</span>
+            </div>
             <div id="bybit-positions-list">
                 <div style="padding: 24px 0; text-align: center; color: var(--text-tertiary);" class="mono">
                     Caricamento posizioni...
@@ -1723,6 +1780,10 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             <div class="section-header-apple">
                 <span>Posizioni Azionarie Wall Street</span>
                 <span class="mono" style="font-size: 11px; color: var(--apple-amber);">NYSE / NASDAQ</span>
+            </div>
+            <div id="alpaca-exposure-bar" class="exposure-strip mono" data-tip="Esposizione netta Long/Short su Wall Street e rischio massimo stimato verso gli SL attivi.">
+                <span style="color: var(--text-tertiary);">Esposizione Netta: --</span>
+                <span style="color: var(--text-tertiary);">Rischio SL: --</span>
             </div>
             <div id="alpaca-cards-list" class="mobile-card-list mono"></div>
 
@@ -1882,6 +1943,14 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                     <div class="learning-banner-row" id="learning-shadow-verdict" data-tip="Confronto tra opportunita profittevoli scartate (Missed Alpha) e trade perdenti evitati dai filtri (Capitale Salvato).">
                         <span>Nessun segnale scartato ancora valutato su barre future chiuse.</span>
                     </div>
+                    <div id="learning-shadow-reasons" class="learning-bucket-tags"></div>
+                    <details class="learning-audit-details" id="learning-recent-shadows-details">
+                        <summary>
+                            <span>Ultimi Scarti &amp; Trigger Filtrati</span>
+                            <span class="badge badge-neutral mono" id="learning-recent-shadows-count">0 RECENTI</span>
+                        </summary>
+                        <div id="learning-recent-shadows-list" class="learning-bucket-list" style="margin-top: 8px;"></div>
+                    </details>
                 </div>
 
                 <!-- 3. Allocazione Bayesiana Contestuale -->
@@ -1891,7 +1960,10 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                             <div class="learning-section-title">Allocazione Bayesiana Contestuale</div>
                             <div class="learning-section-sub">Shrinkage Normal-Gamma, half-life 35g e auto-riabilitazione Shadow</div>
                         </div>
-                        <span class="badge badge-blue mono" id="learning-buckets-count" data-tip-pos="top-right" data-tip="Pesi dinamici per contesto: BOOST 1.25x, NORMAL 1.00x, CAUTIOUS 0.50x, SHADOW 0.00x (blocco virtuale).">0 CONTESTI</span>
+                        <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
+                            <button type="button" class="tf-pill mono" id="toggle-unknown-buckets-btn" onclick="toggleUnknownBuckets()" style="padding: 3px 8px; font-size: 9px;" data-tip="Mostra o nasconde i vecchi contesti storici privi di lato o bias (UNKNOWN).">MOSTRA UNKNOWN</button>
+                            <span class="badge badge-blue mono" id="learning-buckets-count" data-tip-pos="top-right" data-tip="Pesi dinamici per contesto: BOOST 1.25x, NORMAL 1.00x, CAUTIOUS 0.50x, SHADOW 0.00x (blocco virtuale).">0 CONTESTI</span>
+                        </div>
                     </div>
                     <div id="learning-context-buckets-list" class="learning-bucket-list">
                         <div class="learning-banner-row">
@@ -1904,10 +1976,13 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 <div class="learning-section" id="learning-audit-section">
                     <div class="learning-section-hdr">
                         <div>
-                            <div class="learning-section-title">Performance Motori, MetaGate &amp; Self-Audit</div>
-                            <div class="learning-section-sub">Ripartizione strategie, stato drift quant e ultimo report domenicale</div>
+                            <div class="learning-section-title">Performance Motori, Drawdown &amp; Self-Audit</div>
+                            <div class="learning-section-sub">Contributo per strategia, Max Drawdown, stato MetaGate e report domenicale</div>
                         </div>
-                        <span class="badge badge-neutral mono" id="learning-metagate-badge" data-tip-pos="top-right" data-tip="Stato del filtro secondario MetaGate per il monitoraggio del drift statistico sulle esecuzioni.">METAGATE OFF</span>
+                        <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
+                            <span class="badge badge-neutral mono" id="learning-maxdd-badge" data-tip="Massimo drawdown realizzato sui trade chiusi del journal.">MAX DD: $0</span>
+                            <span class="badge badge-neutral mono" id="learning-metagate-badge" data-tip-pos="top-right" data-tip="Stato del filtro secondario MetaGate per il monitoraggio del drift statistico sulle esecuzioni.">METAGATE OFF</span>
+                        </div>
                     </div>
                     <div id="learning-engines-list" class="learning-bucket-list"></div>
                     <div class="learning-banner-row" id="learning-metagate-row">
@@ -2127,7 +2202,8 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                     Ogni segnale bloccato da un filtro di rischio o da un contesto in <em>Shadow Mode</em> non viene dimenticato:<br>
                     <strong>• Registrazione Immutabile:</strong> Viene salvato in <code>signal_shadows</code> con motivo dello scarto, prezzo del segnale, SL% e TP%.<br>
                     <strong>• Valutazione Causale su Barre Future Chiuse:</strong> Dopo la maturazione (<code>&ge; 90 minuti</code>), il motore simula il percorso reale esclusivamente su candele future chiuse, controllando lo Stop Loss prima del Take Profit sulle barre ambigue e sottraendo le commissioni round-trip.<br>
-                    <strong>• Missed Alpha vs Capitale Salvato:</strong> Misura con precisione se i filtri stanno proteggendo il capitale (<code>Virtual Avg R &le; 0</code>) o scartando opportunita profittevoli (<code>Missed Alpha</code>).
+                    <strong>• Missed Alpha vs Capitale Salvato:</strong> Misura con precisione se i filtri stanno proteggendo il capitale (<code>Virtual Avg R &le; 0</code>) o scartando opportunita profittevoli (<code>Missed Alpha</code>).<br>
+                    <strong data-tip="Contatori in tempo reale dei blocchi (inclusi TIMEMACHINE_MC, VIX_SHIELD, LOW_VOLUME) e lista degli ultimi segnali filtrati.">• Telemetria Scarti &amp; Feed Live:</strong> Mostra il conteggio per motivo di scarto (incluso <code>Time Machine MC</code>) e gli ultimi segnali filtrati con il relativo esito virtuale.
                 </div>
             </div>
 
@@ -2156,7 +2232,8 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                     Il dimensionamento delle posizioni si adatta al rendimento statistico di ogni contesto (<code>Broker | Simbolo | Motore | Lato | Volatilita | Sessione</code>):<br>
                     <strong>• Shrinkage Normal-Gamma &amp; Half-Life 35g:</strong> I dati recenti pesano di piu dei vecchi grazie al decadimento esponenziale (<code>half-life 35 giorni</code>), con backoff gerarchico se i campioni specifici sono pochi.<br>
                     <strong>• 4 Regimi Operativi:</strong> <code>BOOST 1.25x</code> (<code>N_eff &ge; 15</code>, <code>LCB &ge; +0.10R</code>), <code>NORMAL 1.00x</code>, <code>CAUTIOUS 0.50x</code> (<code>N_eff &ge; 10</code>, edge debole) e <code>SHADOW 0.00x</code> (blocco reale quando <code>LCB &le; -0.25R</code> e media <code>&le; -0.15R</code>).<br>
-                    <strong>• Auto-Ripristino (<code>SHADOW RECOVERED</code>):</strong> Anche a size <code>0.00x</code>, i segnali shadow continuano a essere simulati: quando i virtual outcomes riportano l'aspettativa in recupero, il contesto viene automaticamente riabilitato.
+                    <strong>• Auto-Ripristino (<code>SHADOW RECOVERED</code>):</strong> Anche a size <code>0.00x</code>, i segnali shadow continuano a essere simulati: quando i virtual outcomes riportano l'aspettativa in recupero, il contesto viene automaticamente riabilitato.<br>
+                    <strong data-tip="I vecchi bucket importati senza lato o bias vengono raggruppati sotto UNKNOWN e tenuti nascosti di default dal toggle dedicato.">• Pillole Leggibili &amp; Filtro UNKNOWN:</strong> I contesti vengono mostrati come tag compatti e i vecchi bucket storici <code>UNKNOWN</code> possono essere mostrati o nascosti con un tap.
                 </div>
             </div>
 
@@ -2170,7 +2247,8 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                     La supervisione quantitativa rimane completamente trasparente e verificabile nel tab <strong>Storico</strong> e su Telegram:<br>
                     <strong>• Report Domenicale Automatico (20:00 CET):</strong> Ogni domenica alle 20:00 CET il motore esegue l'audit completo (<code>WEEKLY_AUDIT</code>), persistendolo nel database e inviando il riepilogo esecutivo su Telegram.<br>
                     <strong>• Comando <code>/learning</code> su Telegram:</strong> Permette di consultare in qualsiasi momento statistiche nette, MFE/MAE, Shadow Ledger, bucket bayesiani e stato dell'Exit Frontier.<br>
-                    <strong>• Quant Drift Monitor (MetaGate):</strong> Verifica l'attivazione, lo stato <code>deployable</code>, il numero di eventi e il base rate del modello secondario MetaGate configurato.
+                    <strong>• Quant Drift Monitor (MetaGate):</strong> Verifica l'attivazione, lo stato <code>deployable</code>, il numero di eventi e il base rate del modello secondario MetaGate configurato.<br>
+                    <strong data-tip="Riepilogo rapido in Bybit e Alpaca con Long vs Short netto, perdita massima sugli SL attivi e Max Drawdown storico.">• Esposizione Netta, Rischio SL &amp; Max Drawdown:</strong> Ogni sezione mostra l'esposizione netta Long/Short, il rischio aperto verso gli Stop Loss e il Max Drawdown storico per motore.
                 </div>
             </div>
 
@@ -3184,6 +3262,166 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             }
         }
 
+        window.showUnknownBuckets = false;
+        window.lastLearningData = null;
+
+        function toggleUnknownBuckets() {
+            window.showUnknownBuckets = !window.showUnknownBuckets;
+            const btn = document.getElementById('toggle-unknown-buckets-btn');
+            if (btn) {
+                btn.textContent = window.showUnknownBuckets ? 'NASCONDI UNKNOWN' : 'MOSTRA UNKNOWN';
+                btn.classList.toggle('active', window.showUnknownBuckets);
+            }
+            if (window.lastLearningData) {
+                renderContextBucketsSection(window.lastLearningData);
+            }
+        }
+
+        function formatContextKeyPills(ck) {
+            const parts = String(ck || 'CONTESTO').split('|').filter(Boolean);
+            const shortEngine = {
+                'TREND_PULLBACK_4H': 'PULLBACK_4H',
+                'LIQUIDITY_SWEEP_MR': 'SWEEP_MR',
+                'INTRADAY_MOMENTUM': 'INTRADAY',
+                'ORB_BREAKOUT_15M': 'ORB_15M'
+            };
+            return parts.map((raw, idx) => {
+                const p = raw.trim().toUpperCase();
+                const label = shortEngine[p] || p;
+                let cls = 'ctx-pill';
+                if (p === 'UNKNOWN') cls += ' ctx-pill-muted';
+                else if (idx === 0) cls += ' ctx-pill-broker';
+                else if (p === 'LONG' || p === 'BUY' || p === 'BULLISH') cls += ' ctx-pill-long';
+                else if (p === 'SHORT' || p === 'SELL' || p === 'BEARISH') cls += ' ctx-pill-short';
+                return `<span class="${cls}">${escapeHtml(label)}</span>`;
+            }).join('');
+        }
+
+        function renderContextBucketsSection(lData) {
+            try {
+                const buckets = Array.isArray(lData.context_buckets) ? lData.context_buckets : [];
+                const activeBuckets = buckets.filter(b => !String(b.context_key || '').toUpperCase().includes('UNKNOWN'));
+                const unknownCount = buckets.length - activeBuckets.length;
+                const toggleBtn = document.getElementById('toggle-unknown-buckets-btn');
+                if (toggleBtn) {
+                    toggleBtn.style.display = unknownCount > 0 ? 'inline-flex' : 'none';
+                    toggleBtn.textContent = window.showUnknownBuckets
+                        ? `NASCONDI UNKNOWN (${unknownCount})`
+                        : `MOSTRA UNKNOWN (${unknownCount})`;
+                }
+                const visibleBuckets = (window.showUnknownBuckets || activeBuckets.length === 0)
+                    ? buckets
+                    : activeBuckets;
+
+                const bCountEl = document.getElementById('learning-buckets-count');
+                const bListEl = document.getElementById('learning-context-buckets-list');
+                if (bCountEl) {
+                    bCountEl.innerText = unknownCount > 0 && !window.showUnknownBuckets && activeBuckets.length > 0
+                        ? `${activeBuckets.length} ATTIVI (${unknownCount} UNKNOWN)`
+                        : `${buckets.length} CONTESTI`;
+                }
+                if (bListEl) {
+                    if (visibleBuckets.length === 0) {
+                        bListEl.innerHTML = `<div class="learning-banner-row"><span>Nessun bucket contestuale consolidato: prior neutro 1.00x attivo.</span></div>`;
+                    } else {
+                        bListEl.innerHTML = visibleBuckets.slice(0, 10).map(b => {
+                            const mode = String(b.mode || 'STANDARD').toUpperCase();
+                            const scale = Number(b.scale !== undefined ? b.scale : 1.0);
+                            const effN = Number(b.effective_n !== undefined ? b.effective_n : (b.n_eff || 0));
+                            const realN = Number(b.real_n !== undefined ? b.real_n : (b.n_real || 0));
+                            const shadowN = Number(b.shadow_n !== undefined ? b.shadow_n : (b.n_shadow || 0));
+                            const meanR = Number(b.mean_r || 0);
+                            const lcbR = Number(b.lcb_r || 0);
+
+                            let modeBadgeCls = 'badge-blue';
+                            let modeLabel = `NORMAL ${scale.toFixed(2)}x`;
+                            if (mode === 'BOOSTED') {
+                                modeBadgeCls = 'badge-green';
+                                modeLabel = `BOOST ${scale.toFixed(2)}x`;
+                            } else if (mode === 'CAUTIOUS') {
+                                modeBadgeCls = 'badge-amber';
+                                modeLabel = `CAUTIOUS ${scale.toFixed(2)}x`;
+                            } else if (mode === 'SHADOW_BLOCKED') {
+                                modeBadgeCls = 'badge-red';
+                                modeLabel = `SHADOW 0.00x`;
+                            } else if (mode === 'LEARNING_PRIOR') {
+                                modeBadgeCls = 'badge-neutral';
+                                modeLabel = `PRIOR ${scale.toFixed(2)}x`;
+                            }
+
+                            const recBadge = b.shadow_recovered
+                                ? `<span class="badge badge-purple mono" data-tip="Contesto riabilitato automaticamente dai virtual outcomes positivi nello Shadow Ledger.">SHADOW RECOVERED</span>`
+                                : '';
+                            const backoffTag = Number(b.backoff_level || 0) > 0
+                                ? `<span class="badge badge-neutral mono">L${Number(b.backoff_level)}</span>`
+                                : '';
+                            const meanCls = meanR >= 0 ? 'val-up' : 'val-down';
+
+                            return `
+                                <div class="learning-bucket-row" data-tip="${escapeHtml(`Bucket: ${b.context_key} | Matched: ${b.matched_key || b.context_key} | N_eff=${effN.toFixed(1)}, LCB=${lcbR >= 0 ? '+' : ''}${lcbR.toFixed(2)}R`)}">
+                                    <div class="learning-bucket-main">
+                                        <div class="learning-bucket-key mono">${formatContextKeyPills(b.context_key || 'CONTESTO')}</div>
+                                        <div class="learning-bucket-tags">
+                                            <span class="badge ${modeBadgeCls} mono">${escapeHtml(modeLabel)}</span>
+                                            ${recBadge}
+                                            ${backoffTag}
+                                        </div>
+                                    </div>
+                                    <div class="learning-bucket-stats mono">
+                                        <div class="${meanCls}">${meanR >= 0 ? '+' : ''}${meanR.toFixed(2)}R <span style="color: var(--text-tertiary); font-weight: 500;">(LCB ${lcbR >= 0 ? '+' : ''}${lcbR.toFixed(2)}R)</span></div>
+                                        <div>N_eff ${effN.toFixed(1)} &bull; R:${realN} / S:${shadowN}</div>
+                                    </div>
+                                </div>
+                            `;
+                        }).join('');
+                    }
+                }
+            } catch (eBuckets) {
+                console.error('Context buckets render error:', eBuckets);
+            }
+        }
+
+        function renderExposureStrip(elId, positions, equityUsd, isAlpaca) {
+            const el = document.getElementById(elId);
+            if (!el) return;
+            const list = Array.isArray(positions) ? positions : [];
+            if (list.length === 0) {
+                el.innerHTML = `<span style="color: var(--text-tertiary);">Esposizione Netta: <b style="color: var(--text-secondary);">Flat ($0)</b></span><span style="color: var(--text-tertiary);">Rischio SL: <b style="color: var(--apple-green);">0.00%</b></span>`;
+                return;
+            }
+            let longUsd = 0;
+            let shortUsd = 0;
+            let openSlRiskUsd = 0;
+            list.forEach(pos => {
+                const sideStr = String(pos.side || (isAlpaca ? 'LONG' : '')).toUpperCase();
+                const isLong = sideStr === 'BUY' || sideStr === 'LONG' || (!isAlpaca && sideStr !== 'SELL');
+                const valUsd = Math.abs(parseFloat(isAlpaca ? (pos.market_value || 0) : (pos.position_value || 0)) || 0);
+                if (isLong) longUsd += valUsd;
+                else shortUsd += valUsd;
+
+                const entry = parseFloat(isAlpaca ? (pos.avg_entry_price || 0) : (pos.entry_price || 0)) || 0;
+                const mark = parseFloat(isAlpaca ? (pos.current_price || entry) : (pos.mark_price || entry)) || entry;
+                const slPrice = parseFloat(pos.stop_loss || pos.sl || pos.trailing_stop || 0) || 0;
+                const qty = Math.abs(parseFloat(isAlpaca ? (pos.qty || 0) : (pos.size || 0)) || 0);
+                if (slPrice > 0 && mark > 0 && qty > 0) {
+                    const riskPerUnit = isLong ? Math.max(0, mark - slPrice) : Math.max(0, slPrice - mark);
+                    openSlRiskUsd += riskPerUnit * qty;
+                } else if (valUsd > 0) {
+                    openSlRiskUsd += valUsd * 0.015;
+                }
+            });
+            const netUsd = longUsd - shortUsd;
+            const netSign = netUsd >= 0 ? '+' : '-';
+            const netCls = netUsd >= 0 ? 'val-up' : 'val-down';
+            const eq = parseFloat(equityUsd || 0);
+            const riskPct = eq > 0 ? (openSlRiskUsd / eq) * 100 : 0;
+            const riskCls = riskPct >= 5 ? 'val-down' : (riskPct >= 2.5 ? '' : 'val-up');
+            el.innerHTML = `
+                <span>Esposizione Netta: <b class="${netCls}">${netSign}$${Math.abs(netUsd).toLocaleString('en-US', {maximumFractionDigits: 0})}</b> <span style="color: var(--text-tertiary);">(L $${Math.round(longUsd)} / S $${Math.round(shortUsd)})</span></span>
+                <span>Rischio SL Aperto: <b class="${riskCls}">-$${openSlRiskUsd.toFixed(2)}</b> <span style="color: var(--text-tertiary);">(-${riskPct.toFixed(2)}%)</span></span>
+            `;
+        }
+
         function renderUI(data) {
             const bybit = data.bybit || {};
             const alpaca = data.alpaca || {};
@@ -3195,6 +3433,9 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             const history = data.perf_history || [];
             const variations = data.variations || {};
             const compass = data.compass || {};
+
+            renderExposureStrip('bybit-exposure-bar', bPositions, bWallet.total_equity || bWallet.wallet_balance || 0, false);
+            renderExposureStrip('alpaca-exposure-bar', aPositions, aAcc.equity || aAcc.portfolio_value || 0, true);
 
             // Aggiorna Hero Delta Display (Apple Stocks style)
             const heroDeltaEl = document.getElementById('hero-delta-display');
@@ -3916,78 +4157,73 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                         shVerdictEl.innerHTML = `<span class="badge ${tagCls} mono">${tagTxt}</span><span>${escapeHtml(descTxt)}</span>`;
                     }
                 }
-            } catch (eShadow) {
-                console.error('Shadow ledger render error:', eShadow);
-            }
 
-            // 7c. Allocazione Bayesiana Contestuale
-            try {
-                const buckets = Array.isArray(lData.context_buckets) ? lData.context_buckets : [];
-                const bCountEl = document.getElementById('learning-buckets-count');
-                const bListEl = document.getElementById('learning-context-buckets-list');
-                if (bCountEl) bCountEl.innerText = `${buckets.length} CONTESTI`;
-                if (bListEl) {
-                    if (buckets.length === 0) {
-                        bListEl.innerHTML = `<div class="learning-banner-row"><span>Nessun bucket contestuale consolidato: prior neutro 1.00x attivo.</span></div>`;
+                const reasonsEl = document.getElementById('learning-shadow-reasons');
+                if (reasonsEl) {
+                    const rc = sh.reason_counts || {};
+                    const tmCnt = Number(sh.timemachine_blocked_count || 0);
+                    const chips = [`<span class="ctx-pill ${tmCnt > 0 ? 'ctx-pill-short' : ''}" data-tip="Segnali bloccati dal Monte Carlo pre-entry (Time Machine).">TIMEMACHINE_MC: ${tmCnt}</span>`];
+                    Object.keys(rc).slice(0, 5).forEach(rk => {
+                        if (rk.includes('TIMEMACHINE')) return;
+                        chips.push(`<span class="ctx-pill">${escapeHtml(rk)}: ${Number(rc[rk] || 0)}</span>`);
+                    });
+                    reasonsEl.innerHTML = chips.join('');
+                }
+
+                const recShadows = Array.isArray(lData.recent_shadows) ? lData.recent_shadows : [];
+                const recCountEl = document.getElementById('learning-recent-shadows-count');
+                const recListEl = document.getElementById('learning-recent-shadows-list');
+                if (recCountEl) recCountEl.innerText = `${recShadows.length} RECENTI`;
+                if (recListEl) {
+                    if (recShadows.length === 0) {
+                        recListEl.innerHTML = `<div class="learning-banner-row"><span>Nessun segnale scartato registrato di recente.</span></div>`;
                     } else {
-                        bListEl.innerHTML = buckets.slice(0, 8).map(b => {
-                            const mode = String(b.mode || 'STANDARD').toUpperCase();
-                            const scale = Number(b.scale !== undefined ? b.scale : 1.0);
-                            const effN = Number(b.effective_n !== undefined ? b.effective_n : (b.n_eff || 0));
-                            const realN = Number(b.real_n !== undefined ? b.real_n : (b.n_real || 0));
-                            const shadowN = Number(b.shadow_n !== undefined ? b.shadow_n : (b.n_shadow || 0));
-                            const meanR = Number(b.mean_r || 0);
-                            const lcbR = Number(b.lcb_r || 0);
-
-                            let modeBadgeCls = 'badge-blue';
-                            let modeLabel = `NORMAL ${scale.toFixed(2)}x`;
-                            if (mode === 'BOOSTED') {
-                                modeBadgeCls = 'badge-green';
-                                modeLabel = `BOOST ${scale.toFixed(2)}x`;
-                            } else if (mode === 'CAUTIOUS') {
-                                modeBadgeCls = 'badge-amber';
-                                modeLabel = `CAUTIOUS ${scale.toFixed(2)}x`;
-                            } else if (mode === 'SHADOW_BLOCKED') {
-                                modeBadgeCls = 'badge-red';
-                                modeLabel = `SHADOW 0.00x`;
-                            } else if (mode === 'LEARNING_PRIOR') {
-                                modeBadgeCls = 'badge-neutral';
-                                modeLabel = `PRIOR ${scale.toFixed(2)}x`;
-                            }
-
-                            const recBadge = b.shadow_recovered
-                                ? `<span class="badge badge-purple mono" data-tip="Contesto riabilitato automaticamente dai virtual outcomes positivi nello Shadow Ledger.">SHADOW RECOVERED</span>`
-                                : '';
-                            const backoffTag = Number(b.backoff_level || 0) > 0
-                                ? `<span class="badge badge-neutral mono">L${Number(b.backoff_level)}</span>`
-                                : '';
-                            const meanCls = meanR >= 0 ? 'val-up' : 'val-down';
-
+                        recListEl.innerHTML = recShadows.slice(0, 8).map(rs => {
+                            const sym = escapeHtml(rs.symbol || '---');
+                            const brk = escapeHtml(String(rs.broker || '').toUpperCase());
+                            const side = escapeHtml(String(rs.side || '').toUpperCase());
+                            const eng = escapeHtml(String(rs.engine || '').toUpperCase());
+                            const rsn = escapeHtml(String(rs.reject_reason || 'FILTER'));
+                            const st = String(rs.status || 'PENDING').toUpperCase();
+                            const vr = Number(rs.virtual_r || 0);
+                            const outcomeHtml = st === 'EVALUATED'
+                                ? `<span class="${vr > 0 ? 'val-up' : 'val-down'}">${vr >= 0 ? '+' : ''}${vr.toFixed(2)}R</span>`
+                                : `<span style="color: var(--text-tertiary);">PENDING</span>`;
                             return `
-                                <div class="learning-bucket-row" data-tip="${escapeHtml(`Bucket: ${b.context_key} | Matched: ${b.matched_key || b.context_key} | N_eff=${effN.toFixed(1)}, LCB=${lcbR >= 0 ? '+' : ''}${lcbR.toFixed(2)}R`)}">
+                                <div class="learning-bucket-row" style="padding: 6px 9px;">
                                     <div class="learning-bucket-main">
-                                        <div class="learning-bucket-key mono">${escapeHtml(b.context_key || 'CONTESTO')}</div>
-                                        <div class="learning-bucket-tags">
-                                            <span class="badge ${modeBadgeCls} mono">${escapeHtml(modeLabel)}</span>
-                                            ${recBadge}
-                                            ${backoffTag}
+                                        <div class="learning-bucket-key mono">
+                                            ${brk ? `<span class="ctx-pill ctx-pill-broker">${brk}</span>` : ''}
+                                            <span class="ctx-pill">${sym}</span>
+                                            ${side ? `<span class="ctx-pill ${side === 'LONG' || side === 'BUY' ? 'ctx-pill-long' : 'ctx-pill-short'}">${side}</span>` : ''}
+                                            ${eng ? `<span class="ctx-pill">${eng}</span>` : ''}
                                         </div>
+                                        <div class="learning-section-sub mono">Motivo: ${rsn}</div>
                                     </div>
-                                    <div class="learning-bucket-stats mono">
-                                        <div class="${meanCls}">${meanR >= 0 ? '+' : ''}${meanR.toFixed(2)}R <span style="color: var(--text-tertiary); font-weight: 500;">(LCB ${lcbR >= 0 ? '+' : ''}${lcbR.toFixed(2)}R)</span></div>
-                                        <div>N_eff ${effN.toFixed(1)} &bull; R:${realN} / S:${shadowN}</div>
-                                    </div>
+                                    <div class="learning-bucket-stats mono">${outcomeHtml}</div>
                                 </div>
                             `;
                         }).join('');
                     }
                 }
-            } catch (eBuckets) {
-                console.error('Context buckets render error:', eBuckets);
+            } catch (eShadow) {
+                console.error('Shadow ledger render error:', eShadow);
             }
+
+            window.lastLearningData = lData;
+            renderContextBucketsSection(lData);
 
             // 7d. Breakdown Motori, MetaGate Drift & Weekly Audit
             try {
+                const tc = lData.trade_counts || {};
+                const ddUsd = Number(tc.max_drawdown_usd || 0);
+                const ddPct = Number(tc.max_drawdown_pct || 0);
+                const ddBadge = document.getElementById('learning-maxdd-badge');
+                if (ddBadge) {
+                    ddBadge.innerText = `MAX DD: -$${ddUsd.toFixed(2)}${ddPct > 0 ? ` (-${ddPct.toFixed(1)}%)` : ''}`;
+                    ddBadge.className = ddUsd > 0 ? 'badge badge-amber mono' : 'badge badge-neutral mono';
+                }
+
                 const engMap = lData.engines_breakdown || {};
                 const engListEl = document.getElementById('learning-engines-list');
                 if (engListEl) {
@@ -3995,6 +4231,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                     if (engKeys.length === 0) {
                         engListEl.innerHTML = '';
                     } else {
+                        const maxAbsPnl = Math.max(1, ...engKeys.map(k => Math.abs(Number((engMap[k] || {}).net_pnl_usd || 0))));
                         engListEl.innerHTML = engKeys.map(k => {
                             const st = engMap[k] || {};
                             const wr = Number(st.win_rate || 0);
@@ -4002,11 +4239,14 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                             const pnlU = Number(st.net_pnl_usd || 0);
                             const expR = Number(st.expectancy_r || 0);
                             const pnlCls = pnlU >= 0 ? 'val-up' : 'val-down';
+                            const barPct = Math.min(100, Math.max(8, (Math.abs(pnlU) / maxAbsPnl) * 100));
+                            const barColor = pnlU >= 0 ? 'var(--apple-green)' : 'var(--apple-red)';
                             return `
                                 <div class="learning-bucket-row">
                                     <div class="learning-bucket-main">
-                                        <div class="learning-bucket-key mono">${escapeHtml(k)}</div>
+                                        <div class="learning-bucket-key mono"><span class="ctx-pill ctx-pill-broker">${escapeHtml(k)}</span></div>
                                         <div class="learning-section-sub mono">${Number(st.total || 0)} trade &bull; WR ${wr.toFixed(1)}% &bull; PF ${pf.toFixed(2)}</div>
+                                        <div class="engine-bar-track"><div class="engine-bar-fill" style="width: ${barPct.toFixed(1)}%; background: ${barColor};"></div></div>
                                     </div>
                                     <div class="learning-bucket-stats mono">
                                         <div class="${pnlCls}">${pnlU >= 0 ? '+' : ''}$${pnlU.toFixed(2)}</div>
@@ -4588,6 +4828,8 @@ def _empty_learning_payload() -> Dict[str, Any]:
             "expectancy_usd": 0.0,
             "total_pnl_usd": 0.0,
             "total_fees_usd": 0.0,
+            "max_drawdown_usd": 0.0,
+            "max_drawdown_pct": 0.0,
         },
         "avg_mfe_pct": 0.0,
         "avg_mae_pct": 0.0,
@@ -4601,6 +4843,8 @@ def _empty_learning_payload() -> Dict[str, Any]:
             "win_rate_pct": 0.0,
             "missed_alpha_count": 0,
             "saved_capital_count": 0,
+            "reason_counts": {},
+            "timemachine_blocked_count": 0,
         },
         "context_buckets": [],
         "exit_frontier": {
@@ -4681,7 +4925,10 @@ def _build_learning_payload(db_path: Path, meta_gate_path: Optional[str] = None)
     saved_capital_count = int(sh_raw.get("saved_capital_count", 0) or 0)
     shadow_pos_by_ctx: Dict[str, int] = {}
     real_neg_by_ctx: Dict[str, int] = {}
+    shadow_reason_counts: Dict[str, int] = {}
     recent_shadows = []
+    max_dd_usd = 0.0
+    max_dd_pct = 0.0
 
     if eff_db.exists():
         conn = None
@@ -4707,6 +4954,16 @@ def _build_learning_payload(db_path: Path, meta_gate_path: Optional[str] = None)
                     missed_alpha_count = int(agg_row["missed_alpha"] or 0)
                     saved_capital_count = int(agg_row["saved_cap"] or 0)
 
+                for rrow in conn.execute(
+                    """
+                    SELECT COALESCE(NULLIF(UPPER(reject_reason), ''), 'OTHER') AS rr, COUNT(*) AS cnt
+                    FROM signal_shadows
+                    GROUP BY rr
+                    ORDER BY cnt DESC
+                    """
+                ).fetchall():
+                    shadow_reason_counts[str(rrow["rr"])] = int(rrow["cnt"] or 0)
+
                 for srow in conn.execute(
                     """
                     SELECT UPPER(context_key) AS ck,
@@ -4720,10 +4977,10 @@ def _build_learning_payload(db_path: Path, meta_gate_path: Optional[str] = None)
 
                 for rec in conn.execute(
                     """
-                    SELECT symbol, side, engine, reject_reason, status, virtual_r, virtual_pnl_pct, hit_outcome, created_at
+                    SELECT broker, symbol, side, engine, reject_reason, status, virtual_r, virtual_pnl_pct, hit_outcome, created_at
                     FROM signal_shadows
                     ORDER BY id DESC
-                    LIMIT 5
+                    LIMIT 10
                     """
                 ).fetchall():
                     recent_shadows.append(dict(rec))
@@ -4739,6 +4996,25 @@ def _build_learning_payload(db_path: Path, meta_gate_path: Optional[str] = None)
                     """
                 ).fetchall():
                     real_neg_by_ctx[str(trow["ck"])] = int(trow["neg_cnt"] or 0)
+
+                cum_pnl = 0.0
+                peak_pnl = 0.0
+                for p_row in conn.execute(
+                    """
+                    SELECT COALESCE(pnl_usd, 0.0) AS pnl_usd, COALESCE(notional_usd, 0.0) AS notional_usd
+                    FROM trade_journal
+                    WHERE status = 'CLOSED' AND pnl_usd IS NOT NULL
+                    ORDER BY COALESCE(closed_at, id) ASC
+                    """
+                ).fetchall():
+                    cum_pnl += float(p_row["pnl_usd"] or 0.0)
+                    if cum_pnl > peak_pnl:
+                        peak_pnl = cum_pnl
+                    dd_now = peak_pnl - cum_pnl
+                    if dd_now > max_dd_usd:
+                        max_dd_usd = dd_now
+                if peak_pnl > 0.0 and max_dd_usd > 0.0:
+                    max_dd_pct = min(100.0, (max_dd_usd / peak_pnl) * 100.0)
         except Exception:
             pass
         finally:
@@ -4748,6 +5024,11 @@ def _build_learning_payload(db_path: Path, meta_gate_path: Optional[str] = None)
                 except Exception:
                     pass
 
+    tm_blocked_cnt = sum(
+        cnt for k, cnt in shadow_reason_counts.items() if "TIMEMACHINE" in k
+    )
+    payload["trade_counts"]["max_drawdown_usd"] = round(max_dd_usd, 2)
+    payload["trade_counts"]["max_drawdown_pct"] = round(max_dd_pct, 2)
     payload["shadow_stats"] = {
         "total": total_sh,
         "evaluated": eval_sh,
@@ -4756,6 +5037,8 @@ def _build_learning_payload(db_path: Path, meta_gate_path: Optional[str] = None)
         "win_rate_pct": float(sh_raw.get("shadow_win_rate", 0.0) or 0.0),
         "missed_alpha_count": missed_alpha_count,
         "saved_capital_count": saved_capital_count,
+        "reason_counts": shadow_reason_counts,
+        "timemachine_blocked_count": tm_blocked_cnt,
     }
 
     buckets = []

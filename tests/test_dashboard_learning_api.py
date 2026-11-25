@@ -185,6 +185,7 @@ class TestDashboardLearningAPI(unittest.TestCase):
         self.assertEqual(learning["trade_counts"]["total"], 2)
         self.assertEqual(learning["trade_counts"]["wins"], 1)
         self.assertEqual(learning["trade_counts"]["losses"], 1)
+        self.assertAlmostEqual(learning["trade_counts"]["max_drawdown_usd"], 110.0, places=2)
         self.assertAlmostEqual(learning["avg_mfe_pct"], 1.7, places=2)
         self.assertAlmostEqual(learning["avg_mae_pct"], -0.9, places=2)
         self.assertAlmostEqual(learning["avg_edge_ratio"], 3.155, places=2)
@@ -196,6 +197,9 @@ class TestDashboardLearningAPI(unittest.TestCase):
         self.assertEqual(sh["missed_alpha_count"], 1)
         self.assertEqual(sh["saved_capital_count"], 1)
         self.assertAlmostEqual(sh["win_rate_pct"], 50.0, places=1)
+        self.assertEqual(sh["reason_counts"].get("CVD_SHIELD"), 1)
+        self.assertEqual(sh["timemachine_blocked_count"], 0)
+        self.assertEqual(len(learning["recent_shadows"]), 3)
 
         buckets = learning["context_buckets"]
         self.assertGreaterEqual(len(buckets), 2)
@@ -254,10 +258,15 @@ class TestDashboardLearningAPI(unittest.TestCase):
 
         # XSS helper checks
         self.assertIn("function escapeHtml(", html)
+        self.assertIn("function formatContextKeyPills(", html)
+        self.assertIn("function renderExposureStrip(", html)
+        self.assertIn("function toggleUnknownBuckets(", html)
+        self.assertIn("overflow-wrap: anywhere;", html)
         self.assertIn("toastText.textContent =", html)
         self.assertNotIn("toastText.innerHTML =", html)
         self.assertIn("escapeHtml(ins.post_mortem_analysis || ins.learned_lesson", html)
-        self.assertIn("escapeHtml(b.context_key", html)
+        self.assertIn("formatContextKeyPills(b.context_key", html)
+        self.assertIn("escapeHtml(label)", html)
         self.assertIn("escapeHtml(readiness.expected_movement", html)
         self.assertIn("escapeHtml(aRead.expected_movement", html)
         self.assertNotIn("openTradeModal('${p.symbol}'", html)
