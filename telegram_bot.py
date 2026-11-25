@@ -4011,10 +4011,12 @@ def _collect_bybit_signals(
     df_15m = _fetch_bybit_closed_ohlcv(b_sym, b_yf, "15", 15, limit=180)
     if df_15m is None or len(df_15m) < 35:
         return None
-    df_1h = _fetch_bybit_closed_ohlcv(b_sym, b_yf, "60", 60, limit=120) or _resample_ohlcv(df_15m, "1h")
-    df_4h = _fetch_bybit_closed_ohlcv(b_sym, b_yf, "240", 240, limit=100) or (
-        _resample_ohlcv(df_1h, "4h") if df_1h is not None else _resample_ohlcv(df_15m, "4h")
-    )
+    df_1h = _fetch_bybit_closed_ohlcv(b_sym, b_yf, "60", 60, limit=120)
+    if df_1h is None or df_1h.empty:
+        df_1h = _resample_ohlcv(df_15m, "1h")
+    df_4h = _fetch_bybit_closed_ohlcv(b_sym, b_yf, "240", 240, limit=100)
+    if df_4h is None or df_4h.empty:
+        df_4h = _resample_ohlcv(df_1h, "4h") if (df_1h is not None and not df_1h.empty) else _resample_ohlcv(df_15m, "4h")
 
     close = df_15m["Close"]
     vol = df_15m["Volume"]
