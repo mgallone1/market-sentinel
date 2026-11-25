@@ -81,11 +81,27 @@ def test_daily_loss_realized(cfg, st):
     assert chk(cfg, st, equity=100000)[1].startswith("DAILY_LOSS")
 
 
-def test_trades_per_day_per_broker(cfg, st):
+def test_trades_per_day_per_broker(st):
+    # Il limite giornaliero e' opzionale (default 0 = illimitato, commit 34e99c7): qui lo si attiva esplicitamente.
+    c = rl.RiskConfig(max_trades_per_day=6)
     for _ in range(6):
+        rl.record_open(c, st, "BYBIT", 100000, NOW)
+    assert chk(c, st)[1].startswith("TRADES_PER_DAY")
+    assert chk(c, st, broker="ALPACA")[0]  # other broker unaffected
+
+
+def test_default_has_no_daily_trade_cap(cfg, st):
+    for _ in range(20):
         rl.record_open(cfg, st, "BYBIT", 100000, NOW)
-    assert chk(cfg, st)[1].startswith("TRADES_PER_DAY")
-    assert chk(cfg, st, broker="ALPACA")[0]  # other broker unaffected
+    assert chk(cfg, st)[0]
+
+
+def test_max_concurrent_trades(cfg, st):
+    # 6 posizioni aperte (rischio aperto trascurabile) -> la settima entrata e' bloccata
+    pos = [dict(symbol=f"S{i}", side="BUY", entry_price=100.0, size=0.01, stop_loss=99.9) for i in range(6)]
+    ok, why = chk(cfg, st, pos=pos)
+    assert not ok and why.startswith("MAX_CONCURRENT_TRADES")
+    assert chk(cfg, st, pos=pos[:5])[0]
 
 
 def test_cooldown_then_release(cfg, st):
