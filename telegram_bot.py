@@ -77,6 +77,7 @@ from services.learning_engine_service import (
     compute_atr_ratchet_levels,
     optimize_exit_frontier,
 )
+from services import telemetry_features as tele_v2
 from services.strategy_engines_service import (
     ENGINE_TREND_PULLBACK,
     ENGINE_LIQUIDITY_SWEEP,
@@ -3306,6 +3307,38 @@ def _fetch_bybit_closed_ohlcv(
     return df
 
 
+# ---------------------------------------------------------------------------
+# Telemetry v2 (solo registrazione): variabili di stato ortogonali per (broker, simbolo).
+# Nessuna regola di ingresso/uscita, filtro, risk manager o allocatore legge questi valori.
+# ---------------------------------------------------------------------------
+_TELEMETRY_CTX: Dict[Tuple[str, str], Dict[str, Any]] = {}
+_BYBIT_PUBLIC_STATE: Optional[Any] = None
+
+
+def _bybit_public_state():
+    """Fetcher pubblico Bybit (funding/OI) non bloccante, creato alla prima richiesta."""
+    global _BYBIT_PUBLIC_STATE
+    if _BYBIT_PUBLIC_STATE is None:
+        _BYBIT_PUBLIC_STATE = tele_v2.BybitPublicState(base_url=os.getenv("BYBIT_PUBLIC_BASE") or None)
+    return _BYBIT_PUBLIC_STATE
+
+
+def _set_telemetry_ctx(broker: str, symbol: str, data: Optional[Dict[str, Any]]) -> None:
+    try:
+        _TELEMETRY_CTX[(str(broker).upper(), str(symbol))] = {
+            k: v for k, v in dict(data or {}).items() if v is not None
+        }
+    except Exception:
+        pass
+
+
+def _telemetry_ctx(broker: str, symbol: str) -> Dict[str, Any]:
+    try:
+        return dict(_TELEMETRY_CTX.get((str(broker).upper(), str(symbol)), {}))
+    except Exception:
+        return {}
+
+
 def _log_shadow_rejection(
     broker: str,
     symbol: str,
@@ -3356,7 +3389,11 @@ def _log_shadow_rejection(
             signal_price=float(signal_price),
             sl_pct=max(0.25, float(sl_pct or 1.2)),
             tp_pct=max(0.50, float(tp_pct or 3.0)),
-            features={**dict(features or {}), "ruleset_version": STRATEGY_RULESET_VERSION},
+            features={
+                **_telemetry_ctx(broker, symbol),
+                **dict(features or {}),
+                "ruleset_version": STRATEGY_RULESET_VERSION,
+            },
         )
     except Exception as e_sh:
         print(f"[!] Warning record_shadow_signal ({broker} {symbol}): {e_sh}")
@@ -3636,6 +3673,7 @@ def _timemachine_precheck_or_reject(
         tm_res["fp"] = evaluate_fokker_planck(
             df_bars, side=side, sl_pct=sl_pct, tp_pct=tp_pct, horizon_bars=horizon_bars,
             fee_rt_pct=fee_rt_pct, interval_minutes=interval_minutes, max_horizon_bars=max_horizon_bars,
+            asset_class=("equity" if str(broker).upper() == "ALPACA" else "crypto"),
         )
     except Exception as e_fp:
         tm_res["fp"] = {"fp_ok": False, "error": str(e_fp)[:120]}
@@ -3687,9 +3725,14 @@ def _tm_notification_text(tm_res: Optional[Dict[str, Any]], minutes_to_close: Op
     )
     fpd = tm.get("fp") or {}
     if fpd.get("fp_ok"):
+        extra = ""
+        if fpd.get("fp_p_tp_bayes") is not None:
+            extra += f" · `{float(fpd.get('fp_p_tp_bayes') or 0.0) * 100:.0f}%` bayes"
+        if fpd.get("fp_p_tp_rs") is not None:
+            extra += f" · `{float(fpd.get('fp_p_tp_rs') or 0.0) * 100:.0f}%` RS"
         txt += (
             f"\n• *Fokker-Planck:* `P(TP)={float(fpd.get('fp_p_tp', 0.0)) * 100:.0f}%` "
-            f"(`{float(fpd.get('fp_p_tp0', 0.0)) * 100:.0f}%` senza drift) | "
+            f"(`{float(fpd.get('fp_p_tp0', 0.0)) * 100:.0f}%` senza drift{extra}) | "
             f"`Pe={float(fpd.get('pe', 0.0)):+.1f}±{float(fpd.get('pe_se', 0.0)):.1f}` _(solo telemetria)_"
         )
     hist = tm.get("history") or {}
@@ -3726,6 +3769,7 @@ def _evaluate_and_trade_alpaca_candidate(
     notification_events: List[str],
     df_sym_5m: Any = None,
     minutes_to_close: Optional[float] = None,
+    telemetry_cycle: Optional[Dict[str, Any]] = None,
 ) -> float:
     """Valuta un titolo USA con regime router multi-engine, allocator Bayesiano e RiskGate.
 
@@ -3737,6 +3781,17 @@ def _evaluate_and_trade_alpaca_candidate(
 
     if df_sym_1h is None or len(df_sym_1h) < 35:
         return 0.0
+    try:  # Telemetry v2 (solo registrazione, mai bloccante)
+        tc = telemetry_cycle or {}
+        _set_telemetry_ctx("ALPACA", sym, {
+            **dict((tc.get("idio") or {}).get(sym) or {}),
+            "vrp_spread": tc.get("vrp_spread"),
+            **tele_v2.safe_telemetry(
+                tele_v2.ofi_bvc, df_sym_5m if (df_sym_5m is not None and len(df_sym_5m) >= 30) else df_sym_1h,
+            ),
+        })
+    except Exception:
+        pass
     sc = df_sym_1h["Close"]
     high_s = df_sym_1h["High"]
     low_s = df_sym_1h["Low"]
@@ -3911,6 +3966,7 @@ def _evaluate_and_trade_alpaca_candidate(
                 "engine": chosen_engine, "context_key": context_key, "order_type": order_type,
                 "alloc_mode": alloc_info.get("mode"), "alloc_scale": alloc_info.get("scale"),
                 "sentinel_sentiment": sentinel_data.get("sentiment"), "sentinel_reasons": sentinel_data.get("reasons", []),
+                **_telemetry_ctx("ALPACA", sym),
                 **_tm_journal_fields(tm_res),
                 "minutes_to_close": minutes_to_close, "late_zone": late_chk.get("zone"),
                 "signal_score": best_sig.get("score"),
@@ -4083,6 +4139,17 @@ def _sync_alpaca_risk_and_screening():
                 except Exception as e_5m:
                     print(f"[!] Warning download 5m ORB Alpaca: {e_5m}")
 
+                # Telemetry v2 di ciclo (solo registrazione): beta/residuo vs SPY e VRP
+                alpaca_tele_cycle: Dict[str, Any] = {}
+                try:
+                    if spy_df is not None and len(spy_df) >= 35:
+                        alpaca_tele_cycle["idio"] = tele_v2.idio_universe(
+                            {s_: d_["Close"] for s_, d_ in stock_dfs.items()}, spy_df["Close"], window=140,
+                        )
+                        alpaca_tele_cycle["vrp_spread"] = tele_v2.vrp_spread(vix_val, spy_df)
+                except Exception:
+                    alpaca_tele_cycle = {}
+
                 def _rank_stock(sym: str) -> float:
                     sdf = stock_dfs.get(sym)
                     if sdf is None or len(sdf) < 8:
@@ -4101,6 +4168,7 @@ def _sync_alpaca_risk_and_screening():
                         positions=open_positions_active, adaptive_params=adaptive_params,
                         notification_events=notification_events,
                         df_sym_5m=stock_5m_dfs.get(sym),
+                        telemetry_cycle=alpaca_tele_cycle,
                         minutes_to_close=session_minutes_to_close,
                     )
                     if spent > 0.0:
@@ -4259,6 +4327,13 @@ def _collect_bybit_signals(
     last_c = float(close.iloc[-1])
     if last_c <= 0.0:
         return None
+    try:  # Telemetry v2 (solo registrazione): OFI BVC + funding/OI pubblici dalla cache non bloccante
+        _set_telemetry_ctx("BYBIT", b_sym, {
+            **tele_v2.safe_telemetry(tele_v2.ofi_bvc, df_15m),
+            **tele_v2.safe_telemetry(_bybit_public_state().get, b_sym),
+        })
+    except Exception:
+        pass
     avg_vol = float(vol.rolling(20).mean().iloc[-1] or 1.0)
     vol_ratio = float(vol.iloc[-1] or 0.0) / (avg_vol + 1e-5)
     atr_pct = _compute_closed_df_atr_pct(df_15m, fallback=1.0)
@@ -4457,6 +4532,7 @@ def _evaluate_and_trade_bybit_candidate(
                 "atr_pct": round(atr_pct, 3), "engine": chosen_engine, "context_key": context_key,
                 "order_type": order_type, "alloc_mode": alloc_info.get("mode"), "alloc_scale": alloc_info.get("scale"),
                 "sentinel_sentiment": sentinel_data.get("sentiment"), "sentinel_reasons": sentinel_data.get("reasons", []),
+                **_telemetry_ctx("BYBIT", b_sym),
                 **_tm_journal_fields(tm_res), "signal_score": best_sig.get("score"),
             },
             client_order_id=link_id, engine=chosen_engine, context_key=context_key,

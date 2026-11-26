@@ -6,6 +6,8 @@ from typing import Any, Dict, List, Optional, Tuple
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 
+from services.telemetry_features import TELEMETRY_V2_COLUMNS as TELEMETRY_V2_COLUMNS_SQL
+
 
 def get_trade_journal_db_path() -> Path:
     """Determina il percorso persistente: volume Railway (/app/data) se disponibile, altrimenti data/market_sentinel.db."""
@@ -18,6 +20,32 @@ def get_trade_journal_db_path() -> Path:
 
 
 ROME_TZ = ZoneInfo("Europe/Rome")
+
+
+def _telemetry_v2_values(payload: Optional[Dict[str, Any]]) -> List[Optional[float]]:
+    """Values of the telemetry v2 columns taken from a context/features dict (None if absent/invalid)."""
+    from services.telemetry_features import TELEMETRY_V2_COLUMNS
+
+    src = payload or {}
+    out: List[Optional[float]] = []
+    for col in TELEMETRY_V2_COLUMNS:
+        try:
+            v = src.get(col)
+            v = float(v) if v is not None else None
+            out.append(v if v is not None and v == v and v not in (float("inf"), float("-inf")) else None)
+        except (TypeError, ValueError):
+            out.append(None)
+    return out
+
+
+def _migrate_telemetry_v2(conn: sqlite3.Connection, table: str) -> None:
+    """Idempotent additive migration: one REAL column per telemetry v2 field (NULL on old rows)."""
+    from services.telemetry_features import TELEMETRY_V2_COLUMNS
+
+    existing = {row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+    for col in TELEMETRY_V2_COLUMNS:
+        if col not in existing:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} REAL;")
 
 
 def _parse_iso_dt(value: Optional[str]) -> Optional[datetime]:
@@ -186,6 +214,10 @@ class TradeJournalService:
                 "CREATE INDEX IF NOT EXISTS idx_shadows_context_key ON signal_shadows(context_key);"
             )
 
+            # Telemetry v2 (orthogonal state variables): additive, idempotent, NULL on old rows
+            _migrate_telemetry_v2(conn, "trade_journal")
+            _migrate_telemetry_v2(conn, "signal_shadows")
+
             # Learning Audit table
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS learning_audit (
@@ -236,13 +268,16 @@ class TradeJournalService:
                 trade_id = self._unique_trade_id(
                     conn, f"{broker.upper()}_{symbol}", int(now_dt.timestamp() * 1000)
                 )
+                tele_cols = ", ".join(TELEMETRY_V2_COLUMNS_SQL)
+                tele_qs = ", ".join("?" for _ in TELEMETRY_V2_COLUMNS_SQL)
                 conn.execute(
-                    """
+                    f"""
                     INSERT INTO trade_journal (
                         trade_id, broker, symbol, side, entry_price, notional_usd,
-                        opened_at, entry_context, status, client_order_id, engine, context_key
+                        opened_at, entry_context, status, client_order_id, engine, context_key,
+                        {tele_cols}
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'OPEN', ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'OPEN', ?, ?, ?, {tele_qs})
                     """,
                     (
                         trade_id,
@@ -256,6 +291,7 @@ class TradeJournalService:
                         eff_client_order_id,
                         eff_engine,
                         eff_context_key,
+                        *_telemetry_v2_values(ctx_copy),
                     ),
                 )
                 conn.commit()
@@ -671,14 +707,16 @@ class TradeJournalService:
                         return None
 
                 shadow_id = f"SHD_{broker_u}_{symbol}_{int(now_dt.timestamp() * 1000)}_{uuid4().hex[:6]}"
+                tele_cols = ", ".join(TELEMETRY_V2_COLUMNS_SQL)
+                tele_qs = ", ".join("?" for _ in TELEMETRY_V2_COLUMNS_SQL)
                 conn.execute(
-                    """
+                    f"""
                     INSERT INTO signal_shadows (
                         shadow_id, broker, symbol, side, engine, context_key,
                         reject_reason, signal_price, sl_pct, tp_pct, features_json,
-                        created_at, status
+                        created_at, status, {tele_cols}
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING')
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', {tele_qs})
                     """,
                     (
                         shadow_id,
@@ -693,6 +731,7 @@ class TradeJournalService:
                         float(tp_pct),
                         json.dumps(features or {}, ensure_ascii=False),
                         now_dt.isoformat(),
+                        *_telemetry_v2_values(features),
                     ),
                 )
                 conn.commit()

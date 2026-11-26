@@ -1173,8 +1173,18 @@ def evaluate_fokker_planck(
     interval_minutes: Optional[float] = None,
     now: Any = None,
     max_horizon_bars: Optional[int] = None,
+    asset_class: str = "crypto",
+    n_bars_per_year: Optional[float] = None,
+    bayes_sr0: float = 0.4,
 ) -> Dict[str, Any]:
     """Closed-form Fokker-Planck counterpart of the Time Machine (telemetry, never blocks).
+
+    Telemetry v2 (2026-11-26) adds, without touching the fields above:
+      * fp_s_rs, fp_p_tp_rs, fp_p_sl_rs, fp_p_tp_rs_zero_drift, fp_p_sl_rs_zero_drift: same solver
+        with the Rogers-Satchell OHLC variance (intrabar excursions, drift-independent); falls back
+        to the close-to-close variance when the OHLC data are invalid or flat (fp_rs_fallback = 1);
+      * fp_nu_bayes, fp_p_tp_bayes, fp_p_sl_bayes, fp_ev_r_bayes: drift shrunk towards 0 with an
+        empirical-Bayes N(0, tau0^2) prior, tau0 = SR0/sqrt(bars/year) * s, SR0 = `bayes_sr0`.
 
     Drift and variance per bar are estimated from the same gap-filtered closed bars used by the
     bootstrap. Reports, for the trade direction:
@@ -1222,15 +1232,13 @@ def evaluate_fokker_planck(
     res = first_passage_probabilities(nu, s2, a, b, h, survival_grid=400)
     res0 = first_passage_probabilities(0.0, s2, a, b, h)
 
-    y = res.get("y")
-    dens = res.get("density")
-    surv_pnl = 0.0
-    if y is not None and dens is not None and len(y) > 1:
-        pnl_y = (np.exp(y) - 1.0) * 100.0 if side_u == "LONG" else (1.0 - np.exp(-y)) * 100.0
-        surv_pnl = float(np.trapezoid(pnl_y * dens, y)) if hasattr(np, "trapezoid") else float(np.trapz(pnl_y * dens, y))
-    gross_pct = res["p_tp"] * tp_p - res["p_sl"] * sl_p + surv_pnl
+    gross_pct = _fp_gross_pct(res, side_u, sl_p, tp_p)
     n_obs = len(log_r)
     sigma = math.sqrt(s2)
+    tele_v2 = _fp_telemetry_v2(
+        bars, side_u, nu, s2, n_obs, a, b, h, sl_p, tp_p, fee, interval_minutes,
+        asset_class, n_bars_per_year, bayes_sr0,
+    )
     return {
         "fp_ok": True,
         "fp_horizon_bars": h,
@@ -1245,7 +1253,79 @@ def evaluate_fokker_planck(
         "pe_se": round(2.0 * b / (sigma * math.sqrt(n_obs)), 3),
         "drift_bp_bar": round(nu * 1e4, 3),
         "sigma_bp_bar": round(sigma * 1e4, 3),
+        **tele_v2,
     }
+
+
+def _fp_gross_pct(res: Dict[str, Any], side_u: str, sl_p: float, tp_p: float) -> float:
+    """Expected gross P&L in % of entry: absorbed paths at the barriers, survivors marked at T."""
+    y = res.get("y")
+    dens = res.get("density")
+    surv_pnl = 0.0
+    if y is not None and dens is not None and len(y) > 1:
+        pnl_y = (np.exp(y) - 1.0) * 100.0 if side_u == "LONG" else (1.0 - np.exp(-y)) * 100.0
+        surv_pnl = float(np.trapezoid(pnl_y * dens, y)) if hasattr(np, "trapezoid") else float(np.trapz(pnl_y * dens, y))
+    return res["p_tp"] * tp_p - res["p_sl"] * sl_p + surv_pnl
+
+
+def _fp_telemetry_v2(
+    bars: pd.DataFrame,
+    side_u: str,
+    nu: float,
+    s2: float,
+    n_obs: int,
+    a: float,
+    b: float,
+    h: int,
+    sl_p: float,
+    tp_p: float,
+    fee: float,
+    interval_minutes: Optional[float],
+    asset_class: str,
+    n_bars_per_year: Optional[float],
+    bayes_sr0: float,
+) -> Dict[str, Any]:
+    """Rogers-Satchell and empirical-Bayes variants of the first-passage solution (telemetry)."""
+    from services.telemetry_features import bars_per_year, bayes_shrunk_drift, rogers_satchell_variance
+
+    out: Dict[str, Any] = {}
+    try:
+        tail = bars.tail(500)
+        s2_rs, _n_rs = rogers_satchell_variance(tail["Open"], tail["High"], tail["Low"], tail["Close"])
+        fallback = s2_rs is None
+        s2_eff = s2 if fallback else float(s2_rs)
+        r_rs = first_passage_probabilities(nu, s2_eff, a, b, h)
+        r_rs0 = first_passage_probabilities(0.0, s2_eff, a, b, h)
+        out.update({
+            "fp_s_rs": round(math.sqrt(s2_eff), 8),
+            "fp_rs_fallback": int(fallback),
+            "fp_p_tp_rs": round(r_rs["p_tp"], 4),
+            "fp_p_sl_rs": round(r_rs["p_sl"], 4),
+            "fp_p_tp_rs_zero_drift": round(r_rs0["p_tp"], 4),
+            "fp_p_sl_rs_zero_drift": round(r_rs0["p_sl"], 4),
+        })
+    except Exception:
+        pass
+    try:
+        nby = n_bars_per_year
+        if nby is None:
+            step = interval_minutes
+            if not step and isinstance(bars.index, pd.DatetimeIndex) and len(bars) >= 3:
+                step = float(np.median((bars.index[1:] - bars.index[:-1]).total_seconds())) / 60.0
+            nby = bars_per_year(step, asset_class)
+        nu_b, w = bayes_shrunk_drift(nu, math.sqrt(s2), n_obs, nby, sr0=bayes_sr0)
+        if nu_b is not None:
+            r_b = first_passage_probabilities(nu_b, s2, a, b, h, survival_grid=400)
+            out.update({
+                "fp_nu_bayes": float(nu_b),
+                "fp_bayes_weight": round(float(w), 6),
+                "fp_p_tp_bayes": round(r_b["p_tp"], 4),
+                "fp_p_sl_bayes": round(r_b["p_sl"], 4),
+                "fp_ev_r_bayes": round((_fp_gross_pct(r_b, side_u, sl_p, tp_p) - fee) / sl_p, 3),
+            })
+    except Exception:
+        pass
+    return out
 
 
 # ---------------------------------------------------------------------------
