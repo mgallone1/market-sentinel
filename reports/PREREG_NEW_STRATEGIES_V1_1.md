@@ -14,7 +14,10 @@ distanze di stop degeneri (rischio fino allo 0.006% del prezzo). La v1.0 resta n
 ## BYBIT_POST_LIQ_REVERSAL v1.1
 - Funding: percentile 30 giorni ≥ **90** (SHORT) / ≤ **10** (LONG) (era 95/5).
 - Open interest: z-score della variazione sulla barra di spike ≤ **−1.5** (era −2.0).
-- **Rischio massimo 3 ATR**: se la distanza entry-SL supera 3 × ATR14 il segnale è scartato (`RISK_TOO_WIDE`).
+- **Rischio massimo 6 ATR**: se la distanza entry-SL supera 6 × ATR14 il segnale è scartato (`RISK_TOO_WIDE`).
+  *Correzione fatta prima di qualsiasi run (commit successivo a 6964d4a)*: la prima stesura diceva 3 ATR, incompatibile con
+  uno spike ≥ 2.5 ATR e uno SL oltre il suo estremo (il rischio è quasi sempre > 2.5 ATR); 6 ATR esclude solo i casi
+  estremi (il trade DOGE della v1.0 era ~9 ATR).
 - Universo: i 10 perp della v1.0 **più** BNB, LTC, DOT, BCH, ATOM, APT, ARB, OP, INJ, UNI (USDT, tutti quotati anche su
   Bybit) = 20 simboli; stessi dati, periodo e costi della v1.0.
 - Varianti (2 prove): (a) uscite attive, (b) uscite fisse TP 2R. Controllo: ingressi casuali con le stesse uscite (seed 0).
