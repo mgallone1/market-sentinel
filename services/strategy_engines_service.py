@@ -1653,3 +1653,493 @@ def evaluate_shadow_bars(
         "hit_outcome": "TIME_EXIT",
         "bars_held": total_bars,
     }
+
+
+# ===========================================================================
+# 8. LAB CANDIDATE STRATEGIES (paper / shadow only — NOT routed by regime_router,
+#    NOT in ALL_ENGINES, never sent to a live broker). Rev. 2026-11-26, strategy version 1.0.
+# ===========================================================================
+
+ENGINE_POST_LIQ_REVERSAL = "BYBIT_POST_LIQ_REVERSAL"
+ENGINE_IN_PLAY_MOMENTUM = "ALPACA_IN_PLAY_MOMENTUM"
+LAB_ENGINES = [ENGINE_POST_LIQ_REVERSAL, ENGINE_IN_PLAY_MOMENTUM]
+LAB_STRATEGY_VERSION = "1.1"  # v1.1 (reports/PREREG_NEW_STRATEGIES_V1_1.md); v1.0 params kept below
+
+EXIT_TP1_PARTIAL = "TP1_PARTIAL"
+EXIT_TRAILING_ATR = "TRAILING_ATR"
+EXIT_TIME_STOP = "TIME_STOP"
+EXIT_STOP_LOSS = "STOP_LOSS"
+EXIT_EOD_FORCE_CLOSE = "EOD_FORCE_CLOSE"
+EXIT_BREAKEVEN_STOP = "BREAKEVEN_STOP"
+EXIT_VWAP_TARGET = "VWAP_TARGET"
+EXIT_FIXED_TP = "FIXED_TP"
+EXIT_MAX_HOLD = "MAX_HOLD"
+
+
+def wilder_atr_array(high: np.ndarray, low: np.ndarray, close: np.ndarray, n: int = 14) -> np.ndarray:
+    """Causal Wilder ATR (value at t uses bars <= t); NaN before n bars."""
+    h, l, c = (np.asarray(x, float) for x in (high, low, close))
+    m = len(c)
+    out = np.full(m, np.nan)
+    if m <= n:
+        return out
+    tr = np.empty(m)
+    tr[0] = h[0] - l[0]
+    tr[1:] = np.maximum(h[1:] - l[1:], np.maximum(np.abs(h[1:] - c[:-1]), np.abs(l[1:] - c[:-1])))
+    a = float(np.mean(tr[1:n + 1]))
+    out[n] = a
+    for t in range(n + 1, m):
+        a = (a * (n - 1) + tr[t]) / n
+        out[t] = a
+    return out
+
+
+# ---------------------------------------------------------------------------
+# 8a. BYBIT_POST_LIQ_REVERSAL — liquidation-cascade exhaustion fade
+# ---------------------------------------------------------------------------
+
+POST_LIQ_PARAMS_V1_0: Dict[str, float] = {
+    "funding_window_days": 30.0,   # rolling window of funding prints for the percentile
+    "funding_hi_pct": 95.0,        # >= : longs crowded -> SHORT setup
+    "funding_lo_pct": 5.0,         # <= : shorts crowded -> LONG setup
+    "spike_atr_mult": 2.5,         # spike bar range >= 2.5 x ATR14 (ATR of the bar BEFORE the spike)
+    "oi_z_max": -2.0,              # OI % change z-score on the spike bar, vs the previous 48 h
+    "oi_lookback_hours": 48.0,
+    "prior_range_bars": 12.0,      # "previous range" = extreme of the 12 bars before the spike
+    "wick_min": 0.50,              # confirmation wick >= 50% of the confirmation bar range
+    "sl_atr_buffer": 0.25,         # SL = spike extreme +- 0.25 ATR
+    "mirror": 0.0,                 # 1.0 = pre-registered mirrored reading (research variant only)
+    "min_risk_atr": 0.0,           # v1.0: no floor on the stop distance
+    "max_risk_atr": 0.0,           # v1.0: no cap (0 = disabled)
+}
+
+# v1.1: relaxed funding/OI thresholds, stop distance between 0.5 and 6 ATR (reports/PREREG_NEW_STRATEGIES_V1_1.md)
+POST_LIQ_PARAMS: Dict[str, float] = dict(POST_LIQ_PARAMS_V1_0, funding_hi_pct=90.0, funding_lo_pct=10.0, oi_z_max=-1.5,
+                                         min_risk_atr=0.5, max_risk_atr=6.0)
+
+
+def funding_percentile(funding: pd.Series, now: Any, window_days: float = 30.0) -> Optional[float]:
+    """Percentile rank (0-100) of the latest funding print <= now among the prints of the last `window_days`.
+
+    Point-in-time: only prints with timestamp <= now. Ties count half. None if < 10 prints or bad input."""
+    try:
+        if funding is None or len(funding) == 0:
+            return None
+        s = pd.Series(funding).dropna().astype(float).sort_index()
+        idx = pd.DatetimeIndex(s.index)
+        s.index = idx.tz_localize("UTC") if idx.tz is None else idx.tz_convert("UTC")
+        t = pd.Timestamp(now)
+        t = t.tz_localize("UTC") if t.tzinfo is None else t.tz_convert("UTC")
+        w = s[(s.index <= t) & (s.index > t - pd.Timedelta(days=float(window_days)))]
+        if len(w) < 10:
+            return None
+        last = float(w.iloc[-1])
+        vals = w.to_numpy()
+        return float(100.0 * ((vals < last).sum() + 0.5 * (vals == last).sum()) / len(vals))
+    except Exception:
+        return None
+
+
+def oi_change_zscore(oi_at_bar_end: np.ndarray, i: int, lookback_bars: int) -> Optional[float]:
+    """z-score of the % change of open interest over bar i (OI at end of bar i vs end of bar i-1),
+    against the % changes of the previous `lookback_bars` bars (excluding bar i). None if unavailable."""
+    oi = np.asarray(oi_at_bar_end, float)
+    if i < lookback_bars + 1 or i >= len(oi):
+        return None
+    with np.errstate(divide="ignore", invalid="ignore"):
+        ch = oi[1:] / oi[:-1] - 1.0  # ch[k] = change over bar k+1
+    cur = ch[i - 1]
+    hist = ch[i - 1 - lookback_bars:i - 1]
+    hist = hist[np.isfinite(hist)]
+    if not np.isfinite(cur) or len(hist) < max(10, lookback_bars // 3):
+        return None
+    sd = float(np.std(hist, ddof=1))
+    if not (sd > 0):
+        return None
+    return float((cur - float(np.mean(hist))) / sd)
+
+
+def detect_post_liq_reversal(
+    o: np.ndarray, h: np.ndarray, l: np.ndarray, c: np.ndarray, v: np.ndarray,
+    i: int,
+    funding_pct: Optional[float],
+    oi_z_spike: Optional[float],
+    atr: Optional[np.ndarray] = None,
+    params: Optional[Dict[str, float]] = None,
+) -> Dict[str, Any]:
+    """Evaluate the setup whose CONFIRMATION bar is i (spike = bar i-1). Uses bars <= i only.
+
+    Returns {"triggered", "side", "reject_reason", "entry", "sl", "risk", "features"}. Reasons:
+    INSUFFICIENT_DATA, NO_FUNDING_DATA, FUNDING_NOT_EXTREME, NO_SPIKE, SPIKE_WRONG_DIRECTION,
+    NO_OI_DATA, OI_NOT_COLLAPSING, NO_REABSORPTION.
+    """
+    p = dict(POST_LIQ_PARAMS)
+    p.update(params or {})
+    nprior = int(p["prior_range_bars"])
+    feats: Dict[str, Any] = {"funding_pct": funding_pct, "oi_delta_z": oi_z_spike}
+
+    def res(trig, side, reason, entry=None, sl=None):
+        risk = abs(entry - sl) if (entry is not None and sl is not None) else None
+        return {"triggered": trig, "side": side, "reject_reason": reason, "entry": entry, "sl": sl,
+                "risk": risk, "engine": ENGINE_POST_LIQ_REVERSAL, "features": feats}
+
+    s = i - 1
+    if atr is None:
+        atr = wilder_atr_array(h, l, c, 14)
+    if s - nprior < 0 or s < 15 or i >= len(c) or not np.isfinite(atr[s - 1]) or atr[s - 1] <= 0:
+        return res(False, None, "INSUFFICIENT_DATA")
+    a = float(atr[s - 1])
+    rng_s = float(h[s] - l[s])
+    feats.update({"spike_range_atr": round(rng_s / a, 3), "atr": a})
+    if funding_pct is None:
+        return res(False, None, "NO_FUNDING_DATA")
+    mirror = bool(p.get("mirror", 0.0))  # pre-registered variant (c): opposite reading of the crowding direction
+    if funding_pct >= p["funding_hi_pct"]:
+        side, want_up = ("LONG", False) if mirror else ("SHORT", True)
+    elif funding_pct <= p["funding_lo_pct"]:
+        side, want_up = ("SHORT", True) if mirror else ("LONG", False)
+    else:
+        return res(False, None, "FUNDING_NOT_EXTREME")
+    if rng_s < p["spike_atr_mult"] * a:
+        return res(False, side, "NO_SPIKE")
+    if (c[s] > o[s]) != want_up or c[s] == o[s]:
+        return res(False, side, "SPIKE_WRONG_DIRECTION")
+    if oi_z_spike is None:
+        return res(False, side, "NO_OI_DATA")
+    if oi_z_spike > p["oi_z_max"]:
+        return res(False, side, "OI_NOT_COLLAPSING")
+    rng_i = max(float(h[i] - l[i]), 1e-12)
+    if side == "SHORT":
+        prior_hi = float(np.max(h[s - nprior:s]))
+        wick = (float(h[i]) - max(float(o[i]), float(c[i]))) / rng_i
+        ok = c[i] < prior_hi and wick >= p["wick_min"] and v[i] < v[s]
+        sl = float(h[s]) + p["sl_atr_buffer"] * a
+    else:
+        prior_lo = float(np.min(l[s - nprior:s]))
+        wick = (min(float(o[i]), float(c[i])) - float(l[i])) / rng_i
+        ok = c[i] > prior_lo and wick >= p["wick_min"] and v[i] < v[s]
+        sl = float(l[s]) - p["sl_atr_buffer"] * a
+    feats.update({"confirm_wick": round(wick, 3), "vol_ratio_confirm_spike": round(float(v[i]) / max(float(v[s]), 1e-12), 3)})
+    if not ok:
+        return res(False, side, "NO_REABSORPTION")
+    entry = float(c[i])
+    if (side == "SHORT" and sl <= entry) or (side == "LONG" and sl >= entry):
+        return res(False, side, "NO_REABSORPTION")
+    risk = abs(entry - sl)
+    if p.get("min_risk_atr", 0.0) and risk < p["min_risk_atr"] * a:  # v1.1: stop at least 0.5 ATR away
+        sl = entry + p["min_risk_atr"] * a if side == "SHORT" else entry - p["min_risk_atr"] * a
+        risk = abs(entry - sl)
+    feats["risk_atr"] = round(risk / a, 3)
+    if p.get("max_risk_atr", 0.0) and risk > p["max_risk_atr"] * a:
+        return res(False, side, "RISK_TOO_WIDE")
+    return res(True, side, "", entry, sl)
+
+
+# ---------------------------------------------------------------------------
+# 8b. ALPACA_IN_PLAY_MOMENTUM — institutional catalyst filter + ORB / EMA pullback
+# ---------------------------------------------------------------------------
+
+IN_PLAY_PARAMS_V1_0: Dict[str, float] = {
+    "rvol_min": 2.0,          # volume 09:30-09:45 / mean of the same window over the previous 20 sessions
+    "rvol_lookback": 20.0,
+    "gap_min_pct": 1.5,       # |open / previous close - 1| >= 1.5%
+    "idio_sigma": 2.0,        # or |residual return vs SPY| > 2 sigma (sigma over the previous 20 sessions)
+    "max_names": 2.0,         # top 2 by RVOL
+    "or_minutes": 15.0,
+    "ema_fast": 9.0,          # fast EMA (5m) for the pullback entry
+    "sl_atr_cap": 1.5,        # SL = opposite side of the OR, capped at 1.5 x ATR14(5m)
+    "min_risk_atr": 0.0,      # v1.0: no floor on the stop distance
+}
+
+# v1.1: stop at least 0.5 x ATR14(5m) away (reports/PREREG_NEW_STRATEGIES_V1_1.md)
+IN_PLAY_PARAMS: Dict[str, float] = dict(IN_PLAY_PARAMS_V1_0, min_risk_atr=0.5)
+
+
+def _ny(idx: pd.DatetimeIndex) -> pd.DatetimeIndex:
+    idx = pd.DatetimeIndex(idx)
+    return (idx.tz_localize("UTC") if idx.tz is None else idx).tz_convert("America/New_York")
+
+
+def opening_window_stats(df_5m: pd.DataFrame, or_minutes: int = 15) -> pd.DataFrame:
+    """Per NY session (regular hours, NYSE calendar): opening-range volume/high/low, open, last close.
+
+    One row per session date with the FULL opening window present (09:30 bar first); columns:
+    or_volume, or_high, or_low, open, close (session close), or_close (close of the last OR bar)."""
+    ny = _ny(df_5m.index)
+    rows = []
+    dates = pd.Index(ny.date)
+    for d in sorted(set(dates)):
+        b = market_calendar.session_bounds(d)
+        if b is None:
+            continue
+        sel = (dates == d)
+        sub = df_5m[sel]
+        sub_ny = ny[sel]
+        rth = (sub_ny >= pd.Timestamp(b[0])) & (sub_ny < pd.Timestamp(b[1]))
+        sub, sub_ny = sub[rth], sub_ny[rth]
+        n_or = int(or_minutes // 5)
+        if len(sub) < n_or or sub_ny[0] != pd.Timestamp(b[0]):
+            continue
+        first = sub.iloc[:n_or]
+        if not ((sub_ny[:n_or] - pd.Timestamp(b[0])) == pd.to_timedelta(np.arange(n_or) * 5, unit="min")).all():
+            continue
+        rows.append({"date": d, "or_volume": float(first["Volume"].sum()), "or_high": float(first["High"].max()),
+                     "or_low": float(first["Low"].min()), "open": float(first["Open"].iloc[0]),
+                     "or_close": float(first["Close"].iloc[-1]), "close": float(sub["Close"].iloc[-1])})
+    return pd.DataFrame(rows).set_index("date") if rows else pd.DataFrame(
+        columns=["or_volume", "or_high", "or_low", "open", "or_close", "close"])
+
+
+def rvol_opening(stats: pd.DataFrame, day: Any, lookback: int = 20) -> Optional[float]:
+    """RVOL = opening-window volume of `day` / mean opening-window volume of the previous `lookback`
+    sessions (strictly before `day`). None if fewer than `lookback` previous sessions are available."""
+    if stats is None or day not in stats.index:
+        return None
+    prev = stats[stats.index < day].tail(int(lookback))
+    if len(prev) < int(lookback):
+        return None
+    m = float(prev["or_volume"].mean())
+    return float(stats.loc[day, "or_volume"] / m) if m > 0 else None
+
+
+def in_play_metrics(stats: pd.DataFrame, spy_stats: pd.DataFrame, day: Any, lookback: int = 20) -> Dict[str, Any]:
+    """Gap, RVOL and SPY-residual of the move from the previous close to 09:45 (point-in-time at 09:45).
+
+    beta and sigma use only sessions strictly before `day` (close-to-close returns for beta; the same
+    prev-close -> 09:45 residual for sigma)."""
+    out: Dict[str, Any] = {"rvol": None, "gap_pct": None, "idio_ret": None, "idio_sigma": None, "idio_z": None}
+    if day not in stats.index or day not in spy_stats.index:
+        return out
+    hist = stats[stats.index <= day]
+    if len(hist) < 2:
+        return out
+    prev_close = float(hist["close"].iloc[-2])
+    out["rvol"] = rvol_opening(stats, day, lookback)
+    out["gap_pct"] = (float(stats.loc[day, "open"]) / prev_close - 1.0) * 100.0
+    j = stats[["close", "or_close"]].join(spy_stats[["close", "or_close"]], rsuffix="_spy", how="inner")
+    j = j[j.index <= day]
+    if len(j) < lookback + 2:
+        return out
+    pc, pcs = j["close"].shift(1), j["close_spy"].shift(1)
+    r_cc, rs_cc = j["close"] / pc - 1.0, j["close_spy"] / pcs - 1.0      # daily close-to-close
+    r_or, rs_or = j["or_close"] / pc - 1.0, j["or_close_spy"] / pcs - 1.0  # prev close -> 09:45
+    past = j.index < day
+    x, y = rs_cc[past].tail(lookback * 3).dropna(), r_cc[past].tail(lookback * 3).dropna()
+    xy = pd.concat([x, y], axis=1).dropna()
+    if len(xy) < lookback or xy.iloc[:, 0].var() <= 0:
+        return out
+    beta = float(xy.cov().iloc[0, 1] / xy.iloc[:, 0].var())
+    resid = (r_or - beta * rs_or)
+    sig = float(resid[past].tail(lookback).std(ddof=1))
+    cur = float(resid.loc[day])
+    out.update({"idio_ret": cur * 100.0, "idio_sigma": sig * 100.0, "beta": beta,
+                "idio_z": (cur / sig) if sig > 0 else None})
+    return out
+
+
+def select_in_play(metrics: Dict[str, Dict[str, Any]], params: Optional[Dict[str, float]] = None) -> List[Dict[str, Any]]:
+    """Qualify names (RVOL >= 2 AND (|gap| >= 1.5% OR |idio z| > 2)); keep the top `max_names` by RVOL.
+    Direction = sign of the gap if the gap qualifies, otherwise sign of the residual. Empty list -> no trades today."""
+    p = dict(IN_PLAY_PARAMS)
+    p.update(params or {})
+    q = []
+    for sym, m in metrics.items():
+        rv, gap, z = m.get("rvol"), m.get("gap_pct"), m.get("idio_z")
+        if rv is None or rv < p["rvol_min"]:
+            continue
+        gap_ok = gap is not None and abs(gap) >= p["gap_min_pct"]
+        idio_ok = z is not None and abs(z) > p["idio_sigma"]
+        if not (gap_ok or idio_ok):
+            continue
+        direction = (1 if gap > 0 else -1) if gap_ok else (1 if z > 0 else -1)
+        q.append({"symbol": sym, "side": "LONG" if direction > 0 else "SHORT", "rvol": rv, "gap_pct": gap,
+                  "idio_z": z, "idio_ret": m.get("idio_ret"), "qualifier": "GAP" if gap_ok else "IDIO"})
+    q.sort(key=lambda d: d["rvol"], reverse=True)
+    return q[: int(p["max_names"])]
+
+
+def in_play_entry(
+    df_5m: pd.DataFrame,
+    day: Any,
+    side: str,
+    params: Optional[Dict[str, float]] = None,
+) -> Dict[str, Any]:
+    """First entry of the day for an In Play name: close beyond the 15m opening range in the catalyst direction
+    (ORB) or first orderly pullback to EMA9 that closes back in the direction (PULLBACK), whichever comes first.
+
+    Entry bars must complete after the opening range and >= 30 minutes before the NYSE close (market_calendar).
+    Returns {"triggered", "pos", "entry", "sl", "risk", "entry_type", "end_pos", "reject_reason"}."""
+    p = dict(IN_PLAY_PARAMS)
+    p.update(params or {})
+    ny = _ny(df_5m.index)
+    b = market_calendar.session_bounds(day)
+    out = {"triggered": False, "reject_reason": "NO_ENTRY", "engine": ENGINE_IN_PLAY_MOMENTUM}
+    if b is None:
+        out["reject_reason"] = "MARKET_CLOSED"
+        return out
+    open_ts, close_ts = pd.Timestamp(b[0]), pd.Timestamp(b[1])
+    pos_all = np.flatnonzero((ny >= open_ts) & (ny < close_ts))
+    n_or = int(p["or_minutes"] // 5)
+    if len(pos_all) <= n_or or ny[pos_all[0]] != open_ts:
+        out["reject_reason"] = "OR_INCOMPLETE"
+        return out
+    h, l, c, o = (df_5m[k].to_numpy(float) for k in ("High", "Low", "Close", "Open"))
+    or_hi, or_lo = float(h[pos_all[:n_or]].max()), float(l[pos_all[:n_or]].min())
+    atr = wilder_atr_array(h, l, c, 14)
+    ema = pd.Series(c).ewm(span=int(p["ema_fast"]), adjust=False).mean().to_numpy()
+    last_entry_end = close_ts - pd.Timedelta(minutes=30)
+    flatten_cut = close_ts - pd.Timedelta(minutes=8)
+    end_candidates = [k for k in pos_all if ny[k] + pd.Timedelta(minutes=5) <= flatten_cut]
+    end_pos = int(end_candidates[-1]) if end_candidates else int(pos_all[-1])
+    long = side == "LONG"
+    for k in pos_all[n_or:]:
+        bar_end = ny[k] + pd.Timedelta(minutes=5)
+        if bar_end > last_entry_end:
+            break
+        orb = (c[k] > or_hi) if long else (c[k] < or_lo)
+        pull = (l[k] <= ema[k] < c[k] and c[k] > o[k] and c[k - 1] > ema[k - 1]) if long else \
+               (h[k] >= ema[k] > c[k] and c[k] < o[k] and c[k - 1] < ema[k - 1])
+        if not (orb or pull):
+            continue
+        entry = float(c[k])
+        a = float(atr[k]) if np.isfinite(atr[k]) else float("nan")
+        sl = or_lo if long else or_hi
+        if np.isfinite(a) and a > 0 and abs(entry - sl) > p["sl_atr_cap"] * a:
+            sl = entry - p["sl_atr_cap"] * a if long else entry + p["sl_atr_cap"] * a
+        if np.isfinite(a) and a > 0 and p.get("min_risk_atr", 0.0) and (
+                (long and entry - sl < p["min_risk_atr"] * a) or ((not long) and sl - entry < p["min_risk_atr"] * a)):
+            sl = entry - p["min_risk_atr"] * a if long else entry + p["min_risk_atr"] * a
+        if (long and sl >= entry) or ((not long) and sl <= entry):
+            continue  # entry inside/below the stop: not a valid bet, keep scanning
+        return {"triggered": True, "pos": int(k), "entry": entry, "sl": float(sl), "risk": abs(entry - sl),
+                "entry_type": "ORB" if orb else "PULLBACK", "end_pos": end_pos, "or_high": or_hi, "or_low": or_lo,
+                "atr": a, "reject_reason": "", "engine": ENGINE_IN_PLAY_MOMENTUM}
+    return out
+
+
+# ---------------------------------------------------------------------------
+# 8c. Active exit manager: 50% at +1.5R, stop to breakeven (incl. fees), trailing ATR, time-stop
+# ---------------------------------------------------------------------------
+
+def simulate_active_exit(
+    o: np.ndarray, h: np.ndarray, l: np.ndarray, c: np.ndarray,
+    entry_pos: int,
+    side: int,
+    entry: float,
+    sl: float,
+    atr: np.ndarray,
+    end_pos: int,
+    *,
+    tp1_r: float = 1.5,
+    tp1_frac: float = 0.5,
+    trail_atr: float = 1.5,
+    time_stop_bars: Optional[int] = None,
+    time_stop_r: Optional[float] = None,
+    vwap: Optional[np.ndarray] = None,
+    fee_side: float = 0.0,
+    slip_entry: float = 0.0,
+    slip_exit: float = 0.0,
+    slip_stop: float = 0.0,
+    end_reason: str = EXIT_EOD_FORCE_CLOSE,
+    fixed_tp_r: Optional[float] = None,
+) -> Dict[str, Any]:
+    """Deterministic bar-by-bar exit simulation of one trade entered at `entry` on bar `entry_pos`.
+
+    Order inside a bar (conservative): (1) active stop, (2) TP1, (3) VWAP target / fixed TP. The trailing stop and
+    the time-stop are evaluated at bar CLOSE and act from the next bar (trail) or at that close (time-stop).
+    After TP1: stop -> breakeven + round-trip fees, then trailing = best extreme since entry -/+ trail_atr * ATR.
+    `fixed_tp_r` turns the manager into the traditional fixed bracket (no partial, no trailing, no time-stop).
+    Costs are fractions of price: fee per side, slippage on entry / normal exits / stops.
+    Returns legs, net return (fraction of entry notional), R multiple, final exit reason, tp1 flag, bars held.
+    """
+    side = 1 if side > 0 else -1
+    risk = abs(entry - sl)
+    if risk <= 0 or end_pos <= entry_pos:
+        return {"valid": False}
+    be_px = entry * (1 + side * 2 * fee_side)
+    tp1_px = entry + side * tp1_r * risk
+    fixed_px = entry + side * fixed_tp_r * risk if fixed_tp_r is not None else None
+    stop_px = sl
+    stop_kind = EXIT_STOP_LOSS
+    remaining = 1.0
+    legs: List[Tuple[float, float, str, int]] = []  # (fraction, price, reason, bar)
+    best = entry
+    tp1_hit = False
+    mfe_r = 0.0
+
+    def fill(px, kind):
+        slip = slip_stop if kind in (EXIT_STOP_LOSS, EXIT_BREAKEVEN_STOP, EXIT_TRAILING_ATR) else slip_exit
+        return px * (1 - side * slip)
+
+    j = entry_pos
+    for j in range(entry_pos + 1, end_pos + 1):
+        hi, lo = float(h[j]), float(l[j])
+        # 1) stop
+        hit_stop = lo <= stop_px if side > 0 else hi >= stop_px
+        if hit_stop:
+            px = stop_px
+            if (side > 0 and o[j] < stop_px) or (side < 0 and o[j] > stop_px):
+                px = float(o[j])  # gap through the stop
+            legs.append((remaining, fill(px, stop_kind), stop_kind, j))
+            remaining = 0.0
+            break
+        fav = (hi - entry) if side > 0 else (entry - lo)
+        mfe_r = max(mfe_r, fav / risk)
+        # 2) TP1 / fixed TP
+        if fixed_px is not None:
+            if (hi >= fixed_px) if side > 0 else (lo <= fixed_px):
+                legs.append((remaining, fill(fixed_px, EXIT_FIXED_TP), EXIT_FIXED_TP, j))
+                remaining = 0.0
+                break
+        elif not tp1_hit and ((hi >= tp1_px) if side > 0 else (lo <= tp1_px)):
+            legs.append((tp1_frac, fill(tp1_px, EXIT_TP1_PARTIAL), EXIT_TP1_PARTIAL, j))
+            remaining -= tp1_frac
+            tp1_hit = True
+            stop_px = be_px
+            stop_kind = EXIT_BREAKEVEN_STOP
+        # 3) VWAP target for the runner
+        if tp1_hit and vwap is not None and np.isfinite(vwap[j]):
+            tgt = float(vwap[j])
+            if (side > 0 and tgt > tp1_px and hi >= tgt) or (side < 0 and tgt < tp1_px and lo <= tgt):
+                legs.append((remaining, fill(tgt, EXIT_VWAP_TARGET), EXIT_VWAP_TARGET, j))
+                remaining = 0.0
+                break
+        # end-of-bar updates
+        best = max(best, hi) if side > 0 else min(best, lo)
+        if tp1_hit and fixed_px is None and np.isfinite(atr[j]):
+            trail = best - side * trail_atr * float(atr[j])
+            if (side > 0 and trail > stop_px) or (side < 0 and trail < stop_px):
+                stop_px = trail
+                stop_kind = EXIT_TRAILING_ATR
+        if (fixed_px is None and not tp1_hit and time_stop_bars is not None and time_stop_r is not None
+                and j - entry_pos >= time_stop_bars and mfe_r < time_stop_r):
+            legs.append((remaining, fill(float(c[j]), EXIT_TIME_STOP), EXIT_TIME_STOP, j))
+            remaining = 0.0
+            break
+    if remaining > 1e-12:
+        legs.append((remaining, fill(float(c[end_pos]), end_reason), end_reason, end_pos))
+        j = end_pos
+    entry_fill = entry * (1 + side * slip_entry)
+    gross = sum(fr * side * (px - entry_fill) / entry for fr, px, _, _ in legs)
+    net = gross - fee_side * (1.0 + sum(fr for fr, _, _, _ in legs))
+    final = legs[-1][2]
+    return {
+        "valid": True,
+        "legs": [{"fraction": fr, "price": px, "reason": why, "bar": int(b)} for fr, px, why, b in legs],
+        "ret": float(net),
+        "r_multiple": float(net * entry / risk),
+        "exit_reason": final,
+        "tp1_hit": bool(tp1_hit),
+        "bars_held": int(legs[-1][3] - entry_pos),
+        "mfe_r": float(mfe_r),
+    }
+
+
+def rolling_vwap(h: np.ndarray, l: np.ndarray, c: np.ndarray, v: np.ndarray, window: int) -> np.ndarray:
+    """Causal rolling VWAP of the typical price over the last `window` bars (inclusive)."""
+    tp = (np.asarray(h, float) + np.asarray(l, float) + np.asarray(c, float)) / 3.0
+    vv = np.asarray(v, float)
+    num = pd.Series(tp * vv).rolling(window, min_periods=window).sum().to_numpy()
+    den = pd.Series(vv).rolling(window, min_periods=window).sum().to_numpy()
+    with np.errstate(divide="ignore", invalid="ignore"):
+        return np.where(den > 0, num / den, np.nan)

@@ -165,6 +165,65 @@ class LiveMarketData:
         s = self._cached(("funding", symbol, lookback_days, start), fetch)
         return s[s.index <= now]
 
+    def open_interest(self, symbol: str, lookback_days: int, now_utc) -> pd.Series:
+        """15-minute open-interest snapshots (<= now); empty Series when no source is reachable."""
+        now = _utc(now_utc)
+        start = now - pd.Timedelta(days=lookback_days)
+        key = ("oi", symbol, lookback_days, now.floor("15min"))
+        s = self._cached(key, lambda: fetch_open_interest(symbol, start, now))
+        return s[s.index <= now] if len(s) else s
+
+
+def _bybit_open_interest(symbol: str, start: pd.Timestamp, end: pd.Timestamp, http_get=None) -> pd.Series:
+    """Bybit public v5 /market/open-interest, 15-minute snapshots, paginated backwards from `end`."""
+    import requests
+
+    get = http_get or requests.get
+    rows, cur_end = [], int(end.timestamp() * 1000)
+    for _ in range(20):
+        r = get("https://api.bybit.com/v5/market/open-interest",
+                params={"category": "linear", "symbol": symbol, "intervalTime": "15min", "limit": 200,
+                        "endTime": cur_end}, timeout=(2, 5))
+        js = r.json()
+        lst = ((js or {}).get("result") or {}).get("list") or []
+        if int((js or {}).get("retCode", -1)) != 0 or not lst:
+            break
+        rows += lst
+        oldest = min(int(x["timestamp"]) for x in lst)
+        if oldest <= int(start.timestamp() * 1000):
+            break
+        cur_end = oldest - 1
+    if not rows:
+        return pd.Series(dtype=float)
+    s = pd.Series({pd.Timestamp(int(x["timestamp"]), unit="ms", tz="UTC"): float(x["openInterest"]) for x in rows})
+    return s.sort_index()
+
+
+def _binance_open_interest(symbol: str, start: pd.Timestamp, end: pd.Timestamp, http_get=None) -> pd.Series:
+    """Binance USD-M /futures/data/openInterestHist (15m, last 30 days only) as fallback."""
+    import requests
+
+    get = http_get or requests.get
+    r = get("https://fapi.binance.com/futures/data/openInterestHist",
+            params={"symbol": symbol, "period": "15m", "limit": 500, "endTime": int(end.timestamp() * 1000)}, timeout=(2, 5))
+    lst = r.json()
+    if not isinstance(lst, list) or not lst:
+        return pd.Series(dtype=float)
+    s = pd.Series({pd.Timestamp(int(x["timestamp"]), unit="ms", tz="UTC"): float(x["sumOpenInterest"]) for x in lst})
+    return s.sort_index()
+
+
+def fetch_open_interest(symbol: str, start: pd.Timestamp, end: pd.Timestamp) -> pd.Series:
+    """Bybit first, Binance as fallback; any error -> empty Series (callers treat it as missing data)."""
+    for fn in (_bybit_open_interest, _binance_open_interest):
+        try:
+            s = fn(symbol, start, end)
+            if len(s):
+                return s[(s.index >= start) & (s.index <= end)]
+        except Exception:  # noqa: BLE001 - geo-block, timeout, schema change
+            continue
+    return pd.Series(dtype=float)
+
 
 class SyntheticMarketData:
     """Percorsi orari deterministici (random walk) per ogni (source, symbol); funding ogni 8h (00/08/16 UTC)."""
@@ -215,3 +274,9 @@ class SyntheticMarketData:
         now = _utc(now_utc)
         idx = pd.date_range((now - pd.Timedelta(days=lookback_days)).ceil("8h"), now, freq="8h", tz="UTC")
         return pd.Series(self.funding_rate, index=idx.as_unit("ns"), dtype="float64")
+
+    def open_interest(self, symbol: str, lookback_days: int, now_utc) -> pd.Series:
+        now = _utc(now_utc)
+        idx = pd.date_range((now - pd.Timedelta(days=lookback_days)).ceil("15min"), now, freq="15min", tz="UTC")
+        rng = np.random.default_rng(self.seed + zlib.crc32(f"oi:{symbol}".encode()))
+        return pd.Series(1e6 * np.cumprod(1 + rng.normal(0, 0.002, len(idx))), index=idx.as_unit("ns"))
