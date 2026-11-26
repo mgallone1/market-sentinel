@@ -1708,6 +1708,7 @@ POST_LIQ_PARAMS: Dict[str, float] = {
     "prior_range_bars": 12.0,      # "previous range" = extreme of the 12 bars before the spike
     "wick_min": 0.50,              # confirmation wick >= 50% of the confirmation bar range
     "sl_atr_buffer": 0.25,         # SL = spike extreme +- 0.25 ATR
+    "mirror": 0.0,                 # 1.0 = pre-registered mirrored reading (research variant only)
 }
 
 
@@ -1786,10 +1787,11 @@ def detect_post_liq_reversal(
     feats.update({"spike_range_atr": round(rng_s / a, 3), "atr": a})
     if funding_pct is None:
         return res(False, None, "NO_FUNDING_DATA")
+    mirror = bool(p.get("mirror", 0.0))  # pre-registered variant (c): opposite reading of the crowding direction
     if funding_pct >= p["funding_hi_pct"]:
-        side, want_up = "SHORT", True
+        side, want_up = ("LONG", False) if mirror else ("SHORT", True)
     elif funding_pct <= p["funding_lo_pct"]:
-        side, want_up = "LONG", False
+        side, want_up = ("SHORT", True) if mirror else ("LONG", False)
     else:
         return res(False, None, "FUNDING_NOT_EXTREME")
     if rng_s < p["spike_atr_mult"] * a:
