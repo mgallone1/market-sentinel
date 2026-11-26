@@ -117,14 +117,14 @@ def run_walkforward(universe: dict, interval: str, primary, rules: ExitRules, ki
                     min_gap_bars: int = 0, kelly_lam: float = 0.25, kelly_cap: float = 0.25,
                     vol_target: float = 0.30, fixed_frac: float = 0.10, seed: int = 0, ablation: bool = True,
                     importance: bool = True, min_train_events: int = 150, model_params: dict | None = None,
-                    ) -> WalkForwardResult:
+                    physics: bool = False) -> WalkForwardResult:
     rng = np.random.default_rng(seed)
     thresholds = list(threshold) if isinstance(threshold, (list, tuple)) else [threshold]
     multi = len(thresholds) > 1
     kinds = tuple(kinds)
     mp = model_params or {}
     events = build_event_dataset(universe, interval, primary, rules, benchmark, hmm=False, extra_cols=extra_cols,
-                                 min_gap_bars=min_gap_bars)
+                                 min_gap_bars=min_gap_bars, physics=physics)
     ts_all = events.index.get_level_values("ts")
     sym_all = np.asarray(events.index.get_level_values("symbol"))
     union = None
@@ -312,6 +312,6 @@ def run_walkforward(universe: dict, interval: str, primary, rules: ExitRules, ki
                symbols=list(universe), rules=repr(rules), n_events=int(len(events)),
                n_folds=len(fold_rows), kelly_lam=kelly_lam, kelly_cap=kelly_cap, vol_target=vol_target,
                data_start=str(min(b.index[0] for b, _ in universe.values())),
-               data_end=str(max(b.index[-1] for b, _ in universe.values())), seed=seed)
+               data_end=str(max(b.index[-1] for b, _ in universe.values())), seed=seed, physics=physics)
     return WalkForwardResult(cfg, summary, pd.DataFrame(fold_rows), returns, details, pbo, n_trials, best, abl, imp,
                              pred_all)

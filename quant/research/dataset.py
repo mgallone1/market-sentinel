@@ -12,7 +12,7 @@ from quant.core import AssetSpec, interval_to_hours
 from quant.features import GaussianHMM, build_features, hmm_inputs, regime_features
 
 DIRECTIONAL = re.compile(r"^(trend_ret|trend_ema_dist|rev_z|rev_rsi|rev_bb|volu_taker|xs_excess|struct_fld|"
-                         r"struct_aroon|struct_dc|ext_|reg_trend)")
+                         r"struct_aroon|struct_dc|ext_|reg_trend|phys_pe|phys_fp_edge|phys_drift)")
 
 
 def resolve_primary(primary):
@@ -30,9 +30,9 @@ def primary_side(primary, bars, spec, interval, benchmark=None) -> pd.Series:
 
 
 def bar_features(bars, spec: AssetSpec, interval: str, benchmark=None, extra_cols=(), mc_window: int = 100,
-                 vol_window: int = 168) -> pd.DataFrame:
+                 vol_window: int = 168, physics: bool = False) -> pd.DataFrame:
     """Feature per barra (causali) + colonne ausiliarie aux_* (statistiche GBM e vol annua per il sizing)."""
-    F = build_features(bars, spec, interval, benchmark)
+    F = build_features(bars, spec, interval, benchmark, physics=physics)
     for c in extra_cols:
         F[f"ext_{c}"] = bars[c]
     lr = np.log(bars["close"]).diff()
@@ -83,7 +83,8 @@ def _same(a, b) -> bool:
 
 
 def build_event_dataset(universe: dict, interval: str, primary, rules: ExitRules, benchmark=None,
-                        hmm=True, extra_cols=(), min_gap_bars: int = 0, hmm_kwargs: dict | None = None) -> pd.DataFrame:
+                        hmm=True, extra_cols=(), min_gap_bars: int = 0, hmm_kwargs: dict | None = None,
+                        physics: bool = False) -> pd.DataFrame:
     """universe: sym -> (bars, spec). Eventi poolati (MultiIndex (symbol, ts), ordinati per ts).
     hmm: False/None = niente feature di regime; GaussianHMM adattato = usato cosi' com'e';
     True = HMM adattato su TUTTO il campione (ammesso solo per il fit finale/gate, NON per il walk-forward)."""
@@ -102,7 +103,7 @@ def build_event_dataset(universe: dict, interval: str, primary, rules: ExitRules
                     keep.append(i)
                     last = p
             lab = lab.iloc[keep]
-        F = bar_features(bars, spec, interval, bm, extra_cols).loc[lab.index]
+        F = bar_features(bars, spec, interval, bm, extra_cols, physics=physics).loc[lab.index]
         F["aux_mc_h"] = float(rules.max_hold_bars)
         F = add_side_columns(F, lab["side"].to_numpy())
         ev = pd.concat([lab, F], axis=1)

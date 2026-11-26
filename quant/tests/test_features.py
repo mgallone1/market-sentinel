@@ -150,3 +150,25 @@ def test_build_features_runtime_20k():
     dt = time.time() - t0
     print("runtime", dt, f.shape)
     assert dt < 20
+
+
+def test_physics_family_causal_and_matches_closed_form():
+    from quant.features.families import _fp_ptp, physics_features
+    from services.strategy_engines_service import first_passage_probabilities
+
+    bars = make_bars(2000, seed=4)
+    full = physics_features(bars, "1h")
+    assert {"phys_pe_24h", "phys_pe_72h", "phys_pe_168h", "phys_fp_ptp0", "phys_fp_edge",
+            "phys_drift_tvd_12", "phys_drift_tvd_48"} <= set(full.columns)
+    for k in (900, 1500, 1999):
+        part = physics_features(bars.iloc[:k], "1h")
+        pd.testing.assert_frame_equal(part.iloc[-30:], full.iloc[k - 30:k], rtol=1e-8, atol=1e-10)
+    # vectorised closed form == scalar solver used by the live bot telemetry
+    nu, s2, a, b = np.array([0.0, 2e-4, -3e-4]), np.full(3, 35e-4 ** 2), np.full(3, 0.012), np.full(3, 0.036)
+    vec = _fp_ptp(nu, s2, a, b, 24)
+    ref = [first_passage_probabilities(float(x), float(s2[0]), 0.012, 0.036, 24)["p_tp"] for x in nu]
+    np.testing.assert_allclose(vec, ref, atol=1e-6)
+    # opt-in only: default feature set unchanged
+    spec = crypto_perp("BTCUSDT", "bybit")
+    assert not any(c.startswith("phys_") for c in build_features(bars, spec, "1h").columns)
+    assert any(c.startswith("phys_") for c in build_features(bars, spec, "1h", physics=True).columns)
