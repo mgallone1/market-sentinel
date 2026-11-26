@@ -1,4 +1,4 @@
-"""ALPACA_IN_PLAY_MOMENTUM (lab paper, v1.0): trade only the US large caps with an institutional catalyst.
+"""ALPACA_IN_PLAY_MOMENTUM (lab paper, v1.1: stop at least 0.5 ATR — reports/PREREG_NEW_STRATEGIES_V1_1.md): trade only the US large caps with an institutional catalyst.
 
 Rules (reports/PREREG_NEW_STRATEGIES.md §2, live code in services/strategy_engines_service.py §8b):
 at 09:45 NY a name is In Play if RVOL(09:30-09:45 vs the same window of the previous 20 sessions) >= 2 and

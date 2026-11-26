@@ -107,11 +107,45 @@ vuota** (creata dalla suite di test): il journal reale è sul server Oracle. Com
 3. Il lab le fa già girare in paper (nessun capitale reale), con ogni segnale e ogni scarto nel journal: costa poco e
    misura fill e costi reali. Promozione a capitale reale solo con i criteri di `docs/LAB.md`.
 
+## 6. Versione 1.1 (pre-registrata in `reports/PREREG_NEW_STRATEGIES_V1_1.md`, prima di ogni run)
+
+Modifiche: stop minimo 0.5 ATR per entrambe; Bybit funding 90/10, OI z ≤ -1.5, stop massimo 6 ATR, 20 perp.
+
+### BYBIT_POST_LIQ_REVERSAL v1.1 (20 perp, 2 anni)
+
+| variante | trade | win% | payoff | E/trade | E (R) | PF | Sharpe netto | Sharpe beta-adj | max DD | DSR | TP1% | uscite |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| a_spec_active | 24 | 50.0% | 1.64 | 0.364% | -0.11 | 1.64 | 0.53 | — | -0.39% | 0.782 | 50% | STOP_LOSS 11, TRAILING_ATR 7, VWAP_TARGET 3, BREAKEVEN_STOP 2, TIME_STOP 1 |
+| b_spec_fixed | 24 | 41.7% | 2.71 | 0.608% | -0.17 | 1.93 | 0.70 | — | -0.47% | 0.876 | 0% | STOP_LOSS 14, FIXED_TP 9, MAX_HOLD 1 |
+| control_random | 24 | 41.7% | 0.84 | -0.177% | -0.44 | 0.60 | -0.68 | — | -0.58% | n/a | 21% | STOP_LOSS 10, TIME_STOP 9, TRAILING_ATR 3, BREAKEVEN_STOP 1, VWAP_TARGET 1 |
+
+Frequenza: 1.01 trade/mese. Verdetto pre-registrato: **NON VALUTABILE** (meno di 30 trade).
+
+- 24 trade: E +0.36%/trade con uscite attive (errore standard 0.39%, t = 0.92) e +0.61% con TP fisso 2R
+  (t = 1.21); il controllo casuale con le stesse uscite fa -0.18%. Direzione incoraggiante, **non significativa**.
+- Ritmo ~1 trade/mese su 20 simboli: 6 mesi di paper ≈ 6 trade. Servono ~2 anni di paper o un universo più ampio
+  per arrivare a 30-50 trade; la v1.1 è nel lab proprio per accumularli senza rischio.
+- Ancora una volta il TP fisso 2R non è peggiore delle uscite attive.
+
+### ALPACA_IN_PLAY_MOMENTUM v1.1 (Yahoo 40 sedute, descrittivo)
+
+| variante | trade | win% | payoff | E/trade | E (R) | PF | Sharpe netto | Sharpe beta-adj | max DD | DSR | TP1% | uscite |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| a_active | 22 | 36.4% | 1.39 | -0.116% | -0.25 | 0.79 | -0.92 | -1.45 | -0.50% | 0.257 | 32% | STOP_LOSS 11, TRAILING_ATR 6, TIME_STOP 2, EOD_FORCE_CLOSE 2, BREAKEVEN_STOP 1 |
+| b_fixed | 22 | 36.4% | 1.85 | 0.034% | -0.13 | 1.06 | 0.22 | -0.46 | -0.41% | 0.391 | 0% | STOP_LOSS 13, FIXED_TP 6, EOD_FORCE_CLOSE 3 |
+| control_no_filter | 302 | 50.0% | 1.25 | 0.090% | 0.13 | 1.25 | 3.29 | 2.32 | -1.19% | n/a | 45% | TRAILING_ATR 134, STOP_LOSS 128, EOD_FORCE_CLOSE 27, TIME_STOP 12, BREAKEVEN_STOP 1 |
+| control_no_filter_fixed | 302 | 45.4% | 1.51 | 0.100% | 0.13 | 1.25 | 3.26 | 2.45 | -1.12% | n/a | 0% | STOP_LOSS 149, FIXED_TP 103, EOD_FORCE_CLOSE 50 |
+
+- Con lo stop minimo la media in R diventa coerente (-0.25R invece di -0.76R); E -0.12%/trade su 22 trade,
+  sotto il controllo senza filtro (+0.09%): `in_play_beats_no_filter` = False.
+- Decisione rimandata al test su 2 anni di barre Alpaca (Fase 7 di `docs/ANTIGRAVITY_PROMPT_AUTONOMO.md`), che
+  applica automaticamente la regola pre-registrata (filtro scartato se non batte il controllo).
+
 ## Avvertenze
 
 - Bybit è geo-bloccato da qui: prezzi, funding e open interest sono di Binance (proxy di ricerca); su Bybit i valori
   differiscono (soprattutto funding e OI). Nel lab su Oracle si usano gli endpoint Bybit v5 con fallback Binance.
 - Nessun parametro è stimato sui dati: l'intero campione è fuori campione rispetto ai parametri; le metriche per
   trimestre sono in `results.json`.
-- Prove dichiarate: 4 varianti Bybit + 2 Alpaca + 1 prova extra (ablazione sul controllo senza filtro).
+- Prove dichiarate: v1.0 7 (4 Bybit + 2 Alpaca + 1 extra), v1.1 4, test Alpaca 2 anni 4: totale 15.
 

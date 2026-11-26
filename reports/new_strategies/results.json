@@ -801,5 +801,739 @@
         "OI_NOT_COLLAPSING": 481
       }
     }
+  },
+  "alpaca_in_play_momentum_v1_1": {
+    "variants": {
+      "a_active": {
+        "n_trades": 22,
+        "win_rate": 0.36363636363636365,
+        "avg_win": 0.012221592996479257,
+        "avg_loss": 0.00881030439328189,
+        "payoff": 1.3871930470187355,
+        "expectancy": -0.0011623417060960177,
+        "expectancy_r": -0.2510403604109952,
+        "profit_factor": 0.7926817411535632,
+        "tp1_rate": 0.3181818181818182,
+        "exits": {
+          "STOP_LOSS": 11,
+          "TRAILING_ATR": 6,
+          "TIME_STOP": 2,
+          "EOD_FORCE_CLOSE": 2,
+          "BREAKEVEN_STOP": 1
+        },
+        "net_sharpe": -0.9224319719129159,
+        "net_total_return": -0.0025775016241367243,
+        "net_max_drawdown": -0.004995716026214736,
+        "net_sr_period": -0.058107752358487925,
+        "excess_sharpe": -1.4521191865789875,
+        "excess_total_return": -0.0039778222222605075,
+        "excess_max_drawdown": -0.005989000313557091,
+        "excess_sr_period": -0.09147491051698578,
+        "quarters": [
+          {
+            "quarter": "2026Q4",
+            "n": 22,
+            "win_rate": 0.36363636363636365,
+            "expectancy": -0.0011623417060960177,
+            "profit_factor": 0.7926817411535632,
+            "sum_ret": -0.025571517534112388
+          }
+        ],
+        "dsr": 0.2571874542312998
+      },
+      "b_fixed": {
+        "n_trades": 22,
+        "win_rate": 0.36363636363636365,
+        "avg_win": 0.017328993062395458,
+        "avg_loss": 0.009360887806635137,
+        "payoff": 1.8512125580772807,
+        "expectancy": 0.00034452341846689716,
+        "expectancy_r": -0.13339687498546923,
+        "profit_factor": 1.0578357474727318,
+        "tp1_rate": 0.0,
+        "exits": {
+          "STOP_LOSS": 13,
+          "FIXED_TP": 6,
+          "EOD_FORCE_CLOSE": 3
+        },
+        "net_sharpe": 0.21713402622235403,
+        "net_total_return": 0.00072085048380921,
+        "net_max_drawdown": -0.004124183937143422,
+        "net_sr_period": 0.01367815796558396,
+        "excess_sharpe": -0.45815820585314343,
+        "excess_total_return": -0.0016434793776822776,
+        "excess_max_drawdown": -0.007383335541609415,
+        "excess_sr_period": -0.028861254138356066,
+        "quarters": [
+          {
+            "quarter": "2026Q4",
+            "n": 22,
+            "win_rate": 0.36363636363636365,
+            "expectancy": 0.00034452341846689716,
+            "profit_factor": 1.0578357474727318,
+            "sum_ret": 0.007579515206271738
+          }
+        ],
+        "dsr": 0.39118000065375724
+      },
+      "control_no_filter": {
+        "n_trades": 302,
+        "win_rate": 0.5,
+        "avg_win": 0.008876872612278616,
+        "avg_loss": 0.007081005588982553,
+        "payoff": 1.253617512474539,
+        "expectancy": 0.0008979335116480327,
+        "expectancy_r": 0.13201390031978583,
+        "profit_factor": 1.253617512474539,
+        "tp1_rate": 0.4503311258278146,
+        "exits": {
+          "TRAILING_ATR": 134,
+          "STOP_LOSS": 128,
+          "EOD_FORCE_CLOSE": 27,
+          "TIME_STOP": 12,
+          "BREAKEVEN_STOP": 1
+        },
+        "net_sharpe": 3.2914438680626263,
+        "net_total_return": 0.027265872562984406,
+        "net_max_drawdown": -0.011852002747666068,
+        "net_sr_period": 0.2073414745052905,
+        "excess_sharpe": 2.31596449671982,
+        "excess_total_return": 0.018157394967027507,
+        "excess_max_drawdown": -0.013387214149074511,
+        "excess_sr_period": 0.14589205008513115,
+        "quarters": [
+          {
+            "quarter": "2026Q4",
+            "n": 302,
+            "win_rate": 0.5,
+            "expectancy": 0.0008979335116480327,
+            "profit_factor": 1.253617512474539,
+            "sum_ret": 0.2711759205177059
+          }
+        ]
+      },
+      "control_no_filter_fixed": {
+        "n_trades": 302,
+        "win_rate": 0.45364238410596025,
+        "avg_win": 0.010880249624480878,
+        "avg_loss": 0.007203063368151263,
+        "payoff": 1.5105031107443112,
+        "expectancy": 0.0010002938503606688,
+        "expectancy_r": 0.132181073361409,
+        "profit_factor": 1.2541753101331554,
+        "tp1_rate": 0.0,
+        "exits": {
+          "STOP_LOSS": 149,
+          "FIXED_TP": 103,
+          "EOD_FORCE_CLOSE": 50
+        },
+        "net_sharpe": 3.2622739843739903,
+        "net_total_return": 0.030388132416014013,
+        "net_max_drawdown": -0.011238391058715491,
+        "net_sr_period": 0.20550394455260454,
+        "excess_sharpe": 2.4494483200673893,
+        "excess_total_return": 0.022386307951602014,
+        "excess_max_drawdown": -0.01220546791671373,
+        "excess_sr_period": 0.15430074057626794,
+        "quarters": [
+          {
+            "quarter": "2026Q4",
+            "n": 302,
+            "win_rate": 0.45364238410596025,
+            "expectancy": 0.0010002938503606688,
+            "profit_factor": 1.2541753101331554,
+            "sum_ret": 0.30208874280892195
+          }
+        ]
+      }
+    },
+    "pbo": {
+      "pbo": 0.34285714285714286,
+      "n_configs": 2
+    },
+    "recommendation": {
+      "verdict": "NON VALUTABILE",
+      "criteria": {
+        "n_trades>=30": false
+      }
+    },
+    "frequency_per_month": 12.16,
+    "period": [
+      "2026-10-01",
+      "2026-11-25"
+    ],
+    "n_sessions_evaluated": 40,
+    "source": "yahoo",
+    "days_with_picks": 17,
+    "selections": [
+      {
+        "date": "2026-10-01",
+        "n_qualified": 0,
+        "picks": []
+      },
+      {
+        "date": "2026-10-02",
+        "n_qualified": 0,
+        "picks": []
+      },
+      {
+        "date": "2026-10-05",
+        "n_qualified": 1,
+        "picks": [
+          "MSFT"
+        ]
+      },
+      {
+        "date": "2026-10-06",
+        "n_qualified": 0,
+        "picks": []
+      },
+      {
+        "date": "2026-10-07",
+        "n_qualified": 0,
+        "picks": []
+      },
+      {
+        "date": "2026-10-08",
+        "n_qualified": 0,
+        "picks": []
+      },
+      {
+        "date": "2026-10-09",
+        "n_qualified": 1,
+        "picks": [
+          "AAPL"
+        ]
+      },
+      {
+        "date": "2026-10-12",
+        "n_qualified": 0,
+        "picks": []
+      },
+      {
+        "date": "2026-10-13",
+        "n_qualified": 0,
+        "picks": []
+      },
+      {
+        "date": "2026-10-14",
+        "n_qualified": 0,
+        "picks": []
+      },
+      {
+        "date": "2026-10-15",
+        "n_qualified": 0,
+        "picks": []
+      },
+      {
+        "date": "2026-10-16",
+        "n_qualified": 1,
+        "picks": [
+          "TSLA"
+        ]
+      },
+      {
+        "date": "2026-10-19",
+        "n_qualified": 0,
+        "picks": []
+      },
+      {
+        "date": "2026-10-20",
+        "n_qualified": 0,
+        "picks": []
+      },
+      {
+        "date": "2026-10-21",
+        "n_qualified": 1,
+        "picks": [
+          "GOOGL"
+        ]
+      },
+      {
+        "date": "2026-10-22",
+        "n_qualified": 1,
+        "picks": [
+          "META"
+        ]
+      },
+      {
+        "date": "2026-10-23",
+        "n_qualified": 0,
+        "picks": []
+      },
+      {
+        "date": "2026-10-26",
+        "n_qualified": 0,
+        "picks": []
+      },
+      {
+        "date": "2026-10-27",
+        "n_qualified": 0,
+        "picks": []
+      },
+      {
+        "date": "2026-10-28",
+        "n_qualified": 0,
+        "picks": []
+      },
+      {
+        "date": "2026-10-29",
+        "n_qualified": 2,
+        "picks": [
+          "GOOGL",
+          "MSFT"
+        ]
+      },
+      {
+        "date": "2026-10-30",
+        "n_qualified": 1,
+        "picks": [
+          "AMZN"
+        ]
+      },
+      {
+        "date": "2026-11-02",
+        "n_qualified": 0,
+        "picks": []
+      },
+      {
+        "date": "2026-11-03",
+        "n_qualified": 1,
+        "picks": [
+          "AAPL"
+        ]
+      },
+      {
+        "date": "2026-11-04",
+        "n_qualified": 2,
+        "picks": [
+          "AMZN",
+          "MSFT"
+        ]
+      },
+      {
+        "date": "2026-11-05",
+        "n_qualified": 2,
+        "picks": [
+          "AMD",
+          "NVDA"
+        ]
+      },
+      {
+        "date": "2026-11-06",
+        "n_qualified": 2,
+        "picks": [
+          "NVDA",
+          "AMD"
+        ]
+      },
+      {
+        "date": "2026-11-09",
+        "n_qualified": 1,
+        "picks": [
+          "NVDA"
+        ]
+      },
+      {
+        "date": "2026-11-10",
+        "n_qualified": 1,
+        "picks": [
+          "NVDA"
+        ]
+      },
+      {
+        "date": "2026-11-11",
+        "n_qualified": 1,
+        "picks": [
+          "NVDA"
+        ]
+      },
+      {
+        "date": "2026-11-12",
+        "n_qualified": 2,
+        "picks": [
+          "NVDA",
+          "AMD"
+        ]
+      },
+      {
+        "date": "2026-11-13",
+        "n_qualified": 1,
+        "picks": [
+          "NVDA"
+        ]
+      },
+      {
+        "date": "2026-11-16",
+        "n_qualified": 0,
+        "picks": []
+      },
+      {
+        "date": "2026-11-17",
+        "n_qualified": 0,
+        "picks": []
+      },
+      {
+        "date": "2026-11-18",
+        "n_qualified": 0,
+        "picks": []
+      },
+      {
+        "date": "2026-11-19",
+        "n_qualified": 0,
+        "picks": []
+      },
+      {
+        "date": "2026-11-20",
+        "n_qualified": 0,
+        "picks": []
+      },
+      {
+        "date": "2026-11-23",
+        "n_qualified": 1,
+        "picks": [
+          "NVDA"
+        ]
+      },
+      {
+        "date": "2026-11-24",
+        "n_qualified": 0,
+        "picks": []
+      },
+      {
+        "date": "2026-11-25",
+        "n_qualified": 0,
+        "picks": []
+      }
+    ],
+    "version": "1.1",
+    "in_play_beats_no_filter": false
+  },
+  "bybit_post_liq_reversal_v1_1": {
+    "variants": {
+      "a_spec_active": {
+        "n_trades": 24,
+        "win_rate": 0.5,
+        "avg_win": 0.018549201538210817,
+        "avg_loss": 0.011277594357334718,
+        "payoff": 1.6447835372041728,
+        "expectancy": 0.0036358035904380504,
+        "expectancy_r": -0.11088830090529193,
+        "profit_factor": 1.644783537204173,
+        "tp1_rate": 0.5,
+        "exits": {
+          "STOP_LOSS": 11,
+          "TRAILING_ATR": 7,
+          "VWAP_TARGET": 3,
+          "BREAKEVEN_STOP": 2,
+          "TIME_STOP": 1
+        },
+        "net_sharpe": 0.5285190175571168,
+        "net_total_return": 0.008695133396388943,
+        "net_max_drawdown": -0.003886132287880484,
+        "net_sr_period": 0.027663949733327215,
+        "excess_sharpe": 0.5285190175571168,
+        "excess_total_return": 0.008695133396388943,
+        "excess_max_drawdown": -0.003886132287880484,
+        "excess_sr_period": 0.027663949733327215,
+        "quarters": [
+          {
+            "quarter": "2024Q4",
+            "n": 2,
+            "win_rate": 0.0,
+            "expectancy": -0.014946252955675133,
+            "profit_factor": 0.0,
+            "sum_ret": -0.029892505911350266
+          },
+          {
+            "quarter": "2025Q1",
+            "n": 2,
+            "win_rate": 0.5,
+            "expectancy": 0.021715132547415594,
+            "profit_factor": 10.233077436824319,
+            "sum_ret": 0.04343026509483119
+          },
+          {
+            "quarter": "2025Q2",
+            "n": 2,
+            "win_rate": 0.0,
+            "expectancy": -0.005333528292047304,
+            "profit_factor": 0.0,
+            "sum_ret": -0.010667056584094607
+          },
+          {
+            "quarter": "2025Q3",
+            "n": 1,
+            "win_rate": 1.0,
+            "expectancy": 0.009886773698183568,
+            "profit_factor": null,
+            "sum_ret": 0.009886773698183568
+          },
+          {
+            "quarter": "2025Q4",
+            "n": 4,
+            "win_rate": 0.75,
+            "expectancy": 0.016998601753529453,
+            "profit_factor": 5.2667971629733845,
+            "sum_ret": 0.06799440701411781
+          },
+          {
+            "quarter": "2026Q1",
+            "n": 5,
+            "win_rate": 0.4,
+            "expectancy": -0.003969143812259404,
+            "profit_factor": 0.437332508059025,
+            "sum_ret": -0.01984571906129702
+          },
+          {
+            "quarter": "2026Q2",
+            "n": 2,
+            "win_rate": 1.0,
+            "expectancy": 0.009162171071986186,
+            "profit_factor": null,
+            "sum_ret": 0.018324342143972373
+          },
+          {
+            "quarter": "2026Q3",
+            "n": 5,
+            "win_rate": 0.4,
+            "expectancy": -0.0023153929694706135,
+            "profit_factor": 0.7020954514734923,
+            "sum_ret": -0.011576964847353067
+          },
+          {
+            "quarter": "2026Q4",
+            "n": 1,
+            "win_rate": 1.0,
+            "expectancy": 0.01960574462350324,
+            "profit_factor": null,
+            "sum_ret": 0.01960574462350324
+          }
+        ],
+        "dsr": 0.7817011984769326
+      },
+      "b_spec_fixed": {
+        "n_trades": 24,
+        "win_rate": 0.4166666666666667,
+        "avg_win": 0.030248091843056463,
+        "avg_loss": 0.011181679717012843,
+        "payoff": 2.7051474025887376,
+        "expectancy": 0.006080725099682699,
+        "expectancy_r": -0.1722356536998558,
+        "profit_factor": 1.932248144706241,
+        "tp1_rate": 0.0,
+        "exits": {
+          "STOP_LOSS": 14,
+          "FIXED_TP": 9,
+          "MAX_HOLD": 1
+        },
+        "net_sharpe": 0.6965856712035915,
+        "net_total_return": 0.014589157191692737,
+        "net_max_drawdown": -0.00473508229784414,
+        "net_sr_period": 0.03646096044415208,
+        "excess_sharpe": 0.6965856712035915,
+        "excess_total_return": 0.014589157191692737,
+        "excess_max_drawdown": -0.00473508229784414,
+        "excess_sr_period": 0.03646096044415208,
+        "quarters": [
+          {
+            "quarter": "2024Q4",
+            "n": 2,
+            "win_rate": 0.0,
+            "expectancy": -0.014946252955675133,
+            "profit_factor": 0.0,
+            "sum_ret": -0.029892505911350266
+          },
+          {
+            "quarter": "2025Q1",
+            "n": 2,
+            "win_rate": 0.5,
+            "expectancy": 0.0279872229727128,
+            "profit_factor": 12.899913407596491,
+            "sum_ret": 0.0559744459454256
+          },
+          {
+            "quarter": "2025Q2",
+            "n": 2,
+            "win_rate": 0.0,
+            "expectancy": -0.005333528292047304,
+            "profit_factor": 0.0,
+            "sum_ret": -0.010667056584094607
+          },
+          {
+            "quarter": "2025Q3",
+            "n": 1,
+            "win_rate": 0.0,
+            "expectancy": -0.014301450489613676,
+            "profit_factor": 0.0,
+            "sum_ret": -0.014301450489613676
+          },
+          {
+            "quarter": "2025Q4",
+            "n": 4,
+            "win_rate": 0.5,
+            "expectancy": 0.021717481177124937,
+            "profit_factor": 4.866694494706854,
+            "sum_ret": 0.08686992470849975
+          },
+          {
+            "quarter": "2026Q1",
+            "n": 5,
+            "win_rate": 0.4,
+            "expectancy": 0.0028279518711134266,
+            "profit_factor": 1.3966136977803818,
+            "sum_ret": 0.014139759355567133
+          },
+          {
+            "quarter": "2026Q2",
+            "n": 2,
+            "win_rate": 1.0,
+            "expectancy": 0.013433717045544264,
+            "profit_factor": null,
+            "sum_ret": 0.026867434091088528
+          },
+          {
+            "quarter": "2026Q3",
+            "n": 5,
+            "win_rate": 0.4,
+            "expectancy": -0.0006301451941500492,
+            "profit_factor": 0.9189238621501302,
+            "sum_ret": -0.003150725970750246
+          },
+          {
+            "quarter": "2026Q4",
+            "n": 1,
+            "win_rate": 1.0,
+            "expectancy": 0.020097577247612592,
+            "profit_factor": null,
+            "sum_ret": 0.020097577247612592
+          }
+        ],
+        "dsr": 0.876436905837047
+      },
+      "control_random": {
+        "n_trades": 24,
+        "win_rate": 0.4166666666666667,
+        "avg_win": 0.006408158263897458,
+        "avg_loss": 0.007618715642491018,
+        "payoff": 0.8411074208043607,
+        "expectancy": -0.0017741848481624863,
+        "expectancy_r": -0.4369349842991235,
+        "profit_factor": 0.6007910148602577,
+        "tp1_rate": 0.20833333333333334,
+        "exits": {
+          "STOP_LOSS": 10,
+          "TIME_STOP": 9,
+          "TRAILING_ATR": 3,
+          "BREAKEVEN_STOP": 1,
+          "VWAP_TARGET": 1
+        },
+        "net_sharpe": -0.6780406957721176,
+        "net_total_return": -0.004258875814557861,
+        "net_max_drawdown": -0.005755496595044152,
+        "net_sr_period": -0.035490272065683955,
+        "excess_sharpe": -0.6780406957721176,
+        "excess_total_return": -0.004258875814557861,
+        "excess_max_drawdown": -0.005755496595044152,
+        "excess_sr_period": -0.035490272065683955,
+        "quarters": [
+          {
+            "quarter": "2024Q4",
+            "n": 4,
+            "win_rate": 0.25,
+            "expectancy": -0.002066965144754461,
+            "profit_factor": 0.6096511413516272,
+            "sum_ret": -0.008267860579017844
+          },
+          {
+            "quarter": "2025Q1",
+            "n": 1,
+            "win_rate": 1.0,
+            "expectancy": 0.0019221509379294705,
+            "profit_factor": null,
+            "sum_ret": 0.0019221509379294705
+          },
+          {
+            "quarter": "2025Q2",
+            "n": 3,
+            "win_rate": 0.3333333333333333,
+            "expectancy": -0.0020691334116906095,
+            "profit_factor": 0.6514189779481712,
+            "sum_ret": -0.006207400235071828
+          },
+          {
+            "quarter": "2025Q4",
+            "n": 4,
+            "win_rate": 0.5,
+            "expectancy": -0.0028291361062911546,
+            "profit_factor": 0.19406082396386795,
+            "sum_ret": -0.011316544425164618
+          },
+          {
+            "quarter": "2026Q1",
+            "n": 5,
+            "win_rate": 0.4,
+            "expectancy": 0.0007811819881046008,
+            "profit_factor": 1.2495582467682125,
+            "sum_ret": 0.003905909940523004
+          },
+          {
+            "quarter": "2026Q2",
+            "n": 3,
+            "win_rate": 0.3333333333333333,
+            "expectancy": -0.004127557223368768,
+            "profit_factor": 0.3187968288352426,
+            "sum_ret": -0.012382671670106305
+          },
+          {
+            "quarter": "2026Q3",
+            "n": 3,
+            "win_rate": 0.6666666666666666,
+            "expectancy": -0.0023016838310221015,
+            "profit_factor": 0.5808603887905144,
+            "sum_ret": -0.0069050514930663045
+          },
+          {
+            "quarter": "2026Q4",
+            "n": 1,
+            "win_rate": 0.0,
+            "expectancy": -0.003328968831925248,
+            "profit_factor": 0.0,
+            "sum_ret": -0.003328968831925248
+          }
+        ]
+      }
+    },
+    "pbo": {
+      "pbo": 0.6811188811188811,
+      "n_configs": 2
+    },
+    "recommendation": {
+      "verdict": "NON VALUTABILE",
+      "criteria": {
+        "n_trades>=30": false
+      }
+    },
+    "frequency_per_month": 1.0077348066298342,
+    "period": [
+      "2024-11-05",
+      "2026-10-30"
+    ],
+    "rejects": {
+      "a_spec_active": {
+        "NO_FUNDING_DATA": 12,
+        "FUNDING_NOT_EXTREME": 23079,
+        "SPIKE_WRONG_DIRECTION": 2411,
+        "OI_NOT_COLLAPSING": 1976,
+        "NO_REABSORPTION": 689
+      },
+      "b_spec_fixed": {
+        "NO_FUNDING_DATA": 12,
+        "FUNDING_NOT_EXTREME": 23079,
+        "SPIKE_WRONG_DIRECTION": 2411,
+        "OI_NOT_COLLAPSING": 1976,
+        "NO_REABSORPTION": 689
+      }
+    }
   }
 }

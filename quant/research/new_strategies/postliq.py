@@ -9,6 +9,7 @@ import pandas as pd
 
 from services.strategy_engines_service import (
     POST_LIQ_PARAMS,
+    POST_LIQ_PARAMS_V1_0,
     detect_post_liq_reversal,
     oi_change_zscore,
     rolling_vwap,
@@ -22,6 +23,9 @@ START, END = "2024-11-01", "2026-11-01"
 FEE_SIDE, SLIP_ENTRY, SLIP_EXIT, SLIP_STOP = 0.00055, 0.0005, 0.0002, 0.0005
 MAX_HOLD, TIME_STOP_BARS, TIME_STOP_R, VWAP_BARS = 96, 6, 0.5, 16
 OI_LOOKBACK = 192  # 48 h of 15m bars
+SYMBOLS_V1_1 = SYMBOLS + ("BNBUSDT", "LTCUSDT", "DOTUSDT", "BCHUSDT", "ATOMUSDT", "APTUSDT", "ARBUSDT", "OPUSDT",
+                          "INJUSDT", "UNIUSDT")
+VARIANTS_V1_1 = {"a_spec_active": dict(mirror=0.0, active=True), "b_spec_fixed": dict(mirror=0.0, active=False)}
 VARIANTS = {
     "a_spec_active": dict(mirror=0.0, active=True),
     "b_spec_fixed": dict(mirror=0.0, active=False),
@@ -62,7 +66,8 @@ def funding_pct_at(fr: pd.Series, ends: pd.DatetimeIndex, window_days: float = 3
     return s.reindex(s.index.union(ends)).sort_index().ffill().reindex(ends).to_numpy(float)
 
 
-def scan_symbol(sym: str, data: Dict[str, object], mirror: float, active: bool) -> Tuple[List[Dict], Dict[str, int]]:
+def scan_symbol(sym: str, data: Dict[str, object], mirror: float, active: bool,
+                base_params: Dict[str, float] = POST_LIQ_PARAMS_V1_0) -> Tuple[List[Dict], Dict[str, int]]:
     d: pd.DataFrame = data["bars"]
     o, h, l, c, v = (d[k].to_numpy(float) for k in ("open", "high", "low", "close", "volume"))
     ends = data["ends"]
@@ -72,7 +77,7 @@ def scan_symbol(sym: str, data: Dict[str, object], mirror: float, active: bool) 
     oi = data["oi"]
     trades, rejects = [], {}
     busy_until = -1
-    params = dict(POST_LIQ_PARAMS, mirror=mirror)
+    params = dict(base_params, mirror=mirror)
     for i in range(OI_LOOKBACK + 20, len(c) - 1):
         s = i - 1
         a = atr[s - 1]
@@ -128,17 +133,21 @@ def random_control(trades: pd.DataFrame, data: Dict[str, Dict], seed: int = 0) -
     return pd.DataFrame(rows)
 
 
-def run() -> Dict[str, object]:
+def run(version: str = "1.0") -> Dict[str, object]:
+    """version "1.0" = reports/PREREG_NEW_STRATEGIES.md; "1.1" = reports/PREREG_NEW_STRATEGIES_V1_1.md."""
+    symbols = SYMBOLS if version == "1.0" else SYMBOLS_V1_1
+    variants = VARIANTS if version == "1.0" else VARIANTS_V1_1
+    base_params = POST_LIQ_PARAMS_V1_0 if version == "1.0" else POST_LIQ_PARAMS
     data = {}
-    for s in SYMBOLS:
+    for s in symbols:
         data[s] = load_symbol(s)
         log.info("%s: %d barre, OI valido %.1f%%, funding print %d", s, len(data[s]["bars"]),
                  100 * np.isfinite(data[s]["oi"]).mean(), len(data[s]["funding"]))
     out = {"trades": {}, "rejects": {}}
-    for name, cfg in VARIANTS.items():
+    for name, cfg in variants.items():
         tr, rj = [], {}
-        for s in SYMBOLS:
-            t, r = scan_symbol(s, data[s], cfg["mirror"], cfg["active"])
+        for s in symbols:
+            t, r = scan_symbol(s, data[s], cfg["mirror"], cfg["active"], base_params)
             tr += t
             for k, n in r.items():
                 rj[k] = rj.get(k, 0) + n

@@ -1,8 +1,8 @@
-"""BYBIT_POST_LIQ_REVERSAL (lab paper, v1.0): fade of a liquidation cascade once forced flow is exhausted.
+"""BYBIT_POST_LIQ_REVERSAL (lab paper, v1.1 — reports/PREREG_NEW_STRATEGIES_V1_1.md): fade of a liquidation cascade once forced flow is exhausted.
 
 Rules (reports/PREREG_NEW_STRATEGIES.md §1, live code in services/strategy_engines_service.py §8a):
-funding percentile (30 days) >= 95 -> SHORT / <= 5 -> LONG; spike bar range >= 2.5 ATR14 in the crowding direction;
-open-interest change on the spike z <= -2 vs the previous 48 h; next bar reabsorbs (close back in the previous range,
+funding percentile (30 days) >= 90 -> SHORT / <= 10 -> LONG (v1.0: 95/5); spike bar range >= 2.5 ATR14 in the crowding direction;
+open-interest change on the spike z <= -1.5 (v1.0: -2) vs the previous 48 h; stop distance 0.5-6 ATR; next bar reabsorbs (close back in the previous range,
 wick >= 50%, lower volume). Exits: SL spike extreme +- 0.25 ATR; 50% at +1.5R and stop to breakeven + fees; runner to the
 4h VWAP or a 1.5 ATR trail; time-stop after 6 bars below +0.5R; safety max hold 96 bars.
 State is rebuilt at every run by replaying the last closed 15m bars (stateless, restart-safe).
@@ -33,8 +33,9 @@ from services.strategy_engines_service import (
     wilder_atr_array,
 )
 
-SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "LINKUSDT", "AVAXUSDT", "ADAUSDT", "DOGEUSDT", "SUIUSDT", "NEARUSDT"]
-WEIGHT = 0.10
+SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "LINKUSDT", "AVAXUSDT", "ADAUSDT", "DOGEUSDT", "SUIUSDT", "NEARUSDT",
+           "BNBUSDT", "LTCUSDT", "DOTUSDT", "BCHUSDT", "ATOMUSDT", "APTUSDT", "ARBUSDT", "OPUSDT", "INJUSDT", "UNIUSDT"]  # v1.1: 20
+MAX_WEIGHT = 0.10  # per position; capped at 1/len(symbols) so the gross never exceeds 1 (lab: no leverage)
 FEE_SIDE, SLIP_ENTRY, SLIP_EXIT, SLIP_STOP = 0.00055, 0.0005, 0.0002, 0.0005
 MAX_HOLD, OI_LOOKBACK, REPLAY_BARS = 96, 192, 104
 NEAR_MISS = ("OI_NOT_COLLAPSING", "NO_REABSORPTION", "NO_OI_DATA")
@@ -134,7 +135,7 @@ class PostLiqReversal:
                 continue
             if pos:
                 n_open += 1
-                w = pos["side"] * WEIGHT * pos["fraction"]
+                w = pos["side"] * min(MAX_WEIGHT, 1.0 / len(self.symbols)) * pos["fraction"]
                 why = (f"post-liq {'LONG' if pos['side'] > 0 else 'SHORT'} aperto, frazione {pos['fraction']:.2f}, "
                        f"SL {pos['sl']:.6g}")
                 targets.append(Target(self.inst[s], w, why, pos))

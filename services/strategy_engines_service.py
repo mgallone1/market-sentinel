@@ -1663,7 +1663,7 @@ def evaluate_shadow_bars(
 ENGINE_POST_LIQ_REVERSAL = "BYBIT_POST_LIQ_REVERSAL"
 ENGINE_IN_PLAY_MOMENTUM = "ALPACA_IN_PLAY_MOMENTUM"
 LAB_ENGINES = [ENGINE_POST_LIQ_REVERSAL, ENGINE_IN_PLAY_MOMENTUM]
-LAB_STRATEGY_VERSION = "1.0"
+LAB_STRATEGY_VERSION = "1.1"  # v1.1 (reports/PREREG_NEW_STRATEGIES_V1_1.md); v1.0 params kept below
 
 EXIT_TP1_PARTIAL = "TP1_PARTIAL"
 EXIT_TRAILING_ATR = "TRAILING_ATR"
@@ -1698,7 +1698,7 @@ def wilder_atr_array(high: np.ndarray, low: np.ndarray, close: np.ndarray, n: in
 # 8a. BYBIT_POST_LIQ_REVERSAL — liquidation-cascade exhaustion fade
 # ---------------------------------------------------------------------------
 
-POST_LIQ_PARAMS: Dict[str, float] = {
+POST_LIQ_PARAMS_V1_0: Dict[str, float] = {
     "funding_window_days": 30.0,   # rolling window of funding prints for the percentile
     "funding_hi_pct": 95.0,        # >= : longs crowded -> SHORT setup
     "funding_lo_pct": 5.0,         # <= : shorts crowded -> LONG setup
@@ -1709,7 +1709,13 @@ POST_LIQ_PARAMS: Dict[str, float] = {
     "wick_min": 0.50,              # confirmation wick >= 50% of the confirmation bar range
     "sl_atr_buffer": 0.25,         # SL = spike extreme +- 0.25 ATR
     "mirror": 0.0,                 # 1.0 = pre-registered mirrored reading (research variant only)
+    "min_risk_atr": 0.0,           # v1.0: no floor on the stop distance
+    "max_risk_atr": 0.0,           # v1.0: no cap (0 = disabled)
 }
+
+# v1.1: relaxed funding/OI thresholds, stop distance between 0.5 and 6 ATR (reports/PREREG_NEW_STRATEGIES_V1_1.md)
+POST_LIQ_PARAMS: Dict[str, float] = dict(POST_LIQ_PARAMS_V1_0, funding_hi_pct=90.0, funding_lo_pct=10.0, oi_z_max=-1.5,
+                                         min_risk_atr=0.5, max_risk_atr=6.0)
 
 
 def funding_percentile(funding: pd.Series, now: Any, window_days: float = 30.0) -> Optional[float]:
@@ -1819,6 +1825,13 @@ def detect_post_liq_reversal(
     entry = float(c[i])
     if (side == "SHORT" and sl <= entry) or (side == "LONG" and sl >= entry):
         return res(False, side, "NO_REABSORPTION")
+    risk = abs(entry - sl)
+    if p.get("min_risk_atr", 0.0) and risk < p["min_risk_atr"] * a:  # v1.1: stop at least 0.5 ATR away
+        sl = entry + p["min_risk_atr"] * a if side == "SHORT" else entry - p["min_risk_atr"] * a
+        risk = abs(entry - sl)
+    feats["risk_atr"] = round(risk / a, 3)
+    if p.get("max_risk_atr", 0.0) and risk > p["max_risk_atr"] * a:
+        return res(False, side, "RISK_TOO_WIDE")
     return res(True, side, "", entry, sl)
 
 
@@ -1826,7 +1839,7 @@ def detect_post_liq_reversal(
 # 8b. ALPACA_IN_PLAY_MOMENTUM — institutional catalyst filter + ORB / EMA pullback
 # ---------------------------------------------------------------------------
 
-IN_PLAY_PARAMS: Dict[str, float] = {
+IN_PLAY_PARAMS_V1_0: Dict[str, float] = {
     "rvol_min": 2.0,          # volume 09:30-09:45 / mean of the same window over the previous 20 sessions
     "rvol_lookback": 20.0,
     "gap_min_pct": 1.5,       # |open / previous close - 1| >= 1.5%
@@ -1835,7 +1848,11 @@ IN_PLAY_PARAMS: Dict[str, float] = {
     "or_minutes": 15.0,
     "ema_fast": 9.0,          # fast EMA (5m) for the pullback entry
     "sl_atr_cap": 1.5,        # SL = opposite side of the OR, capped at 1.5 x ATR14(5m)
+    "min_risk_atr": 0.0,      # v1.0: no floor on the stop distance
 }
+
+# v1.1: stop at least 0.5 x ATR14(5m) away (reports/PREREG_NEW_STRATEGIES_V1_1.md)
+IN_PLAY_PARAMS: Dict[str, float] = dict(IN_PLAY_PARAMS_V1_0, min_risk_atr=0.5)
 
 
 def _ny(idx: pd.DatetimeIndex) -> pd.DatetimeIndex:
@@ -1989,6 +2006,9 @@ def in_play_entry(
         sl = or_lo if long else or_hi
         if np.isfinite(a) and a > 0 and abs(entry - sl) > p["sl_atr_cap"] * a:
             sl = entry - p["sl_atr_cap"] * a if long else entry + p["sl_atr_cap"] * a
+        if np.isfinite(a) and a > 0 and p.get("min_risk_atr", 0.0) and (
+                (long and entry - sl < p["min_risk_atr"] * a) or ((not long) and sl - entry < p["min_risk_atr"] * a)):
+            sl = entry - p["min_risk_atr"] * a if long else entry + p["min_risk_atr"] * a
         if (long and sl >= entry) or ((not long) and sl <= entry):
             continue  # entry inside/below the stop: not a valid bet, keep scanning
         return {"triggered": True, "pos": int(k), "entry": entry, "sl": float(sl), "risk": abs(entry - sl),

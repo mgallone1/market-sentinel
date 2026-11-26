@@ -13,6 +13,8 @@ import pandas as pd
 
 from services import market_calendar
 from services.strategy_engines_service import (
+    IN_PLAY_PARAMS,
+    IN_PLAY_PARAMS_V1_0,
     in_play_entry,
     in_play_metrics,
     opening_window_stats,
@@ -109,9 +111,13 @@ def _first_or_break_side(df: pd.DataFrame, day) -> str | None:
     return None
 
 
-def run(source: str = "yahoo", start: str | None = None, end: str | None = None) -> Dict[str, object]:
+def run(source: str = "yahoo", start: str | None = None, end: str | None = None, version: str = "1.0",
+        bars: Dict[str, pd.DataFrame] | None = None) -> Dict[str, object]:
+    """version "1.0" or "1.1" (stop distance floor 0.5 ATR). `bars` can be passed to reuse downloaded data."""
+    params = IN_PLAY_PARAMS_V1_0 if version == "1.0" else IN_PLAY_PARAMS
     syms = list(SYMBOLS) + ["SPY"]
-    bars = load_yahoo(syms) if source == "yahoo" else load_alpaca(syms, start, end)
+    if bars is None:
+        bars = load_yahoo(syms) if source == "yahoo" else load_alpaca(syms, start, end)
     stats = {s: opening_window_stats(bars[s]) for s in syms}
     days = sorted(set(stats["SPY"].index))
     trades = {k: [] for k in VARIANTS}
@@ -125,7 +131,7 @@ def run(source: str = "yahoo", start: str | None = None, end: str | None = None)
         picks = select_in_play(metrics)
         selections.append({"date": str(day), "n_qualified": len(picks), "picks": [p["symbol"] for p in picks]})
         for p in picks:
-            ent = in_play_entry(bars[p["symbol"]], day, p["side"])
+            ent = in_play_entry(bars[p["symbol"]], day, p["side"], params=params)
             if not ent.get("triggered"):
                 continue
             for name, active in VARIANTS.items():
@@ -136,7 +142,7 @@ def run(source: str = "yahoo", start: str | None = None, end: str | None = None)
             side = _first_or_break_side(bars[s], day)
             if side is None:
                 continue
-            ent = in_play_entry(bars[s], day, side)
+            ent = in_play_entry(bars[s], day, side, params=params)
             if ent.get("triggered"):
                 for key, active in (("control_no_filter", True), ("control_no_filter_fixed", False)):
                     ex = _simulate(bars[s], ent, side, active)
@@ -145,7 +151,7 @@ def run(source: str = "yahoo", start: str | None = None, end: str | None = None)
     spy = bars["SPY"]["Close"]
     sd = spy.index.tz_convert("America/New_York").normalize().tz_localize(None)
     bench = spy.groupby(sd).last().pct_change().fillna(0.0)
-    out = {"trades": {k: pd.DataFrame(v) for k, v in trades.items()}, "selections": selections,
+    out = {"trades": {k: pd.DataFrame(v) for k, v in trades.items()}, "selections": selections, "bars": bars,
            "bench_daily": bench, "n_sessions_evaluated": len(selections), "source": source,
            "period": [str(days[0]) if days else None, str(days[-1]) if days else None]}
     log.info("in play: %d sedute valutate, trade %s", len(selections), {k: len(v) for k, v in trades.items()})

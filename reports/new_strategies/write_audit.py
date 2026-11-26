@@ -113,12 +113,32 @@ def main():
           "   restrittiva (sopra) e testarla sugli stessi dati prima di qualsiasi paper.",
           "3. Il lab le fa già girare in paper (nessun capitale reale), con ogni segnale e ogni scarto nel journal: costa poco e",
           "   misura fill e costi reali. Promozione a capitale reale solo con i criteri di `docs/LAB.md`.", "",
-          "## Avvertenze", "",
+          "## 6. Versione 1.1 (pre-registrata in `reports/PREREG_NEW_STRATEGIES_V1_1.md`, prima di ogni run)", "",
+          "Modifiche: stop minimo 0.5 ATR per entrambe; Bybit funding 90/10, OI z ≤ -1.5, stop massimo 6 ATR, 20 perp.", "",
+          "### BYBIT_POST_LIQ_REVERSAL v1.1 (20 perp, 2 anni)", ""]
+    b1 = RES.get("bybit_post_liq_reversal_v1_1")
+    if b1:
+        L += table(b1["variants"], False)
+        L += ["", f"Frequenza: {b1['frequency_per_month']:.2f} trade/mese. Verdetto pre-registrato: **{b1['recommendation']['verdict']}** "
+              "(meno di 30 trade).", "",
+              "- 24 trade: E +0.36%/trade con uscite attive (errore standard 0.39%, t = 0.92) e +0.61% con TP fisso 2R",
+              "  (t = 1.21); il controllo casuale con le stesse uscite fa -0.18%. Direzione incoraggiante, **non significativa**.",
+              "- Ritmo ~1 trade/mese su 20 simboli: 6 mesi di paper ≈ 6 trade. Servono ~2 anni di paper o un universo più ampio",
+              "  per arrivare a 30-50 trade; la v1.1 è nel lab proprio per accumularli senza rischio.",
+              "- Ancora una volta il TP fisso 2R non è peggiore delle uscite attive.", ""]
+    a1 = RES.get("alpaca_in_play_momentum_v1_1")
+    if a1:
+        L += ["### ALPACA_IN_PLAY_MOMENTUM v1.1 (Yahoo 40 sedute, descrittivo)", ""] + table(a1["variants"], True)
+        L += ["", "- Con lo stop minimo la media in R diventa coerente (-0.25R invece di -0.76R); E -0.12%/trade su 22 trade,",
+              f"  sotto il controllo senza filtro (+0.09%): `in_play_beats_no_filter` = {a1.get('in_play_beats_no_filter')}.",
+              "- Decisione rimandata al test su 2 anni di barre Alpaca (Fase 7 di `docs/ANTIGRAVITY_PROMPT_AUTONOMO.md`), che",
+              "  applica automaticamente la regola pre-registrata (filtro scartato se non batte il controllo).", ""]
+    L += ["## Avvertenze", "",
           "- Bybit è geo-bloccato da qui: prezzi, funding e open interest sono di Binance (proxy di ricerca); su Bybit i valori",
           "  differiscono (soprattutto funding e OI). Nel lab su Oracle si usano gli endpoint Bybit v5 con fallback Binance.",
           "- Nessun parametro è stimato sui dati: l'intero campione è fuori campione rispetto ai parametri; le metriche per",
           "  trimestre sono in `results.json`.",
-          "- Prove dichiarate: 4 varianti Bybit + 2 Alpaca + 1 prova extra (ablazione sul controllo senza filtro).", ""]
+          "- Prove dichiarate: v1.0 7 (4 Bybit + 2 Alpaca + 1 extra), v1.1 4, test Alpaca 2 anni 4: totale 15.", ""]
     (ROOT / "reports" / "NEW_STRATEGIES_POTENTIAL_AUDIT.md").write_text("\n".join(L) + "\n")
     print("ok")
 

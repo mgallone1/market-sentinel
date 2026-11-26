@@ -258,8 +258,8 @@ def _crypto_fixture(with_oi=True):
     idx = pd.date_range("2026-06-01", periods=n, freq="15min", tz="UTC")
     c = 100 + np.cumsum(rng.normal(0, 0.05, n))
     o = np.r_[c[0], c[:-1]]
-    h = np.maximum(o, c) + 0.05
-    l = np.minimum(o, c) - 0.05
+    h = np.maximum(o, c) + 0.25   # ATR ~ 0.5: the spike below is ~3.4 ATR and the stop ~3.8 ATR (inside v1.1 limits)
+    l = np.minimum(o, c) - 0.25
     v = np.full(n, 100.0)
     s, i = n - 3, n - 2
     pre_hi = h[s - 12:s].max()
@@ -484,6 +484,40 @@ class TestUiIntegration(unittest.TestCase):
         data = _json.loads(resp.text)
         self.assertEqual([x["strategy"] for x in data["strategies"]], ["BYBIT_POST_LIQ_REVERSAL", "ALPACA_IN_PLAY_MOMENTUM"])
         self.assertIn("lab-candidates-section", dws.DASHBOARD_HTML)
+
+
+class TestV11RiskRules(unittest.TestCase):
+    def test_min_risk_floor_and_max_risk_cap_post_liq(self):
+        t = TestPostLiquidation()
+        o, h, l, c, v, i, fp, z = t._setup()
+        atr = se.wilder_atr_array(h, l, c, 14)
+        a = atr[i - 2]
+        v10 = se.detect_post_liq_reversal(o, h, l, c, v, i, fp, z, params=se.POST_LIQ_PARAMS_V1_0)
+        v11 = se.detect_post_liq_reversal(o, h, l, c, v, i, fp, z)
+        self.assertTrue(v10["triggered"] and v11["triggered"])
+        self.assertAlmostEqual(v10["sl"], v11["sl"])  # risk ~3.5 ATR: inside [0.5, 6] -> unchanged
+        wide = se.detect_post_liq_reversal(o, h, l, c, v, i, fp, z, params={"max_risk_atr": 2.0})
+        self.assertEqual(wide["reject_reason"], "RISK_TOO_WIDE")
+        floor = se.detect_post_liq_reversal(o, h, l, c, v, i, fp, z, params={"min_risk_atr": 5.0})
+        self.assertAlmostEqual(floor["sl"] - floor["entry"], 5.0 * a)
+
+    def test_v11_thresholds(self):
+        self.assertEqual((se.POST_LIQ_PARAMS["funding_hi_pct"], se.POST_LIQ_PARAMS["funding_lo_pct"]), (90.0, 10.0))
+        self.assertEqual(se.POST_LIQ_PARAMS["oi_z_max"], -1.5)
+        self.assertEqual(se.POST_LIQ_PARAMS_V1_0["funding_hi_pct"], 95.0)
+        self.assertEqual(se.LAB_STRATEGY_VERSION, "1.1")
+        o, h, l, c, v, i, _, _ = t = TestPostLiquidation()._setup()
+        self.assertTrue(se.detect_post_liq_reversal(o, h, l, c, v, i, 92.0, -1.7)["triggered"])
+        self.assertFalse(se.detect_post_liq_reversal(o, h, l, c, v, i, 92.0, -1.7, params=se.POST_LIQ_PARAMS_V1_0)["triggered"])
+
+    def test_in_play_min_risk(self):
+        df, days = TestInPlay()._sessions()
+        day = days[-1].date()
+        e10 = se.in_play_entry(df, day, "LONG", params=se.IN_PLAY_PARAMS_V1_0)
+        e11 = se.in_play_entry(df, day, "LONG")
+        self.assertTrue(e10["triggered"] and e11["triggered"])
+        self.assertGreaterEqual(e11["risk"], 0.5 * e11["atr"] - 1e-12)
+        self.assertGreaterEqual(e11["risk"], e10["risk"] - 1e-12)
 
 
 if __name__ == "__main__":

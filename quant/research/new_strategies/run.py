@@ -62,6 +62,7 @@ def evaluate(res: dict, tz: str, periods: float, main: str, control: str, beta_a
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--only", choices=["bybit", "alpaca"])
+    ap.add_argument("--version", default="1.0", choices=["1.0", "1.1", "both"])
     ap.add_argument("--alpaca-source", default="yahoo", choices=["yahoo", "alpaca"])
     ap.add_argument("--start")
     ap.add_argument("--end")
@@ -70,28 +71,40 @@ def main():
     OUT.mkdir(parents=True, exist_ok=True)
     path = OUT / "results.json"
     results = json.loads(path.read_text()) if path.exists() else {}
+    versions = ["1.0", "1.1"] if a.version == "both" else [a.version]
     if a.only in (None, "bybit"):
         from . import postliq
-        r = postliq.run()
-        ev = evaluate(r, "UTC", 365.0, "a_spec_active", "control_random", False,
-                      ["a_spec_active", "b_spec_fixed", "c_mirror_active", "d_mirror_fixed"])
-        ev["rejects"] = r["rejects"]
-        results["bybit_post_liq_reversal"] = ev
-        for k, t in r["trades"].items():
-            if len(t):
-                t.to_csv(OUT / f"bybit_{k}.csv.gz", index=False)
+        for ver in versions:
+            r = postliq.run(ver)
+            names = list(r["trades"])
+            ev = evaluate(r, "UTC", 365.0, "a_spec_active", "control_random", False,
+                          [n for n in names if n != "control_random"])
+            ev["rejects"] = r["rejects"]
+            sfx = "" if ver == "1.0" else "_v1_1"
+            results["bybit_post_liq_reversal" + sfx] = ev
+            for k, t in r["trades"].items():
+                if len(t):
+                    t.to_csv(OUT / f"bybit{sfx}_{k}.csv.gz", index=False)
+            path.write_text(json.dumps(_clean(results), indent=2, default=str))
     if a.only in (None, "alpaca"):
         from . import inplay
-        r = inplay.run(a.alpaca_source, a.start, a.end)
-        ev = evaluate(r, "America/New_York", 252.0, "a_active", "control_no_filter", True, ["a_active", "b_fixed"])
-        ev.update({"n_sessions_evaluated": r["n_sessions_evaluated"], "source": r["source"],
-                   "days_with_picks": sum(1 for s in r["selections"] if s["n_qualified"] > 0),
-                   "selections": r["selections"]})
-        results["alpaca_in_play_momentum"] = ev
-        for k, t in r["trades"].items():
-            if len(t):
-                t.to_csv(OUT / f"alpaca_{k}.csv.gz", index=False)
-    path.write_text(json.dumps(_clean(results), indent=2, default=str))
+        bars = None
+        for ver in versions:
+            r = inplay.run(a.alpaca_source, a.start, a.end, version=ver, bars=bars)
+            bars = r.pop("bars")
+            ev = evaluate(r, "America/New_York", 252.0, "a_active", "control_no_filter", True, ["a_active", "b_fixed"])
+            ev.update({"n_sessions_evaluated": r["n_sessions_evaluated"], "source": r["source"],
+                       "days_with_picks": sum(1 for s in r["selections"] if s["n_qualified"] > 0),
+                       "selections": r["selections"], "version": ver})
+            ctrl = ev["variants"].get("control_no_filter", {}).get("expectancy")
+            main_e = ev["variants"].get("a_active", {}).get("expectancy")
+            ev["in_play_beats_no_filter"] = bool(ctrl is not None and main_e is not None and main_e > ctrl)
+            sfx = ("" if ver == "1.0" else "_v1_1") + ("_alpaca" if a.alpaca_source == "alpaca" else "")
+            results["alpaca_in_play_momentum" + sfx] = ev
+            for k, t in r["trades"].items():
+                if len(t):
+                    t.to_csv(OUT / f"alpaca{sfx}_{k}.csv.gz", index=False)
+            path.write_text(json.dumps(_clean(results), indent=2, default=str))
     logging.info("scritto %s", path)
 
 
