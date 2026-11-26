@@ -19,6 +19,18 @@ def get_trade_journal_db_path() -> Path:
 
 ROME_TZ = ZoneInfo("Europe/Rome")
 
+# Additive columns of lab_strategy_trades (idempotent migration adds any missing one)
+LAB_TRADE_COLUMNS = [
+    ("strategy_version", "TEXT"), ("ruleset_version", "TEXT"), ("broker", "TEXT"), ("side", "TEXT"),
+    ("signal_time", "TEXT"), ("entry_time", "TEXT"), ("entry_price", "REAL"), ("sl_price", "REAL"),
+    ("risk_pct", "REAL"), ("exit_time", "TEXT"), ("exit_reason", "TEXT"), ("tp1_hit", "INTEGER"),
+    ("remaining_fraction", "REAL"), ("r_multiple", "REAL"), ("pnl_pct", "REAL"), ("reject_reason", "TEXT"),
+    ("rvol", "REAL"), ("gap_pct", "REAL"), ("idio_ret", "REAL"), ("funding_pct", "REAL"), ("oi_delta_z", "REAL"),
+    ("entry_type", "TEXT"), ("diagnostics_json", "TEXT"),
+]
+LAB_EXIT_REASONS = ("TP1_PARTIAL", "TRAILING_ATR", "TIME_STOP", "STOP_LOSS", "EOD_FORCE_CLOSE",
+                    "BREAKEVEN_STOP", "VWAP_TARGET", "MAX_HOLD")
+
 
 def _parse_iso_dt(value: Optional[str]) -> Optional[datetime]:
     """Parsifica una stringa ISO-8601 (con o senza 'Z' / tz) in datetime timezone-aware."""
@@ -185,6 +197,24 @@ class TradeJournalService:
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_shadows_context_key ON signal_shadows(context_key);"
             )
+
+            # Lab candidate strategies (paper/shadow only): one row per signal, upserted on every lab run
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS lab_strategy_trades (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    trade_key TEXT UNIQUE NOT NULL,
+                    strategy TEXT NOT NULL,
+                    symbol TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+            """)
+            lab_cols = {row[1] for row in conn.execute("PRAGMA table_info(lab_strategy_trades)").fetchall()}
+            for col_name, col_def in LAB_TRADE_COLUMNS:
+                if col_name not in lab_cols:
+                    conn.execute(f"ALTER TABLE lab_strategy_trades ADD COLUMN {col_name} {col_def};")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_lab_trades_strategy ON lab_strategy_trades(strategy, status);")
 
             # Learning Audit table
             conn.execute("""
@@ -914,6 +944,94 @@ class TradeJournalService:
                 (limit,),
             ).fetchall()
             return [dict(r) for r in rows]
+
+    # ------------------------------------------------------------------ lab candidate strategies
+    def upsert_lab_trade(self, row: Dict[str, Any]) -> bool:
+        """Insert or update one lab candidate signal/trade keyed by `trade_key` (idempotent across lab runs)."""
+        try:
+            allowed = {c for c, _ in LAB_TRADE_COLUMNS} | {"trade_key", "strategy", "symbol", "status"}
+            data = {k: v for k, v in dict(row).items() if k in allowed}
+            if "diagnostics" in row:
+                data["diagnostics_json"] = json.dumps(row["diagnostics"], ensure_ascii=False, default=str)
+            for k, v in list(data.items()):
+                if isinstance(v, float) and v != v:
+                    data[k] = None
+                elif isinstance(v, bool):
+                    data[k] = int(v)
+            now_iso = datetime.now(ROME_TZ).isoformat()
+            cols = list(data.keys())
+            with sqlite3.connect(self.db_path) as conn:
+                conn.execute(
+                    f"INSERT INTO lab_strategy_trades ({', '.join(cols)}, created_at, updated_at) "
+                    f"VALUES ({', '.join('?' for _ in cols)}, ?, ?) "
+                    f"ON CONFLICT(trade_key) DO UPDATE SET "
+                    + ", ".join(f"{c}=excluded.{c}" for c in cols if c != "trade_key")
+                    + ", updated_at=excluded.updated_at",
+                    [data[c] for c in cols] + [now_iso, now_iso],
+                )
+                conn.commit()
+            return True
+        except Exception as e:
+            print(f"[!] Errore upsert_lab_trade: {e}")
+            return False
+
+    def get_lab_trades(self, strategy: Optional[str] = None, limit: int = 50) -> List[Dict[str, Any]]:
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                conn.row_factory = sqlite3.Row
+                q = "SELECT * FROM lab_strategy_trades"
+                args: List[Any] = []
+                if strategy:
+                    q += " WHERE strategy = ?"
+                    args.append(strategy)
+                q += " ORDER BY COALESCE(entry_time, signal_time, created_at) DESC LIMIT ?"
+                args.append(int(limit))
+                return [dict(r) for r in conn.execute(q, args).fetchall()]
+        except Exception:
+            return []
+
+    def lab_strategy_stats(self, strategy: str, weight: float = 0.10) -> Dict[str, Any]:
+        """E, win rate, payoff, profit factor, max drawdown (equity of `weight` x pnl per closed trade, in entry
+        order) and exit-reason distribution of the CLOSED lab trades of `strategy`."""
+        out: Dict[str, Any] = {"strategy": strategy, "n_closed": 0, "n_open": 0, "n_rejected": 0, "exits": {}}
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                conn.row_factory = sqlite3.Row
+                rows = [dict(r) for r in conn.execute(
+                    "SELECT status, pnl_pct, exit_reason, r_multiple FROM lab_strategy_trades WHERE strategy = ? "
+                    "ORDER BY COALESCE(entry_time, signal_time, created_at)", (strategy,)).fetchall()]
+        except Exception:
+            return out
+        closed = [r for r in rows if r["status"] == "CLOSED" and r["pnl_pct"] is not None]
+        out["n_open"] = sum(1 for r in rows if r["status"] == "OPEN")
+        out["n_rejected"] = sum(1 for r in rows if r["status"] == "REJECTED")
+        out["n_closed"] = len(closed)
+        if not closed:
+            return out
+        p = [float(r["pnl_pct"]) / 100.0 for r in closed]
+        wins = [x for x in p if x > 0]
+        losses = [-x for x in p if x <= 0]
+        avg_w = sum(wins) / len(wins) if wins else None
+        avg_l = sum(losses) / len(losses) if losses else None
+        eq, peak, mdd = 1.0, 1.0, 0.0
+        for x in p:
+            eq *= 1.0 + weight * x
+            peak = max(peak, eq)
+            mdd = min(mdd, eq / peak - 1.0)
+        exits: Dict[str, int] = {}
+        for r in closed:
+            exits[r["exit_reason"] or "UNKNOWN"] = exits.get(r["exit_reason"] or "UNKNOWN", 0) + 1
+        rs = [float(r["r_multiple"]) for r in closed if r["r_multiple"] is not None]
+        out.update({
+            "expectancy_pct": 100.0 * sum(p) / len(p),
+            "expectancy_r": (sum(rs) / len(rs)) if rs else None,
+            "win_rate": len(wins) / len(p),
+            "payoff": (avg_w / avg_l) if (avg_w is not None and avg_l) else None,
+            "profit_factor": (sum(wins) / sum(losses)) if losses and sum(losses) > 0 else None,
+            "max_drawdown_pct": 100.0 * mdd,
+            "exits": exits,
+        })
+        return out
 
     def get_learning_stats(self) -> Dict[str, Any]:
         """Calcola le metriche di apprendimento aggregate (win rate per ciclo, impatto macro)."""

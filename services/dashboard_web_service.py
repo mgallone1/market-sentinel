@@ -1997,6 +1997,58 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                     </details>
                 </div>
 
+                <!-- 5. Strategie candidate del lab (paper/shadow, journal lab_strategy_trades) -->
+                <div class="learning-section" id="lab-candidates-section">
+                    <div class="learning-section-hdr">
+                        <div>
+                            <div class="learning-section-title">Strategie Candidate (Lab Paper)</div>
+                            <div class="learning-section-sub">BYBIT_POST_LIQ_REVERSAL e ALPACA_IN_PLAY_MOMENTUM: solo paper, nessun capitale reale</div>
+                        </div>
+                        <span class="badge badge-neutral mono" data-tip="Promozione a capitale reale solo con i criteri pre-registrati di docs/LAB.md (6 mesi di paper, costi misurati, approvazione esplicita).">PAPER</span>
+                    </div>
+                    <div id="lab-candidates-list" class="learning-bucket-list mono" style="font-size: 11px;">Caricamento...</div>
+                </div>
+                <script>
+                (function () {
+                    function fmt(x, d, suf) { return (typeof x === 'number' && isFinite(x)) ? x.toFixed(d) + (suf || '') : 'n/a'; }
+                    function render(data) {
+                        const box = document.getElementById('lab-candidates-list');
+                        if (!box) return;
+                        box.textContent = '';
+                        (data.strategies || []).forEach(function (st) {
+                            const row = document.createElement('div');
+                            row.style.padding = '6px 0';
+                            const head = document.createElement('div');
+                            head.style.fontWeight = '600';
+                            head.textContent = st.strategy + ' — chiusi ' + st.n_closed + ' · aperti ' + st.n_open + ' · scartati ' + st.n_rejected;
+                            row.appendChild(head);
+                            const body = document.createElement('div');
+                            body.textContent = st.n_closed
+                                ? ('E ' + fmt(st.expectancy_pct, 3, '%') + ' · WR ' + fmt(100 * st.win_rate, 0, '%') + ' · Payoff ' + fmt(st.payoff, 2)
+                                   + ' · PF ' + fmt(st.profit_factor, 2) + ' · MaxDD ' + fmt(st.max_drawdown_pct, 2, '%'))
+                                : 'Nessun trade chiuso finora.';
+                            row.appendChild(body);
+                            const ex = Object.entries(st.exits || {});
+                            if (ex.length) {
+                                const e = document.createElement('div');
+                                e.style.color = 'var(--text-secondary)';
+                                e.textContent = 'Uscite: ' + ex.sort(function (a, b) { return b[1] - a[1]; }).map(function (kv) { return kv[0] + ' ' + kv[1]; }).join(' · ');
+                                row.appendChild(e);
+                            }
+                            box.appendChild(row);
+                        });
+                    }
+                    function load() {
+                        fetch('/api/lab/candidates', { cache: 'no-store' }).then(function (r) { return r.json(); }).then(render).catch(function () {
+                            const box = document.getElementById('lab-candidates-list');
+                            if (box) box.textContent = 'Statistiche non disponibili.';
+                        });
+                    }
+                    document.addEventListener('DOMContentLoaded', load);
+                    setInterval(load, 300000);
+                })();
+                </script>
+
                 <div id="journal-insights-list">
                     <!-- Popolato dinamicamente come righe .apple-cell coerenti -->
                 </div>
@@ -5289,6 +5341,18 @@ async def handle_dashboard_api(request):
             return web.json_response(_CACHE_STORE[tf]["data"])
         return web.json_response({"error": str(e), "status": "recovering"}, status=200)
 
+async def handle_lab_candidates_api(request):
+    """Statistiche delle strategie candidate del lab dal journal (sola lettura)."""
+    try:
+        from services.trade_journal_service import TradeJournalService
+        j = TradeJournalService()
+        engines = ("BYBIT_POST_LIQ_REVERSAL", "ALPACA_IN_PLAY_MOMENTUM")
+        stats = await asyncio.to_thread(lambda: [j.lab_strategy_stats(e) for e in engines])
+        return web.json_response({"strategies": stats}, dumps=lambda o: json.dumps(o, default=str))
+    except Exception as e:
+        return web.json_response({"strategies": [], "error": str(e)}, status=200)
+
+
 async def handle_trade_forecast_api(request):
     """Restituisce l'analisi ciclica (Hurst/Migliorino), onde di Elliott e simulazione Monte Carlo per un asset."""
     symbol = request.query.get("symbol", "BTCUSDT")
@@ -5344,6 +5408,7 @@ def create_web_app(bybit_svc=None, alpaca_svc=None, briefing_callback=None):
     app.router.add_get("/", handle_dashboard_page)
     app.router.add_get("/api/dashboard", handle_dashboard_api)
     app.router.add_get("/api/trade-forecast", handle_trade_forecast_api)
+    app.router.add_get("/api/lab/candidates", handle_lab_candidates_api)
     app.router.add_get("/health", lambda r: web.Response(text="OK"))
     app.router.add_get("/healthz", lambda r: web.Response(text="OK"))
     app.router.add_post("/api/trigger-briefing", handle_trigger_briefing_api)

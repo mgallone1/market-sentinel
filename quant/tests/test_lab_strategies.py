@@ -83,7 +83,9 @@ def test_valid_decisions(strat, now, monkeypatch, tmp_path):
 
 
 def test_registry_env(monkeypatch):
-    assert len(default_strategies()) == 4
+    names = [s.name for s in default_strategies()]
+    assert len(names) == 6  # 4 validated + 2 candidates added 2026-11-26 (paper only)
+    assert {"bybit_post_liq_reversal", "alpaca_in_play_momentum"} <= set(names)
     monkeypatch.setenv("LAB_STRATEGIES", "funding_carry")
     assert [s.name for s in default_strategies()] == ["funding_carry"]
 

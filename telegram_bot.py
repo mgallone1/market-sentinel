@@ -4740,6 +4740,30 @@ async def lab_weekly_review_job(application):
         print(f"[!] Errore lab_weekly_review_job: {e}")
 
 
+LAB_CANDIDATE_ENGINES = {
+    "bybit_post_liq_reversal": "BYBIT_POST_LIQ_REVERSAL",
+    "alpaca_in_play_momentum": "ALPACA_IN_PLAY_MOMENTUM",
+}
+
+
+def _lab_candidates_text() -> str:
+    """Statistiche delle strategie candidate dal journal (tabella lab_strategy_trades)."""
+    out = ["", "*Strategie candidate (paper, journal)*"]
+    for lab_name, engine in LAB_CANDIDATE_ENGINES.items():
+        st = trade_journal_svc.lab_strategy_stats(engine)
+        line = f"• `{engine}`: chiusi {st['n_closed']} | aperti {st['n_open']} | scartati {st['n_rejected']}"
+        if st["n_closed"]:
+            def f(x, d=2, suf=""):
+                return f"{x:.{d}f}{suf}" if isinstance(x, (int, float)) else "n/a"
+            line += (f"\n   E {f(st.get('expectancy_pct'), 3, '%')} ({f(st.get('expectancy_r'), 2, 'R')}) | "
+                     f"WR {f(100 * st['win_rate'], 0, '%')} | payoff {f(st.get('payoff'))} | PF {f(st.get('profit_factor'))} | "
+                     f"maxDD {f(st.get('max_drawdown_pct'), 2, '%')}")
+            line += "\n   uscite: " + ", ".join(f"{k} {v}" for k, v in sorted(st["exits"].items(), key=lambda kv: -kv[1]))
+        out.append(line)
+    out.append("_Solo paper: promozione a capitale reale solo con i criteri di docs/LAB.md._")
+    return "\n".join(out)
+
+
 async def _lab_reply(update, text):
     try:
         await update.effective_message.reply_text(text[:4000], parse_mode="Markdown")
@@ -4757,6 +4781,10 @@ async def lab_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text = await asyncio.to_thread(scorecard, LAB_STORAGE, LAB_STRATEGIES)
     except Exception as e:
         text = f"Errore scorecard lab: {e}"
+    try:
+        text += await asyncio.to_thread(_lab_candidates_text)
+    except Exception as e:
+        text += f"\n(statistiche candidate non disponibili: {e})"
     await _lab_reply(update, text)
 
 
@@ -4767,6 +4795,27 @@ async def lab_log_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     import json as _json
     name = context.args[0] if context.args else None
+    engine = LAB_CANDIDATE_ENGINES.get(name or "") or (name if name in LAB_CANDIDATE_ENGINES.values() else None)
+    if engine:  # strategie candidate: ultimi segnali e uscite dal journal
+        try:
+            trs = await asyncio.to_thread(trade_journal_svc.get_lab_trades, engine, 10)
+            if not trs:
+                await _lab_reply(update, f"Nessun segnale registrato per {engine}.")
+                return
+            out = [f"Ultimi {len(trs)} segnali di {engine}"]
+            for r in trs:
+                t = (r.get("entry_time") or r.get("signal_time") or "")[:16]
+                res = (f"{r.get('exit_reason')} {float(r['pnl_pct']):+.2f}%" if r.get("status") == "CLOSED" and r.get("pnl_pct") is not None
+                       else (r.get("reject_reason") or r.get("status")))
+                diag = []
+                for k in ("rvol", "gap_pct", "idio_ret", "funding_pct", "oi_delta_z"):
+                    if r.get(k) is not None:
+                        diag.append(f"{k} {float(r[k]):.2f}")
+                out.append(f"\n{t} {r.get('symbol')} {r.get('side') or ''} [{r.get('status')}] {res}" + (f" | {', '.join(diag)}" if diag else ""))
+            await _lab_reply(update, "\n".join(out))
+        except Exception as e:
+            await _lab_reply(update, f"Errore lab_log: {e}")
+        return
     try:
         rows = await asyncio.to_thread(LAB_STORAGE.query, "decisions", name, 10)
         if not rows:

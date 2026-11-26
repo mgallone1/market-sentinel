@@ -235,5 +235,256 @@ class TestInPlay(unittest.TestCase):
                                           pd.Timestamp("2026-11-26").date(), "LONG")["reject_reason"], "MARKET_CLOSED")
 
 
+# ---------------------------------------------------------------------------- integration (lab, journal, UI)
+import asyncio  # noqa: E402
+import sqlite3  # noqa: E402
+import tempfile  # noqa: E402
+from pathlib import Path  # noqa: E402
+from unittest.mock import patch  # noqa: E402
+
+
+class _Sink:
+    def __init__(self):
+        self.rows = []
+
+    def upsert_lab_trade(self, row):
+        self.rows.append(row)
+        return True
+
+
+def _crypto_fixture(with_oi=True):
+    rng = np.random.default_rng(3)
+    n = 520
+    idx = pd.date_range("2026-06-01", periods=n, freq="15min", tz="UTC")
+    c = 100 + np.cumsum(rng.normal(0, 0.05, n))
+    o = np.r_[c[0], c[:-1]]
+    h = np.maximum(o, c) + 0.05
+    l = np.minimum(o, c) - 0.05
+    v = np.full(n, 100.0)
+    s, i = n - 3, n - 2
+    pre_hi = h[s - 12:s].max()
+    o[s], c[s], h[s], l[s], v[s] = c[s - 1], c[s - 1] + 1.5, c[s - 1] + 1.7, c[s - 1] - 0.02, 500.0
+    o[i] = pre_hi - 0.05
+    c[i] = pre_hi - 0.15
+    h[i] = c[s - 1] + 1.2          # long upper wick, high below the spike high (no stop)
+    l[i] = c[i] - 0.05
+    v[i] = 200.0
+    o[n - 1], c[n - 1], h[n - 1], l[n - 1] = c[i], c[i] - 0.05, c[i] + 0.05, c[i] - 0.1
+    bars = pd.DataFrame({"open": o, "high": h, "low": l, "close": c, "volume": v}, index=idx)
+    f_idx = pd.date_range("2026-05-01", "2026-06-06 16:00", freq="8h", tz="UTC")
+    funding = pd.Series(np.linspace(-1e-4, 1e-4, len(f_idx)), index=f_idx)
+    funding.iloc[-1] = 5e-4
+    ends = idx + pd.Timedelta(minutes=15)
+    oi_vals = 1e6 * np.cumprod(1 + rng.normal(0, 0.001, n))
+    oi_vals[s:] *= 0.94          # forced closing on the spike bar
+    oi = pd.Series(oi_vals, index=ends) if with_oi else pd.Series(dtype=float)
+    return bars, funding, oi, ends
+
+
+class _FakeCryptoData:
+    def __init__(self, bars, funding, oi):
+        self.b, self.f, self.oi = bars, funding, oi
+
+    def bars(self, source, symbol, interval, lookback_days, now):
+        return self.b
+
+    def funding(self, symbol, lookback_days, now):
+        return self.f
+
+    def open_interest(self, symbol, lookback_days, now):
+        return self.oi
+
+
+class TestLabPostLiq(unittest.TestCase):
+    def test_open_short_position_and_journal_row(self):
+        from quant.lab.strategies.post_liq_reversal import PostLiqReversal
+
+        bars, funding, oi, ends = _crypto_fixture()
+        sink = _Sink()
+        strat = PostLiqReversal(symbols=["BTCUSDT"], journal_sink=sink)
+        dec = strat.decide(ends[-1] + pd.Timedelta(minutes=1), _FakeCryptoData(bars, funding, oi))
+        w = dec.targets[0].weight
+        self.assertAlmostEqual(w, -0.10)
+        opened = [r for r in sink.rows if r["status"] == "OPEN"]
+        self.assertEqual(len(opened), 1)
+        r = opened[0]
+        self.assertEqual(r["strategy"], se.ENGINE_POST_LIQ_REVERSAL)
+        self.assertEqual(r["ruleset_version"], se.STRATEGY_RULESET_VERSION)
+        self.assertGreaterEqual(r["funding_pct"], 95.0)
+        self.assertLessEqual(r["oi_delta_z"], -2.0)
+
+    def test_missing_open_interest_means_no_entry(self):
+        from quant.lab.strategies.post_liq_reversal import PostLiqReversal
+
+        bars, funding, oi, ends = _crypto_fixture(with_oi=False)
+        sink = _Sink()
+        dec = PostLiqReversal(symbols=["BTCUSDT"], journal_sink=sink).decide(
+            ends[-1] + pd.Timedelta(minutes=1), _FakeCryptoData(bars, funding, oi))
+        self.assertEqual(dec.targets[0].weight, 0.0)
+        self.assertTrue(any(r.get("reject_reason") == "NO_OI_DATA" for r in sink.rows))
+
+    def test_data_error_is_flat_not_crash(self):
+        from quant.lab.strategies.post_liq_reversal import PostLiqReversal
+
+        class Broken:
+            def bars(self, *a, **k):
+                raise RuntimeError("geo-block")
+
+        dec = PostLiqReversal(symbols=["BTCUSDT"], journal_sink=_Sink()).decide(pd.Timestamp("2026-06-07", tz="UTC"), Broken())
+        self.assertEqual(dec.targets[0].weight, 0.0)
+
+
+class _FakeEqData:
+    def __init__(self, frames):
+        self.frames = frames
+
+    def bars(self, source, symbol, interval, lookback_days, now):
+        df = self.frames[symbol]
+        return df[df.index <= now]
+
+
+class TestLabInPlay(unittest.TestCase):
+    def _frames(self):
+        days = [d for d in pd.bdate_range("2026-09-21", periods=26) if d.date().isoformat() != "2026-09-07"]
+        frames = {}
+        for sym in ["NVDA", "AAPL", "MSFT", "TSLA", "AMZN", "META", "GOOGL", "AMD", "SPY"]:
+            parts, prev = [], 100.0
+            rng = np.random.default_rng(abs(hash(sym)) % 1000)
+            for k, d in enumerate(days):
+                idx = pd.date_range(f"{d.date()} 09:30", periods=78, freq="5min", tz="America/New_York")
+                last = k == len(days) - 1
+                op = prev * (1.03 if (last and sym == "NVDA") else 1.0)
+                cl = op + np.cumsum(rng.normal(0, 0.02, 78)) + (np.linspace(0, 2, 78) if (last and sym == "NVDA") else 0)
+                vol = np.full(78, 1000.0)
+                if last and sym == "NVDA":
+                    vol[:3] = 3500.0
+                parts.append(pd.DataFrame({"open": cl, "high": cl + 0.05, "low": cl - 0.05, "close": cl, "volume": vol}, index=idx))
+                prev = float(cl[-1])
+            df = pd.concat(parts)
+            df.index = df.index.tz_convert("UTC")
+            frames[sym] = df
+        return frames, days[-1].date()
+
+    def test_in_play_name_opens_and_others_stay_flat(self):
+        from quant.lab.strategies.in_play_momentum import InPlayMomentum
+
+        frames, day = self._frames()
+        sink = _Sink()
+        now = pd.Timestamp(f"{day} 12:00", tz="America/New_York").tz_convert("UTC")
+        dec = InPlayMomentum(journal_sink=sink).decide(now, _FakeEqData(frames))
+        w = {t.instrument.symbol: t.weight for t in dec.targets}
+        self.assertGreater(w["NVDA"], 0.0)
+        self.assertTrue(all(v == 0.0 for k, v in w.items() if k != "NVDA"))
+        row = [r for r in sink.rows if r["symbol"] == "NVDA"][0]
+        self.assertGreaterEqual(row["rvol"], 2.0)
+        self.assertGreaterEqual(row["gap_pct"], 1.5)
+
+    def test_no_positions_outside_session_or_before_0950(self):
+        from quant.lab.strategies.in_play_momentum import InPlayMomentum
+
+        frames, day = self._frames()
+        early = pd.Timestamp(f"{day} 09:46", tz="America/New_York").tz_convert("UTC")
+        dec = InPlayMomentum(journal_sink=_Sink()).decide(early, _FakeEqData(frames))
+        self.assertTrue(all(t.weight == 0.0 for t in dec.targets))
+        sat = pd.Timestamp("2026-10-24 15:00", tz="UTC")
+        self.assertTrue(all(t.weight == 0.0 for t in InPlayMomentum(journal_sink=_Sink()).decide(sat, _FakeEqData(frames)).targets))
+
+
+class TestLabJournalTable(unittest.TestCase):
+    def test_migration_on_legacy_db_and_upsert(self):
+        from services.trade_journal_service import LAB_TRADE_COLUMNS, TradeJournalService
+
+        with tempfile.TemporaryDirectory() as d:
+            db = Path(d) / "old.db"
+            with sqlite3.connect(db) as conn:  # an older lab table with only the base columns
+                conn.execute("CREATE TABLE lab_strategy_trades (id INTEGER PRIMARY KEY AUTOINCREMENT, trade_key TEXT UNIQUE NOT NULL, "
+                             "strategy TEXT NOT NULL, symbol TEXT NOT NULL, status TEXT NOT NULL, created_at TEXT NOT NULL, "
+                             "updated_at TEXT NOT NULL)")
+                conn.execute("INSERT INTO lab_strategy_trades (trade_key, strategy, symbol, status, created_at, updated_at) "
+                             "VALUES ('old', 'X', 'BTC', 'CLOSED', 'a', 'a')")
+            j = TradeJournalService(db_path=db)
+            TradeJournalService(db_path=db)
+            with sqlite3.connect(db) as conn:
+                cols = [r[1] for r in conn.execute("PRAGMA table_info(lab_strategy_trades)")]
+            for c, _ in LAB_TRADE_COLUMNS:
+                self.assertEqual(cols.count(c), 1)
+            key = "ALPACA_IN_PLAY_MOMENTUM|NVDA|2026-11-25"
+            j.upsert_lab_trade({"trade_key": key, "strategy": "ALPACA_IN_PLAY_MOMENTUM", "symbol": "NVDA", "status": "OPEN",
+                                "rvol": 3.1, "gap_pct": float("nan"), "tp1_hit": True, "diagnostics": {"q": "GAP"}})
+            j.upsert_lab_trade({"trade_key": key, "strategy": "ALPACA_IN_PLAY_MOMENTUM", "symbol": "NVDA", "status": "CLOSED",
+                                "pnl_pct": 1.2, "exit_reason": "TRAILING_ATR", "r_multiple": 1.4})
+            rows = j.get_lab_trades("ALPACA_IN_PLAY_MOMENTUM")
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0]["status"], "CLOSED")
+            self.assertEqual(rows[0]["rvol"], 3.1)
+            self.assertIsNone(rows[0]["gap_pct"])
+            st = j.lab_strategy_stats("ALPACA_IN_PLAY_MOMENTUM")
+            self.assertEqual(st["n_closed"], 1)
+            self.assertEqual(st["exits"], {"TRAILING_ATR": 1})
+
+
+class TestOpenInterestFallback(unittest.TestCase):
+    def test_both_sources_down_returns_empty(self):
+        import quant.lab.marketdata as md
+
+        def boom(*a, **k):
+            raise TimeoutError("timeout")
+
+        with patch.object(md, "_bybit_open_interest", boom), patch.object(md, "_binance_open_interest", boom):
+            s = md.fetch_open_interest("BTCUSDT", pd.Timestamp("2026-06-01", tz="UTC"), pd.Timestamp("2026-06-02", tz="UTC"))
+        self.assertEqual(len(s), 0)
+
+    def test_bybit_parsing_and_binance_fallback(self):
+        import quant.lab.marketdata as md
+
+        class R:
+            def __init__(self, js):
+                self.js = js
+
+            def json(self):
+                return self.js
+
+        t0 = int(pd.Timestamp("2026-06-01 10:00", tz="UTC").timestamp() * 1000)
+        by = R({"retCode": 0, "result": {"list": [{"openInterest": "10", "timestamp": str(t0 + 900000)},
+                                                  {"openInterest": "9", "timestamp": str(t0)}]}})
+        s = md._bybit_open_interest("BTCUSDT", pd.Timestamp("2026-06-01 10:00", tz="UTC"),
+                                    pd.Timestamp("2026-06-01 11:00", tz="UTC"), http_get=lambda *a, **k: by)
+        self.assertEqual(list(s.values), [9.0, 10.0])
+        bn = R([{"sumOpenInterest": "5", "timestamp": t0}])
+        s2 = md._binance_open_interest("BTCUSDT", pd.Timestamp("2026-06-01", tz="UTC"), pd.Timestamp("2026-06-02", tz="UTC"),
+                                       http_get=lambda *a, **k: bn)
+        self.assertEqual(float(s2.iloc[0]), 5.0)
+
+
+class TestUiIntegration(unittest.TestCase):
+    STATS = {"strategy": "BYBIT_POST_LIQ_REVERSAL", "n_closed": 3, "n_open": 1, "n_rejected": 4, "expectancy_pct": 0.21,
+             "expectancy_r": 0.3, "win_rate": 0.66, "payoff": 1.4, "profit_factor": 2.1, "max_drawdown_pct": -0.2,
+             "exits": {"TRAILING_ATR": 2, "TIME_STOP": 1}}
+
+    def test_lab_text_shows_candidate_metrics(self):
+        import telegram_bot
+
+        with patch.object(telegram_bot.trade_journal_svc, "lab_strategy_stats", return_value=self.STATS):
+            txt = telegram_bot._lab_candidates_text()
+        for frag in ("E 0.210%", "WR 66%", "payoff 1.40", "PF 2.10", "maxDD -0.20%", "TIME_STOP 1", "TRAILING_ATR 2"):
+            self.assertIn(frag, txt)
+
+    def test_dashboard_endpoint(self):
+        import json as _json
+
+        import services.dashboard_web_service as dws
+        import services.trade_journal_service as tjs
+
+        class Stub:
+            def lab_strategy_stats(self, e):
+                return {**TestUiIntegration.STATS, "strategy": e}
+
+        with patch.object(tjs, "TradeJournalService", lambda *a, **k: Stub()):
+            resp = asyncio.run(dws.handle_lab_candidates_api(None))
+        data = _json.loads(resp.text)
+        self.assertEqual([x["strategy"] for x in data["strategies"]], ["BYBIT_POST_LIQ_REVERSAL", "ALPACA_IN_PLAY_MOMENTUM"])
+        self.assertIn("lab-candidates-section", dws.DASHBOARD_HTML)
+
+
 if __name__ == "__main__":
     unittest.main()
