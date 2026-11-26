@@ -312,9 +312,58 @@ class TestAlpacaLateSessionWiring(unittest.TestCase):
         self.assertGreater(spent, 0.0)
         alp.place_bracket_order.assert_called_once()
         ctx = rec_entry.call_args.kwargs["context"]
-        for key in ("ruleset_version", "tm_expected_r", "tm_drift_z", "hist_n", "minutes_to_close", "late_zone"):
+        for key in ("ruleset_version", "tm_expected_r", "tm_drift_z", "hist_n", "minutes_to_close", "late_zone",
+                    "fp_p_tp", "fp_p_tp0", "pe", "pe_se"):
             self.assertIn(key, ctx)
         self.assertEqual(ctx["late_zone"], "NORMAL")
+
+
+class TestFokkerPlanckFirstPassage(unittest.TestCase):
+    A = -np.log(1 - 0.012)
+    B = np.log(1.036)
+    S2 = (35e-4) ** 2
+
+    def test_infinite_horizon_matches_gamblers_ruin(self):
+        from services.strategy_engines_service import first_passage_probabilities as fpp
+
+        self.assertAlmostEqual(fpp(0.0, self.S2, self.A, self.B, 1e7)["p_tp"], self.A / (self.A + self.B), places=6)
+        nu = 2e-4
+        k = 2 * nu / self.S2
+        exact = np.expm1(-k * self.A) / np.expm1(-k * (self.A + self.B))
+        self.assertAlmostEqual(fpp(nu, self.S2, self.A, self.B, 1e7)["p_tp"], exact, places=6)
+
+    def test_finite_horizon_matches_brownian_simulation_and_conserves_mass(self):
+        from services.strategy_engines_service import first_passage_probabilities as fpp
+
+        res = fpp(2e-4, self.S2, self.A, self.B, 24, survival_grid=400)
+        rng = np.random.default_rng(7)
+        sub = 100
+        paths = np.cumsum(rng.normal(2e-4 / sub, 35e-4 / np.sqrt(sub), (20000, 24 * sub)), axis=1)
+        hs = np.where((paths <= -self.A).any(1), (paths <= -self.A).argmax(1), 10**9)
+        ht = np.where((paths >= self.B).any(1), (paths >= self.B).argmax(1), 10**9)
+        self.assertAlmostEqual(res["p_tp"], float((ht < hs).mean()), delta=0.01)
+        self.assertAlmostEqual(res["p_sl"], float((hs < ht).mean()), delta=0.015)
+        mass = res["p_tp"] + res["p_sl"] + np.trapezoid(res["density"], res["y"])
+        self.assertAlmostEqual(mass, 1.0, places=3)
+
+    def test_short_is_mirror_of_long_and_peclet_noise_reported(self):
+        from services.strategy_engines_service import evaluate_fokker_planck
+
+        df = _random_walk(520, 3.0, 35.0, 11)
+        now = df.index[-1] + timedelta(hours=1)
+        inv = df.copy()
+        inv[["Open", "Close"]] = 1e4 / df[["Open", "Close"]]
+        inv["High"], inv["Low"] = 1e4 / df["Low"], 1e4 / df["High"]
+        lng = evaluate_fokker_planck(df, "LONG", 1.0, 1.0, fee_rt_pct=0.0, now=now)
+        sht = evaluate_fokker_planck(inv, "SHORT", 1.0, 1.0, fee_rt_pct=0.0, now=now)
+        self.assertTrue(lng["fp_ok"] and sht["fp_ok"])
+        # same drift magnitude seen from the mirrored side; b differs only by log(1.01) vs -log(0.99)
+        self.assertAlmostEqual(lng["pe"], sht["pe"], delta=0.05)
+        # Pe standard error = 2 b / (sigma sqrt(n)): the estimate is noisy by construction
+        lr = np.diff(np.log(df["Close"].to_numpy()))
+        expected_se = 2 * np.log(1.01) / (lr.std(ddof=1) * np.sqrt(len(lr)))
+        self.assertAlmostEqual(lng["pe_se"], expected_se, delta=0.01)
+        self.assertGreater(lng["fp_p_tp"], lng["fp_p_tp0"])  # positive drift helps the LONG target
 
 
 if __name__ == "__main__":
