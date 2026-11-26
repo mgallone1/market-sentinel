@@ -745,6 +745,40 @@ def compute_context_allocation(
     return _compute_allocation_from_obs(obs, context_key)
 
 
+EQUITY_FLATTEN_LEAD_MINUTES = 8.0
+
+
+def _truncate_to_equity_session(
+    fwd_df: pd.DataFrame,
+    created_dt: datetime,
+    now: Optional[datetime] = None,
+) -> Tuple[pd.DataFrame, bool]:
+    """Keep only the forward bars an intraday equity trade could live through.
+
+    US equity positions are force-flattened `EQUITY_FLATTEN_LEAD_MINUTES` before the NYSE close
+    of the signal's own session (16:00 ET, or 13:00 ET on early-close days), so a shadow signal
+    must be marked there, not on the next sessions. Returns (bars, session_still_running).
+    """
+    from services import market_calendar
+
+    created_ny = market_calendar.now_ny(created_dt)
+    bounds = market_calendar.session_bounds(created_ny.date())
+    if bounds is None or fwd_df is None or fwd_df.empty:
+        return fwd_df, False
+    cutoff = pd.Timestamp(bounds[1]) - pd.Timedelta(minutes=EQUITY_FLATTEN_LEAD_MINUTES)
+    idx = fwd_df.index
+    if not isinstance(idx, pd.DatetimeIndex):
+        return fwd_df, False
+    idx_utc = idx.tz_localize("UTC") if idx.tz is None else idx.tz_convert("UTC")
+    step = pd.Timedelta(minutes=5)
+    if len(idx_utc) >= 2:
+        step = pd.Timedelta(pd.Series(idx_utc).diff().dropna().median())
+    keep = (idx_utc + step) <= cutoff.tz_convert("UTC")
+    now_ts = pd.Timestamp(now or datetime.now(timezone.utc))
+    now_ts = now_ts.tz_localize("UTC") if now_ts.tzinfo is None else now_ts.tz_convert("UTC")
+    return fwd_df[keep], bool(now_ts < cutoff.tz_convert("UTC"))
+
+
 def _fallback_evaluate_shadow_bars(
     ohlcv_df: pd.DataFrame,
     broker: str,
@@ -895,6 +929,9 @@ def run_evaluation_cycle(
                 fwd_df = prep_df[prep_df.index > created_ts].rename(
                     columns={"high": "High", "low": "Low", "close": "Close"}
                 )
+                session_open_still = False
+                if str(sh["broker"]).upper() == "ALPACA":
+                    fwd_df, session_open_still = _truncate_to_equity_session(fwd_df, cdt)
                 if fwd_df.empty:
                     continue
                 fee_rt = (
@@ -912,6 +949,8 @@ def run_evaluation_cycle(
                 )
                 if not sh_res or sh_res.get("status", "EVALUATED") != "EVALUATED":
                     continue
+                if session_open_still and str(sh_res.get("hit_outcome")) not in ("SL", "TP"):
+                    continue  # equity session still running: wait for the forced-flatten mark
             else:
                 sh_res = _fallback_evaluate_shadow_bars(
                     df,
