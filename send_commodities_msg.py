@@ -1,7 +1,13 @@
+import os
 import urllib.request
 import json
+from pathlib import Path as _Path
 
-token = "9070559372:AAEsCUsDnb-xlgDzq3JakX4_9icIgMhPCAA"
+from dotenv import load_dotenv as _load_dotenv
+
+_load_dotenv(_Path(__file__).parent / ".env")
+
+token = os.environ["TELEGRAM_BOT_TOKEN"]  # mai scrivere il token nel codice: usare .env
 chat_id = 424093845
 
 msg = (

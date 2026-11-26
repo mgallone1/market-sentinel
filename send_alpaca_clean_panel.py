@@ -1,8 +1,14 @@
+import os
 import urllib.request
 import json
 from services.alpaca_execution_service import AlpacaExecutionService
+from pathlib import Path as _Path
 
-TELEGRAM_TOKEN = "9070559372:AAEsCUsDnb-xlgDzq3JakX4_9icIgMhPCAA"
+from dotenv import load_dotenv as _load_dotenv
+
+_load_dotenv(_Path(__file__).parent / ".env")
+
+TELEGRAM_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]  # mai scrivere il token nel codice: usare .env
 USER_CHAT_ID = 424093845
 
 alpaca_service = AlpacaExecutionService()
