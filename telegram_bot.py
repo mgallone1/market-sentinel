@@ -92,6 +92,7 @@ from services.strategy_engines_service import (
     engine_intraday_momentum,
     engine_orb_breakout_15m,
     evaluate_timemachine_gate,
+    evaluate_fokker_planck,
     replay_signal_history,
     late_session_entry_check,
     STRATEGY_RULESET_VERSION,
@@ -3630,6 +3631,14 @@ def _timemachine_precheck_or_reject(
         )
     except Exception as e_hist:
         tm_res["history"] = {"n": 0, "error": str(e_hist)[:120]}
+    try:
+        # Fokker-Planck in forma chiusa e numero di Peclet: solo telemetria, non blocca nulla
+        tm_res["fp"] = evaluate_fokker_planck(
+            df_bars, side=side, sl_pct=sl_pct, tp_pct=tp_pct, horizon_bars=horizon_bars,
+            fee_rt_pct=fee_rt_pct, interval_minutes=interval_minutes, max_horizon_bars=max_horizon_bars,
+        )
+    except Exception as e_fp:
+        tm_res["fp"] = {"fp_ok": False, "error": str(e_fp)[:120]}
     if not tm_res.get("passed", True):
         rej = str(tm_res.get("reason") or "TIMEMACHINE_MC")
         _log_shadow_rejection(
@@ -3663,6 +3672,7 @@ def _tm_journal_fields(tm_res: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         "hist_mean_r": hist.get("mean_r"),
         "hist_win_rate": hist.get("win_rate"),
         "hist_t_stat": hist.get("t_stat"),
+        **{k: v for k, v in (tm.get("fp") or {}).items() if k.startswith(("fp_", "pe"))},
     }
 
 
@@ -3675,6 +3685,13 @@ def _tm_notification_text(tm_res: Optional[Dict[str, Any]], minutes_to_close: Op
         f"`E[R]={float(tm.get('expected_r', 0.0)):+.2f}` | `P(TP)={float(tm.get('p_tp_first', 0.0)) * 100:.0f}%` "
         f"| `P(SL)={float(tm.get('p_sl_first', 0.0)) * 100:.0f}%`"
     )
+    fpd = tm.get("fp") or {}
+    if fpd.get("fp_ok"):
+        txt += (
+            f"\n• *Fokker-Planck:* `P(TP)={float(fpd.get('fp_p_tp', 0.0)) * 100:.0f}%` "
+            f"(`{float(fpd.get('fp_p_tp0', 0.0)) * 100:.0f}%` senza drift) | "
+            f"`Pe={float(fpd.get('pe', 0.0)):+.1f}±{float(fpd.get('pe_se', 0.0)):.1f}` _(solo telemetria)_"
+        )
     hist = tm.get("history") or {}
     if int(hist.get("n", 0) or 0) > 0:
         txt += (

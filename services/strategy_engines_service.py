@@ -9,8 +9,9 @@ Stateless, pure DataFrame-driven signal engines built without lookahead bias:
   3. INTRADAY_MOMENTUM  (`engine_intraday_momentum`): Filtered intraday breakout with shadow telemetry.
   4. ORB_BREAKOUT_15M   (`engine_orb_breakout_15m`): NY 15-minute Opening Range Breakout for equities.
   5. Time Machine Gate  (`evaluate_timemachine_gate`): Bootstrap Monte Carlo adverse-drift veto.
-  6. Same-rule replay   (`replay_signal_history`): real-path replay of past triggers (telemetry).
-  7. Late-session gate  (`late_session_entry_check`): no weak entries close to the equity flatten.
+  6. Fokker-Planck      (`evaluate_fokker_planck`): closed-form first-passage telemetry, Peclet number.
+  7. Same-rule replay   (`replay_signal_history`): real-path replay of past triggers (telemetry).
+  8. Late-session gate  (`late_session_entry_check`): no weak entries close to the equity flatten.
 """
 from __future__ import annotations
 
@@ -1081,6 +1082,169 @@ def evaluate_timemachine_gate(
         "drift_z": round(float(drift_z), 3),
         "pool_size": int(len(pool)),
         "gaps_skipped": int(gaps),
+    }
+
+
+# ---------------------------------------------------------------------------
+# 5b. Fokker-Planck first-passage solver (closed form, telemetry)
+# ---------------------------------------------------------------------------
+#
+# Log-price y (signed in the trade direction) as Brownian motion with drift nu and variance s2
+# per bar, started at 0 between two absorbing barriers: SL at -a, TP at +b. The Kolmogorov
+# forward equation  d_t p = -nu d_y p + (s2/2) d_yy p  with p(-a)=p(b)=0 has the eigen-expansion
+# (z = y + a, L = a + b, z0 = a)
+#   p(z,t) = (2/L) sum_n sin(n pi z0/L) sin(n pi z/L) exp(nu (z-z0)/s2 - lambda_n t),
+#   lambda_n = nu^2/(2 s2) + n^2 pi^2 s2 / (2 L^2).
+# Boundary fluxes give the first-passage probabilities in closed form. The infinite-horizon
+# limits are the gambler's-ruin formulas and the finite-horizon correction is a fast-converging
+# series in exp(-lambda_n T). No mesh, no time stepping, no sampling noise: for constant
+# coefficients this is the exact solution the semi-Lagrangian/MacCormack + Crank-Nicolson
+# splitting would approximate.
+
+def _ruin_prob_tp(nu: float, s2: float, a: float, L: float) -> float:
+    """P(hit +b before -a) on infinite horizon (gambler's ruin with drift)."""
+    if s2 <= 0.0:
+        return 1.0 if nu > 0.0 else 0.0
+    k = 2.0 * nu / s2
+    if abs(k * L) < 1e-9:
+        return a / L
+    if k * L > 700.0:
+        return 1.0 - math.exp(-k * (L - a)) if k * (L - a) < 700.0 else 1.0
+    if k * L < -700.0:
+        return math.exp(k * (L - a)) if k * (L - a) > -700.0 else 0.0
+    return math.expm1(-k * a) / math.expm1(-k * L)
+
+
+def first_passage_probabilities(
+    nu: float,
+    s2: float,
+    a: float,
+    b: float,
+    horizon: float,
+    survival_grid: int = 0,
+) -> Dict[str, Any]:
+    """Exact first-passage probabilities of drifted Brownian motion between -a (SL) and +b (TP).
+
+    Returns p_tp, p_sl (absorbed before `horizon`), p_neither and, if `survival_grid` > 0,
+    the surviving density on a grid of y in (-a, b) as (y, density) for expectations at T.
+    Units: nu and s2 per bar, horizon in bars, a and b in log-return units.
+    """
+    L = a + b
+    out: Dict[str, Any] = {"p_tp": 0.0, "p_sl": 0.0, "p_neither": 1.0}
+    if not (a > 0.0 and b > 0.0 and s2 > 0.0 and horizon > 0.0):
+        return out
+    T = float(horizon)
+    # enough terms for exp(-lambda_n T) < e^-40
+    n_max = int(min(20000, 30 + math.ceil((L / math.pi) * math.sqrt(80.0 / (s2 * T)))))
+    n = np.arange(1, n_max + 1, dtype=float)
+    lam = nu * nu / (2.0 * s2) + (n * math.pi) ** 2 * s2 / (2.0 * L * L)
+    decay = np.exp(-lam * T)
+    s_n = np.sin(n * math.pi * a / L)
+    c_n = (2.0 / L) * s_n * (n * math.pi / L) * (s2 / 2.0)
+    sign_n = np.where(n % 2 == 0, 1.0, -1.0)  # cos(n pi)
+
+    p_tp_inf = _ruin_prob_tp(nu, s2, a, L)
+    p_sl_inf = 1.0 - p_tp_inf
+    # residual mass still to be absorbed after T at each boundary
+    e_tp = nu * b / s2
+    e_sl = -nu * a / s2
+    res_tp = float(np.sum(c_n * (-sign_n) * decay / lam)) * math.exp(min(700.0, e_tp))
+    res_sl = float(np.sum(c_n * decay / lam)) * math.exp(min(700.0, e_sl))
+    p_tp = min(1.0, max(0.0, p_tp_inf - res_tp))
+    p_sl = min(1.0, max(0.0, p_sl_inf - res_sl))
+    out.update({"p_tp": p_tp, "p_sl": p_sl, "p_neither": max(0.0, 1.0 - p_tp - p_sl)})
+
+    if survival_grid > 0:
+        z = np.linspace(0.0, L, int(survival_grid) + 2)[1:-1]
+        modes = np.sin(np.outer(z, n) * math.pi / L)  # (grid, n)
+        dens = (2.0 / L) * (modes @ (s_n * decay)) * np.exp(np.clip(nu * (z - a) / s2, -700.0, 700.0))
+        out["y"] = z - a
+        out["density"] = np.clip(dens, 0.0, None)
+    return out
+
+
+def evaluate_fokker_planck(
+    df_bars: pd.DataFrame,
+    side: str,
+    sl_pct: float,
+    tp_pct: float,
+    horizon_bars: int = 24,
+    fee_rt_pct: float = 0.12,
+    interval_minutes: Optional[float] = None,
+    now: Any = None,
+    max_horizon_bars: Optional[int] = None,
+) -> Dict[str, Any]:
+    """Closed-form Fokker-Planck counterpart of the Time Machine (telemetry, never blocks).
+
+    Drift and variance per bar are estimated from the same gap-filtered closed bars used by the
+    bootstrap. Reports, for the trade direction:
+      * fp_p_tp / fp_p_sl / fp_expected_r with the estimated drift;
+      * fp_p_tp0 / fp_p_sl0 with zero drift (volatility-only reachability: not inflated by the
+        drift-estimation noise, which biases P(TP) upwards because P(TP) is convex in the drift);
+      * pe = 2 nu b / s2, the Peclet number of the move to the target, and its standard error
+        pe_se = 2 b / (sigma sqrt(n)): Pe = drift_z * 2 b / (sigma sqrt(n)), i.e. the drift
+        z-score rescaled to the target distance.
+    """
+    side_u = str(side or "").upper()
+    side_u = {"BUY": "LONG", "SELL": "SHORT"}.get(side_u, side_u)
+    sl_p = _safe_float(sl_pct, -1.0)
+    tp_p = _safe_float(tp_pct, -1.0)
+    fee = max(0.0, _safe_float(fee_rt_pct, 0.12))
+    empty = {"fp_ok": False}
+    if side_u not in ("LONG", "SHORT") or sl_p <= 0.0 or tp_p <= 0.0:
+        return empty
+    if side_u == "SHORT" and tp_p >= 100.0:
+        return empty
+    h = max(1, int(horizon_bars))
+    if max_horizon_bars is not None:
+        h = max(1, min(h, int(max_horizon_bars)))
+
+    bars = prepare_closed_bars(df_bars, interval_minutes=interval_minutes, now=now)
+    if bars is None or len(bars) < 22:
+        return empty
+    pool, _gaps = _bootstrap_pool(bars, interval_minutes)
+    if len(pool) < 20:
+        return empty
+    log_r = np.log(pool[:, 2])
+    direction = 1.0 if side_u == "LONG" else -1.0
+    nu = direction * float(np.mean(log_r))
+    s2 = float(np.var(log_r, ddof=1))
+    if not (s2 > 0.0 and math.isfinite(s2)):
+        return empty
+
+    if side_u == "LONG":
+        a = -math.log(1.0 - sl_p / 100.0)
+        b = math.log(1.0 + tp_p / 100.0)
+    else:
+        a = math.log(1.0 + sl_p / 100.0)
+        b = -math.log(1.0 - tp_p / 100.0)
+
+    res = first_passage_probabilities(nu, s2, a, b, h, survival_grid=400)
+    res0 = first_passage_probabilities(0.0, s2, a, b, h)
+
+    y = res.get("y")
+    dens = res.get("density")
+    surv_pnl = 0.0
+    if y is not None and dens is not None and len(y) > 1:
+        pnl_y = (np.exp(y) - 1.0) * 100.0 if side_u == "LONG" else (1.0 - np.exp(-y)) * 100.0
+        surv_pnl = float(np.trapezoid(pnl_y * dens, y)) if hasattr(np, "trapezoid") else float(np.trapz(pnl_y * dens, y))
+    gross_pct = res["p_tp"] * tp_p - res["p_sl"] * sl_p + surv_pnl
+    n_obs = len(log_r)
+    sigma = math.sqrt(s2)
+    return {
+        "fp_ok": True,
+        "fp_horizon_bars": h,
+        "fp_p_tp": round(res["p_tp"], 4),
+        "fp_p_sl": round(res["p_sl"], 4),
+        "fp_p_neither": round(res["p_neither"], 4),
+        "fp_p_tp0": round(res0["p_tp"], 4),
+        "fp_p_sl0": round(res0["p_sl"], 4),
+        "fp_expected_r": round((gross_pct - fee) / sl_p, 3),
+        "fp_expected_r_gross": round(gross_pct / sl_p, 3),
+        "pe": round(2.0 * nu * b / s2, 3),
+        "pe_se": round(2.0 * b / (sigma * math.sqrt(n_obs)), 3),
+        "drift_bp_bar": round(nu * 1e4, 3),
+        "sigma_bp_bar": round(sigma * 1e4, 3),
     }
 
 
