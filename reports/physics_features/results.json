@@ -1,0 +1,136 @@
+{
+  "A": {
+    "dataset": "A",
+    "kinds": {
+      "logit": {
+        "logloss_base": 0.6834472596997114,
+        "logloss_phys": 0.6822933441206376,
+        "d_logloss": -0.0011539155790738498,
+        "auc_base": 0.5013610168203753,
+        "auc_phys": 0.4908616467143375,
+        "d_auc": -0.010499370106037742,
+        "logloss_vs_base_rate_phys": 0.007644510403965188,
+        "expectancy_base": null,
+        "expectancy_phys": null,
+        "n_trades_phys": 88,
+        "fold_d_logloss": [
+          0.000570781691304402,
+          -0.0017979191820333004,
+          0.011846925608391656,
+          -0.004268008456667234,
+          -0.0013309014707118584,
+          0.004167006043705126,
+          -0.019858853527146243,
+          0.0008097818851355895
+        ],
+        "t_fold": -0.3883669699132976,
+        "event_d_mean": -0.001153915579073881,
+        "event_d_se": 0.0013397347604658146
+      },
+      "hgb": {
+        "logloss_base": 0.6769007795013383,
+        "logloss_phys": 0.6769514728815551,
+        "d_logloss": 5.069338021679304e-05,
+        "auc_base": 0.49759473318565284,
+        "auc_phys": 0.5068691199091534,
+        "d_auc": 0.00927438672350056,
+        "logloss_vs_base_rate_phys": 0.002302639164882714,
+        "expectancy_base": null,
+        "expectancy_phys": null,
+        "n_trades_phys": 104,
+        "fold_d_logloss": [
+          -0.0025426745668602263,
+          -0.0012682687246697605,
+          0.007119932238420478,
+          -0.0007167156781418645,
+          -0.0014353769902282465,
+          5.449190490558475e-06,
+          0.00026760428479629354,
+          -0.0010345069679009583
+        ],
+        "t_fold": 0.04680311891818304,
+        "event_d_mean": 5.069338021676722e-05,
+        "event_d_se": 0.0011005634884408053
+      }
+    },
+    "best_kind_phys": "hgb",
+    "ablation_phys_delta": -0.0006940105009798359,
+    "criteria": {
+      "1_d_logloss<=-0.001": false,
+      "2_d_auc>=+0.005": true,
+      "3_t_fold<=-2": false,
+      "4_ablation_phys>0": false
+    },
+    "passed": false,
+    "verdict_base": "NO EDGE \u2014 do not deploy",
+    "verdict_phys": "NO EDGE \u2014 do not deploy",
+    "ablation_table": [
+      {
+        "family_dropped": "deriv_",
+        "n_cols": 3.0,
+        "logloss_without": 0.6791348797682363,
+        "delta_logloss": 0.0021834068866811718
+      },
+      {
+        "family_dropped": "struct_",
+        "n_cols": 16.0,
+        "logloss_without": 0.6784953643193725,
+        "delta_logloss": 0.001543891437817413
+      },
+      {
+        "family_dropped": "meta_",
+        "n_cols": 1.0,
+        "logloss_without": 0.6783853030672505,
+        "delta_logloss": 0.0014338301856954283
+      },
+      {
+        "family_dropped": "volu_",
+        "n_cols": 8.0,
+        "logloss_without": 0.6764359624393524,
+        "delta_logloss": -0.0005155104422026602
+      },
+      {
+        "family_dropped": "trend_",
+        "n_cols": 14.0,
+        "logloss_without": 0.6764227887144624,
+        "delta_logloss": -0.00052868416709273
+      },
+      {
+        "family_dropped": "phys_",
+        "n_cols": 13.0,
+        "logloss_without": 0.6762574623805753,
+        "delta_logloss": -0.0006940105009798359
+      },
+      {
+        "family_dropped": "reg_",
+        "n_cols": 4.0,
+        "logloss_without": 0.6757565478181473,
+        "delta_logloss": -0.0011949250634077924
+      },
+      {
+        "family_dropped": "rev_",
+        "n_cols": 8.0,
+        "logloss_without": 0.675694623997793,
+        "delta_logloss": -0.0012568488837620961
+      },
+      {
+        "family_dropped": "cal_",
+        "n_cols": 5.0,
+        "logloss_without": 0.6755734761962561,
+        "delta_logloss": -0.0013779966852990322
+      },
+      {
+        "family_dropped": "vol_",
+        "n_cols": 7.0,
+        "logloss_without": 0.6751535908807097,
+        "delta_logloss": -0.0017978820008454077
+      },
+      {
+        "family_dropped": "xs_",
+        "n_cols": 6.0,
+        "logloss_without": 0.6739554344834219,
+        "delta_logloss": -0.0029960383981332273
+      }
+    ]
+  }
+}
