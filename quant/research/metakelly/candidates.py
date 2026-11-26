@@ -232,7 +232,7 @@ def btc_bias_series(btc_15m: pd.DataFrame) -> pd.Series:
         return cache[k]
 
     ends15 = btc_15m.index + pd.Timedelta(minutes=15)
-    k_idx = np.searchsorted(t1_end.to_numpy(), ends15.to_numpy(), side="right") - 1
+    k_idx = pd.DatetimeIndex(t1_end).searchsorted(pd.DatetimeIndex(ends15), side="right") - 1
     return pd.Series([at_hour(int(k)) if k >= 0 else "NEUTRAL" for k in k_idx], index=btc_15m.index)
 
 
@@ -246,8 +246,8 @@ def crypto_candidates(sym: str, df_15m: pd.DataFrame, taker_buy: Optional[pd.Ser
     fund = funding_pct.reindex(idx).ffill().fillna(0.0).to_numpy(float)
     h1_all = resample(df, "1h")
     h4_all = resample(df, "4h")
-    h1_end = (h1_all.index + pd.Timedelta(hours=1)).to_numpy()
-    h4_end = (h4_all.index + pd.Timedelta(hours=4)).to_numpy()
+    h1_end = pd.DatetimeIndex(h1_all.index + pd.Timedelta(hours=1))
+    h4_end = pd.DatetimeIndex(h4_all.index + pd.Timedelta(hours=4))
     ends = idx + pd.Timedelta(minutes=15)
     out: List[Dict] = []
     for i in range(60, len(df)):
@@ -255,8 +255,8 @@ def crypto_candidates(sym: str, df_15m: pd.DataFrame, taker_buy: Optional[pd.Ser
         mom = _momentum_possible(h, l, c, i)
         sw = _sweep_possible(h, l, c, i)
         hourly = (end.minute == 0)
-        n1 = int(np.searchsorted(h1_end, end.to_datetime64(), side="right"))
-        n4 = int(np.searchsorted(h4_end, end.to_datetime64(), side="right"))
+        n1 = int(h1_end.searchsorted(end, side="right"))
+        n4 = int(h4_end.searchsorted(end, side="right"))
         w1 = h1_all.iloc[max(0, n1 - 120):n1]
         w4 = h4_all.iloc[max(0, n4 - 100):n4]
         pb = hourly and _pullback_possible(w1["Close"], w1["High"], w1["Low"]) if len(w1) >= 20 else False
