@@ -39,6 +39,7 @@ from zoneinfo import ZoneInfo
 from datetime import datetime
 
 from services.market_data import MarketDataService
+from services import market_calendar
 from services.technical_analysis import TechnicalAnalysisService
 from services.predictive_engine import PredictiveTradingEngine
 from services.news_sentiment import NewsSentimentService
@@ -91,6 +92,9 @@ from services.strategy_engines_service import (
     engine_intraday_momentum,
     engine_orb_breakout_15m,
     evaluate_timemachine_gate,
+    replay_signal_history,
+    late_session_entry_check,
+    STRATEGY_RULESET_VERSION,
     select_best_signal,
 )
 
@@ -2994,28 +2998,50 @@ async def daily_evening_recap_job(application):
     except Exception as e_recap:
         print(f"[!] Errore recap giornaliero: {e_recap}")
 
-async def auto_flatten_overnight_job(application):
+AUTO_FLATTEN_LEAD_MINUTES = 8.0
+
+
+async def auto_flatten_overnight_job(application, now: Any = None, clock: Optional[Dict[str, Any]] = None):
     """
-    Regola tassativa Day-Trading per azioni tradizionali: Flat by 21:55 CET (15:55 EST).
-    Chiude forzatamente le posizioni azionarie aperte a margine prima della chiusura di Wall Street
-    per evitare commissioni di overnight e gap notturni.
+    Regola tassativa Day-Trading per azioni tradizionali: flat negli ultimi
+    `AUTO_FLATTEN_LEAD_MINUTES` minuti della sessione regolare NYSE, sull'orologio di New York.
+
+    Il job gira ogni minuto 12:50-12:59 e 15:50-15:59 ET (giorni feriali) e agisce solo se la
+    chiusura di OGGI e' entro il margine: copre quindi sia la chiusura regolare (16:00 ET) sia le
+    chiusure anticipate (13:00 ET, es. 27/11/2026 e 24/12/2026), indipendentemente dallo
+    sfasamento dell'ora legale USA/UE. La chiusura del broker (clock Alpaca `next_close`) prevale
+    sul calendario statico. Idempotente: senza posizioni azionarie non fa nulla.
     LE CRYPTO SONO ESCLUSE: il mercato crypto scambia 24/7 ed è gestito dal bot dedicato.
     """
     if alpaca_service is None:
         return
     try:
+        if clock is None:
+            try:
+                clock = alpaca_service._api_request("clock")
+            except Exception:
+                clock = None
+        mkt = market_calendar.session_status(now, clock if isinstance(clock, dict) else None)
+        mtc = mkt.get("minutes_to_close")
+        if mtc is None or mtc > AUTO_FLATTEN_LEAD_MINUTES:
+            return
         summary = alpaca_service.get_account_summary()
         positions = summary.get("positions", [])
         stock_positions = []
         for p in positions:
             sym = p.get("symbol", "")
             # Se non è una crypto (non contiene USD/EUR e non appartiene alla classe crypto)
-            is_crypto = p.get("asset_class") == "crypto" or "/" in sym or sym.endswith("USD") and any(sym.startswith(c) for c in ["BTC", "ETH", "SOL", "ADA", "XRP", "DOGE"])
+            is_crypto = (
+                p.get("asset_class") == "crypto"
+                or "/" in sym
+                or (sym.endswith("USD") and any(sym.startswith(c) for c in ["BTC", "ETH", "SOL", "ADA", "XRP", "DOGE"]))
+            )
             if not is_crypto:
                 stock_positions.append(sym)
 
         if stock_positions:
-            print(f"🛑 [Auto-Flatten 21:55] Rilevate {len(stock_positions)} posizioni azionarie. Liquidazione forzata anti-overnight in corso...")
+            close_lbl = str(mkt.get("close_ny") or "")[11:16] or "16:00"
+            print(f"🛑 [Auto-Flatten {close_lbl} ET -{mtc:.0f}m] Rilevate {len(stock_positions)} posizioni azionarie. Liquidazione forzata anti-overnight in corso...")
             for s in stock_positions:
                 alpaca_service.close_position(s)
             # Invia notifica di sicurezza
@@ -3024,10 +3050,11 @@ async def auto_flatten_overnight_job(application):
                     await application.bot.send_message(
                         chat_id=user_id,
                         text=(
-                            "🛑 *PROTEZIONE ANTI-OVERNIGHT AZIONARIA ATTIVATA (21:55 CET)*\n"
+                            f"🛑 *PROTEZIONE ANTI-OVERNIGHT AZIONARIA ATTIVATA ({mtc:.0f} min alla chiusura NY {close_lbl} ET)*\n"
                             "────────────────────────\n"
                             f"Liquidate automaticamente *{len(stock_positions)} posizioni su azioni* aperte prima della chiusura di Wall Street.\n"
-                            "• Zero commissioni di prestito overnight a margine.\n"
+                            + (f"• Seduta a chiusura anticipata: {mkt.get('early_close')}.\n" if mkt.get("early_close") else "")
+                            + "• Zero commissioni di prestito overnight a margine.\n"
                             "• Zero rischio di gap down all'apertura successiva.\n"
                             "💡 *Nota:* Le posizioni *Crypto 24/7* restano attive e gestite dal risk manager continuo."
                         ),
@@ -3328,7 +3355,7 @@ def _log_shadow_rejection(
             signal_price=float(signal_price),
             sl_pct=max(0.25, float(sl_pct or 1.2)),
             tp_pct=max(0.50, float(tp_pct or 3.0)),
-            features=dict(features or {}),
+            features={**dict(features or {}), "ruleset_version": STRATEGY_RULESET_VERSION},
         )
     except Exception as e_sh:
         print(f"[!] Warning record_shadow_signal ({broker} {symbol}): {e_sh}")
@@ -3571,8 +3598,17 @@ def _timemachine_precheck_or_reject(
     fee_rt_pct: float,
     interval_minutes: Optional[int],
     horizon_bars: int = 24,
+    max_horizon_bars: Optional[int] = None,
+    replay_df: Any = None,
+    replay_interval_minutes: Optional[int] = None,
+    replay_max_bars: int = 24,
+    session_bound: bool = False,
 ) -> Tuple[bool, Dict[str, Any]]:
-    """Pre-entry Monte Carlo Time Machine gate with shadow rejection telemetry."""
+    """Pre-entry Monte Carlo Time Machine gate with shadow rejection telemetry.
+
+    Also replays the same entry rule on the symbol's past bars (`replay_df`, real paths) and
+    attaches the result as `tm_res["history"]`: telemetry only, it never blocks an order.
+    """
     tm_res = evaluate_timemachine_gate(
         df_bars,
         side=side,
@@ -3582,21 +3618,79 @@ def _timemachine_precheck_or_reject(
         horizon_bars=horizon_bars,
         fee_rt_pct=fee_rt_pct,
         interval_minutes=interval_minutes,
+        max_horizon_bars=max_horizon_bars,
     )
+    try:
+        tm_res["history"] = replay_signal_history(
+            replay_df if replay_df is not None else df_bars,
+            engine=engine, side=side, sl_pct=sl_pct, tp_pct=tp_pct, fee_rt_pct=fee_rt_pct,
+            max_bars=replay_max_bars,
+            interval_minutes=(replay_interval_minutes if replay_df is not None else interval_minutes),
+            session_bound=session_bound, flatten_lead_minutes=AUTO_FLATTEN_LEAD_MINUTES,
+        )
+    except Exception as e_hist:
+        tm_res["history"] = {"n": 0, "error": str(e_hist)[:120]}
     if not tm_res.get("passed", True):
         rej = str(tm_res.get("reason") or "TIMEMACHINE_MC")
         _log_shadow_rejection(
             broker, symbol, side, engine, macro_bias, atr_pct, rome_hour,
-            rej, signal_price, sl_pct, tp_pct, features, context_key_override=context_key,
+            rej, signal_price, sl_pct, tp_pct, _with_tm_features(features, tm_res),
+            context_key_override=context_key,
         )
         print(
             f"[TimeMachine BLOCK] {broker} {symbol} {side} ({engine}): {rej} "
-            f"E[R]={float(tm_res.get('expected_r', 0.0)):+.2f} "
-            f"WR={float(tm_res.get('resolved_win_rate', 0.0)) * 100.0:.0f}% "
-            f"vs BE={float(tm_res.get('breakeven_wr', 0.0)) * 100.0:.0f}%"
+            f"E[R] lordo={float(tm_res.get('expected_r_gross', 0.0)):+.2f} "
+            f"netto={float(tm_res.get('expected_r', 0.0)):+.2f} "
+            f"drift z={float(tm_res.get('drift_z', 0.0)):+.2f}"
         )
         return False, tm_res
     return True, tm_res
+
+
+def _tm_journal_fields(tm_res: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """Compact Time Machine / same-rule replay fields for the trade journal and shadow features."""
+    tm = tm_res or {}
+    hist = tm.get("history") or {}
+    return {
+        "ruleset_version": STRATEGY_RULESET_VERSION,
+        "tm_expected_r": tm.get("expected_r"),
+        "tm_expected_r_gross": tm.get("expected_r_gross"),
+        "tm_p_tp": tm.get("p_tp_first"),
+        "tm_p_sl": tm.get("p_sl_first"),
+        "tm_drift_z": tm.get("drift_z"),
+        "tm_horizon_bars": tm.get("horizon_bars"),
+        "hist_n": hist.get("n"),
+        "hist_mean_r": hist.get("mean_r"),
+        "hist_win_rate": hist.get("win_rate"),
+        "hist_t_stat": hist.get("t_stat"),
+    }
+
+
+def _tm_notification_text(tm_res: Optional[Dict[str, Any]], minutes_to_close: Optional[float]) -> str:
+    tm = tm_res or {}
+    if int(tm.get("replays", 0) or 0) <= 0:
+        return ""
+    txt = (
+        f"\n• *Time Machine MC ({tm.get('replays', 0)}, {tm.get('horizon_bars', '?')} barre):* "
+        f"`E[R]={float(tm.get('expected_r', 0.0)):+.2f}` | `P(TP)={float(tm.get('p_tp_first', 0.0)) * 100:.0f}%` "
+        f"| `P(SL)={float(tm.get('p_sl_first', 0.0)) * 100:.0f}%`"
+    )
+    hist = tm.get("history") or {}
+    if int(hist.get("n", 0) or 0) > 0:
+        txt += (
+            f"\n• *Storico stessa regola:* `{hist.get('n')} segnali` | `R medio {float(hist.get('mean_r') or 0.0):+.2f}` "
+            f"| `vincenti {float(hist.get('win_rate') or 0.0) * 100:.0f}%` _(solo telemetria)_"
+        )
+    if minutes_to_close is not None:
+        txt += f"\n• *Chiusura NY tra:* `{float(minutes_to_close):.0f} min`"
+    return txt
+
+
+def _with_tm_features(features: Optional[Dict[str, Any]], tm_res: Optional[Dict[str, Any]], **extra: Any) -> Dict[str, Any]:
+    merged = dict(features or {})
+    merged.update(_tm_journal_fields(tm_res))
+    merged.update(extra)
+    return merged
 
 
 def _evaluate_and_trade_alpaca_candidate(
@@ -3614,8 +3708,13 @@ def _evaluate_and_trade_alpaca_candidate(
     adaptive_params: Optional[Dict[str, Any]],
     notification_events: List[str],
     df_sym_5m: Any = None,
+    minutes_to_close: Optional[float] = None,
 ) -> float:
-    """Valuta un titolo USA con regime router multi-engine, allocator Bayesiano e RiskGate."""
+    """Valuta un titolo USA con regime router multi-engine, allocator Bayesiano e RiskGate.
+
+    `minutes_to_close` (orologio NYSE): sotto i 30 minuti nessun ingresso; tra 30 e 90 minuti
+    solo setup forti con TP raggiungibile prima della chiusura forzata (late-session gate).
+    """
     import pandas as pd
     from services.hurst_migliorino_cycles import HurstMigliorinoCycleService
 
@@ -3728,15 +3827,41 @@ def _evaluate_and_trade_alpaca_candidate(
     stop_p = round(ref_p * (1 - sl_pct / 100.0), 2) if sig_side == "LONG" else round(ref_p * (1 + sl_pct / 100.0), 2)
 
     tm_use_5m = df_sym_5m is not None and len(df_sym_5m) >= 22
+    tm_interval = 5 if tm_use_5m else 60
+    # Orizzonte della simulazione tagliato alla chiusura forzata di oggi (orologio NY)
+    tm_max_h: Optional[int] = None
+    if minutes_to_close is not None:
+        tm_max_h = max(1, int((float(minutes_to_close) - AUTO_FLATTEN_LEAD_MINUTES) // tm_interval))
+    replay_is_orb = chosen_engine == ENGINE_ORB_BREAKOUT and df_sym_5m is not None
     tm_ok, tm_res = _timemachine_precheck_or_reject(
         broker="ALPACA", symbol=sym, df_bars=(df_sym_5m if tm_use_5m else df_sym_1h),
         side=sig_side, engine=chosen_engine, macro_bias=eq_bias, atr_pct=atr_pct,
         rome_hour=now_cet.hour, signal_price=ref_p, sl_pct=sl_pct, tp_pct=tp_pct,
         features=best_sig.get("features"), context_key=context_key,
-        fee_rt_pct=0.05, interval_minutes=(5 if tm_use_5m else 60),
-        horizon_bars=(36 if tm_use_5m else 18),
+        fee_rt_pct=0.05, interval_minutes=tm_interval,
+        horizon_bars=(36 if tm_use_5m else 18), max_horizon_bars=tm_max_h,
+        replay_df=(df_sym_5m if replay_is_orb else df_sym_1h),
+        replay_interval_minutes=(5 if replay_is_orb else 60),
+        replay_max_bars=(78 if replay_is_orb else 7),
+        session_bound=True,
     )
     if not tm_ok:
+        return 0.0
+
+    late_chk = late_session_entry_check(minutes_to_close, float(best_sig.get("score") or 0.0), tm_res)
+    if not late_chk.get("allowed", True):
+        _log_shadow_rejection(
+            "ALPACA", sym, sig_side, chosen_engine, eq_bias, atr_pct, now_cet.hour,
+            str(late_chk.get("reason")), ref_p, sl_pct, tp_pct,
+            _with_tm_features(best_sig.get("features"), tm_res, minutes_to_close=minutes_to_close,
+                              score=best_sig.get("score")),
+            context_key_override=context_key,
+        )
+        print(
+            f"[LateSession BLOCK] ALPACA {sym} {sig_side} ({chosen_engine}): {late_chk.get('reason')} "
+            f"a {float(minutes_to_close or 0.0):.0f} min dalla chiusura | score={float(best_sig.get('score') or 0.0):.0f} "
+            f"P(TP)={float(tm_res.get('p_tp_first', 0.0)) * 100.0:.0f}% E[R]={float(tm_res.get('expected_r', 0.0)):+.2f}"
+        )
         return 0.0
 
     if not _risk_gate(
@@ -3769,7 +3894,9 @@ def _evaluate_and_trade_alpaca_candidate(
                 "engine": chosen_engine, "context_key": context_key, "order_type": order_type,
                 "alloc_mode": alloc_info.get("mode"), "alloc_scale": alloc_info.get("scale"),
                 "sentinel_sentiment": sentinel_data.get("sentiment"), "sentinel_reasons": sentinel_data.get("reasons", []),
-                "tm_expected_r": tm_res.get("expected_r"), "tm_p_tp": tm_res.get("p_tp_first"),
+                **_tm_journal_fields(tm_res),
+                "minutes_to_close": minutes_to_close, "late_zone": late_chk.get("zone"),
+                "signal_score": best_sig.get("score"),
             },
             client_order_id=client_oid, engine=chosen_engine, context_key=context_key,
         )
@@ -3777,10 +3904,7 @@ def _evaluate_and_trade_alpaca_candidate(
         print(f"[!] Warning trade journal entry: {e_j}")
 
     boost_txt = f"\n• *Fondamentali Sentinella:* `{sentinel_data.get('sentiment')}` ({', '.join(sentinel_data.get('reasons', ['Allineato']))})" if sentinel_data.get("reasons") else ""
-    tm_txt = (
-        f"\n• *Time Machine MC ({tm_res.get('replays', 0)}):* `E[R]={float(tm_res.get('expected_r', 0.0)):+.2f}` | `WinProb={float(tm_res.get('resolved_win_rate', 0.0))*100:.0f}%`"
-        if tm_res.get("replays", 0) > 0 else ""
-    )
+    tm_txt = _tm_notification_text(tm_res, minutes_to_close)
     notification_events.append((
         f"{'🟢' if sig_side == 'LONG' else '🔻'} *NUOVO ORDINE WALL STREET ({chosen_engine})*\n"
         f"────────────────────────\n"
@@ -3817,6 +3941,9 @@ def _sync_alpaca_risk_and_screening():
         is_open = clock.get("is_open", False) if isinstance(clock, dict) else False
         if not is_open:
             return []
+        mkt_session = market_calendar.session_status(None, clock if isinstance(clock, dict) else None)
+        session_minutes_to_close = mkt_session.get("minutes_to_close")
+        session_minutes_since_open = mkt_session.get("minutes_since_open")
 
         # 2. Leggi Trend Macro SPY e VIX (con Delta Volatilità)
         eq_bias, vix_val, vix_delta_pct = _get_equities_macro_bias()
@@ -3908,9 +4035,9 @@ def _sync_alpaca_risk_and_screening():
         # 5. Screening Ingressi Multi-Engine Wall Street (Fino al cap 70% e RiskConfig.max_concurrent_trades)
         if available_risk_budget_alpaca >= 1000.0 and eq_bias in ["BULLISH", "BEARISH", "NEUTRAL"]:
             import yfinance as yf
-            now_cet = datetime.now(ZoneInfo("Europe/Rome"))
-            if now_cet.hour == 15 and now_cet.minute < 45:
-                print(f"⏱️ [Open Bell Filter] Primi 15 minuti di Wall Street ({now_cet.strftime('%H:%M')}). Attesa stabilizzazione spread.")
+            # Open Bell Filter sull'orologio di New York (immune allo sfasamento DST USA/UE)
+            if session_minutes_since_open is not None and float(session_minutes_since_open) < 15.0:
+                print(f"⏱️ [Open Bell Filter] Primi 15 minuti di Wall Street ({mkt_session.get('now_ny', '')[11:16]} ET). Attesa stabilizzazione spread.")
                 return notification_events
 
             active_syms = {p["symbol"] for p in open_positions_active}
@@ -3957,6 +4084,7 @@ def _sync_alpaca_risk_and_screening():
                         positions=open_positions_active, adaptive_params=adaptive_params,
                         notification_events=notification_events,
                         df_sym_5m=stock_5m_dfs.get(sym),
+                        minutes_to_close=session_minutes_to_close,
                     )
                     if spent > 0.0:
                         active_syms.add(sym)
@@ -4272,6 +4400,7 @@ def _evaluate_and_trade_bybit_candidate(
         rome_hour=rome_hour, signal_price=ref_p, sl_pct=sl_pct, tp_pct=tp_pct,
         features=best_sig.get("features"), context_key=context_key,
         fee_rt_pct=0.12, interval_minutes=15, horizon_bars=24,
+        replay_max_bars=24, session_bound=False,
     )
     if not tm_ok:
         return 0.0
@@ -4311,7 +4440,7 @@ def _evaluate_and_trade_bybit_candidate(
                 "atr_pct": round(atr_pct, 3), "engine": chosen_engine, "context_key": context_key,
                 "order_type": order_type, "alloc_mode": alloc_info.get("mode"), "alloc_scale": alloc_info.get("scale"),
                 "sentinel_sentiment": sentinel_data.get("sentiment"), "sentinel_reasons": sentinel_data.get("reasons", []),
-                "tm_expected_r": tm_res.get("expected_r"), "tm_p_tp": tm_res.get("p_tp_first"),
+                **_tm_journal_fields(tm_res), "signal_score": best_sig.get("score"),
             },
             client_order_id=link_id, engine=chosen_engine, context_key=context_key,
         )
@@ -4319,10 +4448,7 @@ def _evaluate_and_trade_bybit_candidate(
         print(f"[!] Warning trade journal entry: {e_j}")
 
     boost_txt = f"\n• *Sentinella Macro/News:* `{sentinel_data.get('sentiment')}` ({', '.join(sentinel_data.get('reasons', ['Allineato']))})" if sentinel_data.get("reasons") else ""
-    tm_txt = (
-        f"\n• *Time Machine MC ({tm_res.get('replays', 0)}):* `E[R]={float(tm_res.get('expected_r', 0.0)):+.2f}` | `WinProb={float(tm_res.get('resolved_win_rate', 0.0))*100:.0f}%`"
-        if tm_res.get("replays", 0) > 0 else ""
-    )
+    tm_txt = _tm_notification_text(tm_res, None)
     notification_events.append((
         f"{'🟢' if sig_side == 'LONG' else '🔻'} *NUOVO ORDINE {sig_side} APERTO ({chosen_engine})*\n"
         f"────────────────────────\n"
@@ -4814,13 +4940,17 @@ async def post_init(application):
             id="evening_briefing_2130",
             replace_existing=True
         )
-        # Auto-Flatten Day-Trade alle 21:55 CET (15:55 EST): stop a qualsiasi rischio/commissione overnight
+        # Auto-Flatten Day-Trade sull'orologio di New York: ogni minuto 12:50-12:59 e 15:50-15:59 ET;
+        # il job agisce solo negli ultimi AUTO_FLATTEN_LEAD_MINUTES della seduta di OGGI
+        # (chiusura regolare 16:00 o anticipata 13:00), immune allo sfasamento DST USA/UE.
         scheduler.add_job(
             auto_flatten_overnight_job,
-            CronTrigger(hour=21, minute=55, timezone="Europe/Rome"),
+            CronTrigger(day_of_week="mon-fri", hour="12,15", minute="50-59", timezone="America/New_York"),
             args=[application],
-            id="auto_flatten_2155",
-            replace_existing=True
+            id="auto_flatten_ny_close",
+            replace_existing=True,
+            coalesce=True,
+            max_instances=1,
         )
         # Report Giornaliero Silenzioso di Fine Giornata alle 22:00 CET
         scheduler.add_job(

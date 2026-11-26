@@ -8,18 +8,20 @@ Stateless, pure DataFrame-driven signal engines built without lookahead bias:
   2. LIQUIDITY_SWEEP_MR (`engine_liquidity_sweep_mr`): Contrarian Maker fade of trapped stops.
   3. INTRADAY_MOMENTUM  (`engine_intraday_momentum`): Filtered intraday breakout with shadow telemetry.
   4. ORB_BREAKOUT_15M   (`engine_orb_breakout_15m`): NY 15-minute Opening Range Breakout for equities.
-  5. Time Machine Gate  (`evaluate_timemachine_gate`): Empirical bootstrap Monte Carlo pre-entry check.
+  5. Time Machine Gate  (`evaluate_timemachine_gate`): Bootstrap Monte Carlo adverse-drift veto.
+  6. Same-rule replay   (`replay_signal_history`): real-path replay of past triggers (telemetry).
+  7. Late-session gate  (`late_session_entry_check`): no weak entries close to the equity flatten.
 """
 from __future__ import annotations
 
 import math
-import random
 from typing import Any, Dict, List, Optional, Tuple
 from zoneinfo import ZoneInfo
 
 import numpy as np
 import pandas as pd
 
+from services import market_calendar
 from services.hurst_migliorino_cycles import HurstMigliorinoCycleService
 from services.indicators_safe import atr_wilder, drop_forming_bar, wilder_rsi
 
@@ -27,6 +29,11 @@ ENGINE_TREND_PULLBACK = "TREND_PULLBACK_4H"
 ENGINE_LIQUIDITY_SWEEP = "LIQUIDITY_SWEEP_MR"
 ENGINE_INTRADAY_MOMENTUM = "INTRADAY_MOMENTUM"
 ENGINE_ORB_BREAKOUT = "ORB_BREAKOUT_15M"
+
+# Version tag of the live rule set, stored with every journal entry and shadow signal so that
+# outcomes can be grouped by rule version (ADX 21 trend routing, Anti-Chase 68/32/2.2 ATR,
+# ORB 15m, Time Machine rev. 2026-11-26, late-session gate 30/90 min).
+STRATEGY_RULESET_VERSION = "2026-11-26.1"
 ALL_ENGINES = [
     ENGINE_TREND_PULLBACK,
     ENGINE_LIQUIDITY_SWEEP,
@@ -771,6 +778,7 @@ def engine_orb_breakout_15m(
     min_vol_x: float = 1.10,
     interval_minutes: Optional[float] = 5,
     now: Any = None,
+    late_cutoff_minutes: float = 30.0,
 ) -> Dict[str, Any]:
     """NY 15-minute Opening Range Breakout (ORB) engine on closed 5m bars."""
     bars = prepare_closed_bars(df_5m, interval_minutes=interval_minutes, now=now)
@@ -806,29 +814,34 @@ def engine_orb_breakout_15m(
         )
         return _result(False, None, "INSUFFICIENT_DATA", 1.2, 3.0, 0.0, empty_feats)
 
-    ny_tz = ZoneInfo("America/New_York")
-    idx = bars.index
-    if idx.tz is None:
-        # Assume NY local if market-hour timestamps exist directly, otherwise UTC
-        has_ny_morning = any((t.hour == 9 and t.minute >= 30) for t in idx[-min(len(idx), 120):])
-        idx_ny = idx.tz_localize(ny_tz if has_ny_morning else "UTC").tz_convert(ny_tz)
-    else:
-        idx_ny = idx.tz_convert(ny_tz)
+    # Timezone-naive input: NY local if market-hour timestamps exist directly, otherwise UTC
+    idx_ny = _to_ny_index(bars.index)
 
     bars_ny = bars.copy()
     bars_ny.index = idx_ny
     last_date = idx_ny[-1].date()
     session_bars = bars_ny[bars_ny.index.date == last_date]
-    rth_bars = session_bars.between_time("09:30", "15:55")
+    # Session close from the NYSE calendar: 16:00 ET, or 13:00 ET on early-close days
+    close_ts = _session_close_ny(last_date) or pd.Timestamp(datetime_combine_ny(last_date, 16, 0))
+    open_ts = pd.Timestamp(datetime_combine_ny(last_date, 9, 30))
+    rth_bars = session_bars[(session_bars.index >= open_ts) & (session_bars.index < close_ts)]
 
     or_bars_count = max(1, int(or_minutes // 5))
     if len(rth_bars) <= or_bars_count:
         feats = extract_normalized_features(bars, cycle_data=cycle_data, macro_bias=bias)
         return _result(False, None, "INSUFFICIENT_DATA", 1.2, 3.0, 0.0, feats)
+    if rth_bars.index[0] != open_ts:
+        # Opening bars missing: the range would be computed on the wrong bars
+        feats = extract_normalized_features(bars, cycle_data=cycle_data, macro_bias=bias)
+        return _result(False, None, "OR_INCOMPLETE", 1.2, 3.0, 0.0, feats)
 
+    # Entry window: from the end of the opening range to `late_cutoff_minutes` before the close
+    # (bar is complete at last_ts + 5m). Late entries are additionally screened by the bot's
+    # late-session gate.
     last_ts = rth_bars.index[-1]
-    last_hm = last_ts.hour * 60 + last_ts.minute
-    if last_hm < (9 * 60 + 45) or last_hm > (15 * 60 + 30):
+    window_start = open_ts + pd.Timedelta(minutes=or_minutes)
+    window_end = close_ts - pd.Timedelta(minutes=late_cutoff_minutes)
+    if last_ts < window_start or (last_ts + pd.Timedelta(minutes=5)) > window_end:
         feats = extract_normalized_features(bars, cycle_data=cycle_data, macro_bias=bias)
         return _result(False, None, "OUTSIDE_ORB_WINDOW", 1.2, 3.0, 0.0, feats)
 
@@ -886,6 +899,52 @@ def engine_orb_breakout_15m(
     return _result(True, side, "", sl_pct, tp_pct, score, features)
 
 
+# Time Machine gate parameters (rev. 2026-11-26). Decision is taken on GROSS expectancy AND on the
+# statistical significance of the adverse drift, never on the win-rate among resolved paths
+# (that statistic is biased towards the nearer barrier on a finite horizon: with SL 1.2% /
+# TP 3.6% / 24 bars on a driftless walk it reads ~0.08 against a 0.25 break-even).
+TM_MIN_EXPECTED_R_GROSS = -0.10
+TM_ADVERSE_DRIFT_Z = -1.0
+
+
+def _bootstrap_pool(
+    bars: pd.DataFrame,
+    interval_minutes: Optional[float],
+    max_bars: int = 500,
+) -> Tuple[np.ndarray, int]:
+    """Per-bar (High/prevC, Low/prevC, Close/prevC) ratios of the last `max_bars` closed bars.
+
+    Bars that follow a time gap larger than 1.5x the bar interval (overnight / weekend /
+    missing data) are excluded: intraday positions are flattened before the close, so a
+    session gap is not a move an intraday trade can experience.
+    """
+    tail = bars.tail(max_bars)
+    highs = tail["High"].to_numpy(dtype=float)
+    lows = tail["Low"].to_numpy(dtype=float)
+    closes = tail["Close"].to_numpy(dtype=float)
+
+    gap_mask = np.zeros(len(tail), dtype=bool)
+    if isinstance(tail.index, pd.DatetimeIndex) and len(tail) >= 3:
+        dt_min = (tail.index[1:] - tail.index[:-1]).total_seconds().to_numpy(dtype=float) / 60.0
+        step = float(interval_minutes) if interval_minutes else float(np.median(dt_min))
+        if step > 0.0:
+            gap_mask[1:] = dt_min > (1.5 * step)
+
+    rows: List[Tuple[float, float, float]] = []
+    gaps = 0
+    for i in range(1, len(tail)):
+        if gap_mask[i]:
+            gaps += 1
+            continue
+        prev_c = closes[i - 1]
+        if prev_c <= 0.0 or not math.isfinite(prev_c):
+            continue
+        hr, lr, cr = highs[i] / prev_c, lows[i] / prev_c, closes[i] / prev_c
+        if min(hr, lr, cr) > 0.0 and all(math.isfinite(v) for v in (hr, lr, cr)):
+            rows.append((hr, lr, cr))
+    return np.asarray(rows, dtype=float).reshape(-1, 3), gaps
+
+
 def evaluate_timemachine_gate(
     df_bars: pd.DataFrame,
     side: str,
@@ -894,16 +953,28 @@ def evaluate_timemachine_gate(
     n_replays: int = 1200,
     horizon_bars: int = 24,
     fee_rt_pct: float = 0.12,
-    min_expected_r: float = -0.05,
-    wr_tolerance: float = 0.05,
+    min_expected_r: float = TM_MIN_EXPECTED_R_GROSS,
+    adverse_drift_z: float = TM_ADVERSE_DRIFT_Z,
     seed: int = 19,
     interval_minutes: Optional[float] = None,
     now: Any = None,
+    max_horizon_bars: Optional[int] = None,
+    wr_tolerance: Optional[float] = None,  # deprecated, ignored (kept for call compatibility)
 ) -> Dict[str, Any]:
-    """Empirical bootstrap Monte Carlo pre-entry check inspired by trader-timemachine.
+    """Empirical bootstrap Monte Carlo pre-entry check (rev. 2026-11-26).
 
-    Rebuilds `n_replays` synthetic paths of `horizon_bars` from recent closed-bar ratios
-    (O/prevC, H/prevC, L/prevC, C/prevC). Checks SL before TP on each bar.
+    Rebuilds `n_replays` synthetic paths of `horizon_bars` (capped by `max_horizon_bars`,
+    e.g. the bars left before the forced equity flatten) from recent closed-bar ratios.
+    SL is checked before TP inside each bar. Paths that touch neither barrier are marked to
+    market at the horizon, so E[R] accounts for every path (no conditioning on resolution).
+
+    Blocks (TIMEMACHINE_NEG_EXPECTANCY) only when BOTH hold:
+      * gross E[R] (before fees) < `min_expected_r`, and
+      * the drift of the sampled bars, signed in the trade direction, has z-score <= `adverse_drift_z`.
+    The unconditional bootstrap measures the recent drift/volatility regime, not the edge of the
+    setup: it is used as a "don't fight a significant adverse drift" veto. Fees are reported in
+    the net `expected_r` but do not trigger the veto (otherwise every tight-stop plan is vetoed).
+    `resolved_win_rate` is reported for information only.
     """
     side_u = str(side or "").upper()
     if side_u == "BUY":
@@ -918,123 +989,357 @@ def evaluate_timemachine_gate(
     if side_u not in ("LONG", "SHORT") or sl_p <= 0.0 or tp_p <= 0.0:
         return {"passed": False, "reason": "INVALID_PLAN", "replays": 0, "expected_r": 0.0}
 
+    h_bars = max(1, int(horizon_bars))
+    if max_horizon_bars is not None:
+        h_bars = max(1, min(h_bars, int(max_horizon_bars)))
+    breakeven_wr = round(1.0 / (1.0 + (tp_p / sl_p)), 4)
+
+    def _insufficient() -> Dict[str, Any]:
+        return {
+            "passed": True,
+            "reason": "INSUFFICIENT_HISTORY",
+            "replays": 0,
+            "horizon_bars": h_bars,
+            "expected_r": 0.0,
+            "expected_r_gross": 0.0,
+            "p_tp_first": 0.0,
+            "p_sl_first": 0.0,
+            "p_neither": 1.0,
+            "resolved_win_rate": 0.0,
+            "breakeven_wr": breakeven_wr,
+            "drift_z": 0.0,
+            "pool_size": 0,
+        }
+
     bars = prepare_closed_bars(df_bars, interval_minutes=interval_minutes, now=now)
     if bars is None or len(bars) < 22:
-        return {
-            "passed": True,
-            "reason": "INSUFFICIENT_HISTORY",
-            "replays": 0,
-            "expected_r": 0.0,
-            "p_tp_first": 0.0,
-            "p_sl_first": 0.0,
-            "p_neither": 1.0,
-            "resolved_win_rate": 0.0,
-            "breakeven_wr": round(1.0 / (1.0 + (tp_p / sl_p)), 4),
-        }
+        return _insufficient()
 
-    tail = bars.tail(500)
-    opens = tail["Open"].to_numpy(dtype=float)
-    highs = tail["High"].to_numpy(dtype=float)
-    lows = tail["Low"].to_numpy(dtype=float)
-    closes = tail["Close"].to_numpy(dtype=float)
-
-    pool: List[Tuple[float, float, float]] = []
-    for i in range(1, len(tail)):
-        prev_c = closes[i - 1]
-        if prev_c <= 0.0 or not math.isfinite(prev_c):
-            continue
-        hr = highs[i] / prev_c
-        lr = lows[i] / prev_c
-        cr = closes[i] / prev_c
-        if hr > 0.0 and lr > 0.0 and cr > 0.0 and math.isfinite(hr) and math.isfinite(lr) and math.isfinite(cr):
-            pool.append((hr, lr, cr))
-
+    pool, gaps = _bootstrap_pool(bars, interval_minutes)
     if len(pool) < 20:
-        return {
-            "passed": True,
-            "reason": "INSUFFICIENT_HISTORY",
-            "replays": 0,
-            "expected_r": 0.0,
-            "p_tp_first": 0.0,
-            "p_sl_first": 0.0,
-            "p_neither": 1.0,
-            "resolved_win_rate": 0.0,
-            "breakeven_wr": round(1.0 / (1.0 + (tp_p / sl_p)), 4),
-        }
+        return _insufficient()
 
-    sl_mult = (1.0 - sl_p / 100.0) if side_u == "LONG" else (1.0 + sl_p / 100.0)
-    tp_mult = (1.0 + tp_p / 100.0) if side_u == "LONG" else (1.0 - tp_p / 100.0)
-    sl_r = -1.0 - (fee / sl_p)
-    tp_r = (tp_p - fee) / sl_p
+    direction = 1.0 if side_u == "LONG" else -1.0
+    rets = pool[:, 2] - 1.0
+    sd = float(np.std(rets, ddof=1)) if len(rets) > 1 else 0.0
+    mean_ret = float(np.mean(rets))
+    if sd > 0.0:
+        drift_z = direction * mean_ret / (sd / math.sqrt(len(rets)))
+    else:
+        drift_z = 0.0 if mean_ret == 0.0 else direction * math.copysign(99.0, mean_ret)
 
-    rng = random.Random(seed)
     n_rep = max(100, int(n_replays))
-    h_bars = max(4, int(horizon_bars))
-    pool_len = len(pool)
+    rng = np.random.default_rng(seed)
+    draws = pool[rng.integers(0, len(pool), size=(n_rep, h_bars))]  # (n, h, 3)
+    cum_c = np.cumprod(draws[:, :, 2], axis=1)
+    px_prev = np.concatenate([np.ones((n_rep, 1)), cum_c[:, :-1]], axis=1)
+    bar_h = px_prev * draws[:, :, 0]
+    bar_l = px_prev * draws[:, :, 1]
 
-    tp_hits = 0
-    sl_hits = 0
-    total_r = 0.0
+    if side_u == "LONG":
+        sl_hit = bar_l <= (1.0 - sl_p / 100.0)
+        tp_hit = bar_h >= (1.0 + tp_p / 100.0)
+    else:
+        sl_hit = bar_h >= (1.0 + sl_p / 100.0)
+        tp_hit = bar_l <= (1.0 - tp_p / 100.0)
 
-    for _ in range(n_rep):
-        px = 1.0
-        outcome_r: Optional[float] = None
-        for _step in range(h_bars):
-            hr, lr, cr = pool[rng.randrange(pool_len)]
-            bar_h = px * hr
-            bar_l = px * lr
-            if side_u == "LONG":
-                if bar_l <= sl_mult:
-                    sl_hits += 1
-                    outcome_r = sl_r
-                    break
-                if bar_h >= tp_mult:
-                    tp_hits += 1
-                    outcome_r = tp_r
-                    break
-            else:
-                if bar_h >= sl_mult:
-                    sl_hits += 1
-                    outcome_r = sl_r
-                    break
-                if bar_l <= tp_mult:
-                    tp_hits += 1
-                    outcome_r = tp_r
-                    break
-            px = px * cr
-        if outcome_r is None:
-            raw_ret_pct = ((px - 1.0) * 100.0) if side_u == "LONG" else ((1.0 - px) * 100.0)
-            outcome_r = (raw_ret_pct - fee) / sl_p
-        total_r += outcome_r
+    big = h_bars + 1
+    sl_first = np.where(sl_hit.any(axis=1), sl_hit.argmax(axis=1), big)
+    tp_first = np.where(tp_hit.any(axis=1), tp_hit.argmax(axis=1), big)
+    is_sl = (sl_first < big) & (sl_first <= tp_first)  # SL wins ties inside the same bar
+    is_tp = (tp_first < big) & ~is_sl
 
-    p_tp = tp_hits / n_rep
-    p_sl = sl_hits / n_rep
-    p_neither = max(0.0, 1.0 - p_tp - p_sl)
+    end_ret_pct = direction * (cum_c[:, -1] - 1.0) * 100.0
+    gross_pct = np.where(is_sl, -sl_p, np.where(is_tp, tp_p, end_ret_pct))
+    gross_r = gross_pct / sl_p
+    net_r = (gross_pct - fee) / sl_p
+
+    p_tp = float(is_tp.mean())
+    p_sl = float(is_sl.mean())
     resolved = p_tp + p_sl
-    resolved_wr = (p_tp / resolved) if resolved > 0.0 else 0.5
-    breakeven_wr = 1.0 / (1.0 + (tp_p / sl_p))
-    expected_r = total_r / n_rep
+    expected_r = float(net_r.mean())
+    expected_r_gross = float(gross_r.mean())
 
     passed = True
     reason = "TIMEMACHINE_OK"
-    if expected_r < min_expected_r:
+    if expected_r_gross < float(min_expected_r) and drift_z <= float(adverse_drift_z):
         passed = False
         reason = "TIMEMACHINE_NEG_EXPECTANCY"
-    elif resolved >= 0.15 and resolved_wr < (breakeven_wr - wr_tolerance):
-        passed = False
-        reason = "TIMEMACHINE_LOW_WIN_PROB"
 
     return {
         "passed": passed,
         "reason": reason,
         "replays": n_rep,
+        "horizon_bars": h_bars,
         "expected_r": round(expected_r, 3),
+        "expected_r_gross": round(expected_r_gross, 3),
         "p_tp_first": round(p_tp, 4),
         "p_sl_first": round(p_sl, 4),
-        "p_neither": round(p_neither, 4),
-        "resolved_win_rate": round(resolved_wr, 4),
-        "breakeven_wr": round(breakeven_wr, 4),
+        "p_neither": round(max(0.0, 1.0 - resolved), 4),
+        "resolved_win_rate": round((p_tp / resolved) if resolved > 0.0 else 0.0, 4),
+        "breakeven_wr": breakeven_wr,
+        "drift_z": round(float(drift_z), 3),
+        "pool_size": int(len(pool)),
+        "gaps_skipped": int(gaps),
     }
+
+
+# ---------------------------------------------------------------------------
+# 5c. Same-rule historical replay (real paths, informational telemetry)
+# ---------------------------------------------------------------------------
+
+def _to_ny_index(idx: pd.DatetimeIndex) -> pd.DatetimeIndex:
+    ny_tz = ZoneInfo("America/New_York")
+    if idx.tz is None:
+        has_ny_morning = any((t.hour == 9 and t.minute >= 30) for t in idx[-min(len(idx), 120):])
+        return idx.tz_localize(ny_tz if has_ny_morning else "UTC").tz_convert(ny_tz)
+    return idx.tz_convert(ny_tz)
+
+
+def _session_close_ny(day: Any) -> Optional[pd.Timestamp]:
+    bounds = market_calendar.session_bounds(day)
+    return pd.Timestamp(bounds[1]) if bounds else None
+
+
+def momentum_signal_positions(bars: pd.DataFrame, side: str, adx_min: float = 16.0) -> List[int]:
+    """Bar positions where the INTRADAY_MOMENTUM price rules fired (vectorised, no lookahead).
+
+    Mirrors breakout over the previous 4 bars, EMA20/EMA50 stack, RSI 52/48, ADX floor and the
+    Anti-Chase guard (RSI 68/32, |C-EMA20| <= 2.2 ATR). Microstructure/cycle/VIX shields are not
+    replayed (their history is not stored), so this is an upper bound of the live trigger set.
+    """
+    if bars is None or len(bars) < 60:
+        return []
+    c, h, l = bars["Close"], bars["High"], bars["Low"]
+    ema20 = c.ewm(span=20, adjust=False).mean()
+    ema50 = c.ewm(span=50, adjust=False).mean()
+    rsi = wilder_rsi(c, 14)
+    adx = compute_adx(h, l, c, 14)
+    atr = atr_wilder(h, l, c, 14)
+    dist = (c - ema20).abs() / atr.replace(0.0, np.nan)
+    if str(side).upper() == "LONG":
+        prior_hi = h.shift(1).rolling(4).max()
+        cond = (c > prior_hi) & (c > ema20) & (ema20 > ema50) & (rsi > 52.0) & (rsi <= 68.0)
+    else:
+        prior_lo = l.shift(1).rolling(4).min()
+        cond = (c < prior_lo) & (c < ema20) & (ema20 < ema50) & (rsi < 48.0) & (rsi >= 32.0)
+    cond = cond & (adx >= adx_min) & (dist <= 2.2)
+    arr = cond.fillna(False).to_numpy(dtype=bool)
+    arr[:50] = False
+    return [int(i) for i in np.flatnonzero(arr)]
+
+
+def orb_signal_positions(
+    bars: pd.DataFrame,
+    side: str,
+    or_minutes: int = 15,
+    min_vol_x: float = 1.10,
+    late_cutoff_minutes: float = 30.0,
+) -> List[int]:
+    """Bar positions where the ORB_BREAKOUT_15M price/volume rules fired in each NY session."""
+    if bars is None or len(bars) < 6 or not isinstance(bars.index, pd.DatetimeIndex):
+        return []
+    idx_ny = _to_ny_index(bars.index)
+    side_u = str(side).upper()
+    or_n = max(1, int(or_minutes // 5))
+    out: List[int] = []
+    pos_all = np.arange(len(bars))
+    dates = np.array([t.date() for t in idx_ny])
+    for day in sorted(set(dates)):
+        close_ts = _session_close_ny(day)
+        if close_ts is None:
+            continue
+        sel = pos_all[dates == day]
+        times = idx_ny[sel]
+        open_ts = pd.Timestamp(datetime_combine_ny(day, 9, 30))
+        rth = [(p, t) for p, t in zip(sel, times) if open_ts <= t < close_ts]
+        if len(rth) <= or_n or rth[0][1] != open_ts:
+            continue
+        or_pos = [p for p, _ in rth[:or_n]]
+        or_high = float(bars["High"].iloc[or_pos].max())
+        or_low = float(bars["Low"].iloc[or_pos].min())
+        or_vol = float(bars["Volume"].iloc[or_pos].mean())
+        if or_high <= or_low or or_low <= 0.0:
+            continue
+        last_entry_ts = close_ts - pd.Timedelta(minutes=late_cutoff_minutes)
+        for k in range(or_n, len(rth)):
+            p, t = rth[k]
+            if t + pd.Timedelta(minutes=5) > last_entry_ts:
+                break
+            c = float(bars["Close"].iloc[p])
+            pc = float(bars["Close"].iloc[rth[k - 1][0]])
+            v = float(bars["Volume"].iloc[p])
+            if or_vol > 0.0 and v < min_vol_x * or_vol:
+                continue
+            if side_u == "LONG":
+                ok = c > or_high and pc <= or_high * 1.002 and (c - or_high) / or_high * 100.0 <= 1.5
+            else:
+                ok = c < or_low and pc >= or_low * 0.998 and (or_low - c) / or_low * 100.0 <= 1.5
+            if ok:
+                out.append(int(p))
+    return out
+
+
+def datetime_combine_ny(day: Any, hour: int, minute: int) -> Any:
+    import datetime as _dt
+    return _dt.datetime.combine(day, _dt.time(hour, minute), tzinfo=ZoneInfo("America/New_York"))
+
+
+def replay_signal_history(
+    df_bars: pd.DataFrame,
+    engine: str,
+    side: str,
+    sl_pct: float,
+    tp_pct: float,
+    fee_rt_pct: float = 0.12,
+    max_bars: int = 24,
+    interval_minutes: Optional[float] = None,
+    session_bound: bool = False,
+    flatten_lead_minutes: float = 8.0,
+    now: Any = None,
+) -> Dict[str, Any]:
+    """Replay the SAME entry rule on past bars of the same symbol, on the real price paths.
+
+    Each past trigger enters at its bar close with the live SL/TP percentages; SL is checked
+    before TP inside each bar; open trades are marked to market after `max_bars` or, when
+    `session_bound` (US equities), at the last bar before the forced flatten of that session.
+    Trades never overlap (a new trigger is ignored while a replayed trade is open), so the
+    outcomes are closer to independent. The current (last) bar is excluded.
+    Informational only: with a handful of past events it cannot support a decision.
+    """
+    side_u = str(side or "").upper()
+    engine_u = str(engine or "").upper()
+    out: Dict[str, Any] = {"engine": engine_u, "n": 0, "mean_r": None, "win_rate": None,
+                           "tp_rate": None, "sl_rate": None, "t_stat": None}
+    sl_p = _safe_float(sl_pct, -1.0)
+    tp_p = _safe_float(tp_pct, -1.0)
+    if side_u not in ("LONG", "SHORT") or sl_p <= 0.0 or tp_p <= 0.0:
+        return out
+    bars = prepare_closed_bars(df_bars, interval_minutes=interval_minutes, now=now)
+    if bars is None or len(bars) < 10:
+        return out
+
+    if engine_u == ENGINE_INTRADAY_MOMENTUM:
+        entries = momentum_signal_positions(bars, side_u)
+    elif engine_u == ENGINE_ORB_BREAKOUT:
+        entries = orb_signal_positions(bars, side_u)
+    else:
+        out["note"] = "NO_REPLAY_RULE"
+        return out
+    entries = [p for p in entries if p < len(bars) - 1]
+
+    closes = bars["Close"].to_numpy(dtype=float)
+    highs = bars["High"].to_numpy(dtype=float)
+    lows = bars["Low"].to_numpy(dtype=float)
+    fee = max(0.0, _safe_float(fee_rt_pct, 0.12))
+    step = float(interval_minutes) if interval_minutes else 0.0
+    idx_ny = _to_ny_index(bars.index) if (session_bound and isinstance(bars.index, pd.DatetimeIndex)) else None
+
+    results: List[float] = []
+    outcomes: List[str] = []
+    busy_until = -1
+    for p in entries:
+        if p <= busy_until:
+            continue
+        entry = closes[p]
+        if entry <= 0.0:
+            continue
+        sl_px = entry * (1.0 - sl_p / 100.0) if side_u == "LONG" else entry * (1.0 + sl_p / 100.0)
+        tp_px = entry * (1.0 + tp_p / 100.0) if side_u == "LONG" else entry * (1.0 - tp_p / 100.0)
+        cutoff_ts = None
+        if idx_ny is not None:
+            close_ts = _session_close_ny(idx_ny[p].date())
+            if close_ts is not None:
+                cutoff_ts = close_ts - pd.Timedelta(minutes=flatten_lead_minutes)
+        gross: Optional[float] = None
+        last_j = p
+        for j in range(p + 1, min(len(bars), p + 1 + int(max_bars))):
+            if idx_ny is not None:
+                if idx_ny[j].date() != idx_ny[p].date():
+                    break
+                if cutoff_ts is not None and idx_ny[j] + pd.Timedelta(minutes=step) > cutoff_ts:
+                    break
+            last_j = j
+            hit_sl = lows[j] <= sl_px if side_u == "LONG" else highs[j] >= sl_px
+            hit_tp = highs[j] >= tp_px if side_u == "LONG" else lows[j] <= tp_px
+            if hit_sl:
+                gross, tag = -sl_p, "SL"
+                break
+            if hit_tp:
+                gross, tag = tp_p, "TP"
+                break
+        if last_j == p:
+            continue  # no forward bar inside the session: nothing to learn
+        if gross is None:
+            move = (closes[last_j] - entry) / entry * 100.0
+            gross, tag = (move if side_u == "LONG" else -move), "TIME"
+        results.append((gross - fee) / sl_p)
+        outcomes.append(tag)
+        busy_until = last_j
+
+    n = len(results)
+    out["n"] = n
+    if n == 0:
+        return out
+    arr = np.asarray(results, dtype=float)
+    out["mean_r"] = round(float(arr.mean()), 3)
+    out["win_rate"] = round(float((arr > 0.0).mean()), 3)
+    out["tp_rate"] = round(outcomes.count("TP") / n, 3)
+    out["sl_rate"] = round(outcomes.count("SL") / n, 3)
+    if n >= 3 and float(arr.std(ddof=1)) > 0.0:
+        out["t_stat"] = round(float(arr.mean() / (arr.std(ddof=1) / math.sqrt(n))), 2)
+    return out
+
+
+# ---------------------------------------------------------------------------
+# 5d. Late-session entry gate (US equities, forced flatten before the close)
+# ---------------------------------------------------------------------------
+
+LATE_SESSION_NO_ENTRY_MINUTES = 30.0
+LATE_SESSION_ZONE_MINUTES = 90.0
+LATE_SESSION_MIN_SCORE = 75.0
+LATE_SESSION_MIN_P_TP = 0.25
+LATE_SESSION_MIN_EXPECTED_R = 0.0
+
+
+def late_session_entry_check(
+    minutes_to_close: Optional[float],
+    score: float,
+    tm_res: Optional[Dict[str, Any]],
+    no_entry_minutes: float = LATE_SESSION_NO_ENTRY_MINUTES,
+    late_zone_minutes: float = LATE_SESSION_ZONE_MINUTES,
+    min_score: float = LATE_SESSION_MIN_SCORE,
+    min_p_tp: float = LATE_SESSION_MIN_P_TP,
+    min_expected_r: float = LATE_SESSION_MIN_EXPECTED_R,
+) -> Dict[str, Any]:
+    """Decide whether a new equity entry still has time to work before the forced flatten.
+
+    * `minutes_to_close` None (crypto / session unknown): no restriction.
+    * < `no_entry_minutes`: never enter (LATE_SESSION_NO_TIME).
+    * < `late_zone_minutes`: enter only on a strong setup, all required:
+        - engine score >= `min_score`                                  (else LATE_SESSION_WEAK_SETUP)
+        - Time Machine evidence available, with horizon cut at the flatten (else LATE_SESSION_NO_EVIDENCE)
+        - P(TP touched before the flatten) >= `min_p_tp`              (else LATE_SESSION_TP_UNREACHABLE)
+        - net E[R], open paths valued at the flatten, >= `min_expected_r` (else LATE_SESSION_NEG_EXPECTANCY)
+    """
+    if minutes_to_close is None:
+        return {"allowed": True, "zone": "NO_SESSION_LIMIT", "reason": ""}
+    mtc = float(minutes_to_close)
+    if mtc < no_entry_minutes:
+        return {"allowed": False, "zone": "CLOSING", "reason": "LATE_SESSION_NO_TIME"}
+    if mtc >= late_zone_minutes:
+        return {"allowed": True, "zone": "NORMAL", "reason": ""}
+
+    tm = tm_res or {}
+    if _safe_float(score, 0.0) < min_score:
+        return {"allowed": False, "zone": "LATE", "reason": "LATE_SESSION_WEAK_SETUP"}
+    if int(tm.get("replays", 0) or 0) <= 0:
+        return {"allowed": False, "zone": "LATE", "reason": "LATE_SESSION_NO_EVIDENCE"}
+    if _safe_float(tm.get("p_tp_first"), 0.0) < min_p_tp:
+        return {"allowed": False, "zone": "LATE", "reason": "LATE_SESSION_TP_UNREACHABLE"}
+    if _safe_float(tm.get("expected_r"), -1.0) < min_expected_r:
+        return {"allowed": False, "zone": "LATE", "reason": "LATE_SESSION_NEG_EXPECTANCY"}
+    return {"allowed": True, "zone": "LATE", "reason": ""}
 
 
 # ---------------------------------------------------------------------------
